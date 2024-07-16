@@ -11,4 +11,4 @@ Authors:
 Daniele Lozzi, Ilaria Di Pompeo, Martina Marcaccio, Matias Ademaj, Simone Migliore, Giuseppe Curcio.
 
 
-Load in the same folder all files downloaded from Pupil Cloud and rename the internal video as "eye.mp4" and the video from external camera as "external.mp4"
+Load in the same folder named "eyetracking_files" all files downloaded from Pupil Cloud and rename the internal video as "internal.mp4" and the video from external camera as "external.mp4"
