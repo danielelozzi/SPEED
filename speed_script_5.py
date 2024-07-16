@@ -1,5 +1,4 @@
-def run_script(folder_name, subj_name):
-
+def run_script(folder_name='dati_prova', subj_name='subj_01'):
     import pandas as pd
     import numpy as np
     import matplotlib.pyplot as plt
@@ -12,6 +11,9 @@ def run_script(folder_name, subj_name):
     import numpy as np
     import matplotlib.pyplot as plt
     from scipy.signal import welch, spectrogram
+    import matplotlib.pyplot as plt
+    from scipy.stats import gaussian_kde
+    from sklearn.preprocessing import MinMaxScaler
 
     def conv_time(ns):
         date = datetime.datetime.fromtimestamp(ns*(10**-9))
@@ -44,7 +46,7 @@ def run_script(folder_name, subj_name):
 
         rec_id = events.loc[event,'recording id']
 
-        subj_name = str('subj_03')
+        #subj_name = str('subj_03')
         gaze_mark = pd.read_csv('./eyetracking_file/gaze.csv')
         pupillometry_data  = pd.read_csv('./eyetracking_file/3d_eye_states.csv')
         fixations_mark = pd.read_csv('./eyetracking_file/fixations.csv')
@@ -140,10 +142,10 @@ def run_script(folder_name, subj_name):
         blink_avg = blink['duration [ms]'].mean()
         blink_std = blink['duration [ms]'].std()
 
-        pupillometry_start = pupillometry_data.at[0,'pupil diameter [mm]']
-        pupillometry_end = pupillometry_data.at[pupillometry_data.shape[0]-1,'pupil diameter [mm]']
-        pupillometry_avg = pupillometry_data['pupil diameter [mm]'].mean()
-        pupillometry_std = pupillometry_data['pupil diameter [mm]'].std()
+        pupillometry_start = pupillometry_data.at[0,'pupil diameter left [mm]']
+        pupillometry_end = pupillometry_data.at[pupillometry_data.shape[0]-1,'pupil diameter left [mm]']
+        pupillometry_avg = pupillometry_data['pupil diameter left [mm]'].mean()
+        pupillometry_std = pupillometry_data['pupil diameter left [mm]'].std()
 
         n_moviments = len(lista_movimenti)
         sum_time_movement = np.sum(lista_movimenti['duration'])/10**9
@@ -200,7 +202,7 @@ def run_script(folder_name, subj_name):
 
         results = pd.DataFrame(results,index=[0])
         results.to_csv('./eyetracking_file/results_'+subj_name+'.csv')
-        ts = pupillometry_data['pupil diameter [mm]'].to_numpy()
+        ts = pupillometry_data['pupil diameter left [mm]'].to_numpy()
         import numpy as np
         import matplotlib.pyplot as plt
         from scipy.signal import welch, spectrogram
@@ -218,7 +220,7 @@ def run_script(folder_name, subj_name):
         plt.ylabel('Power spectral Density [V^2/Hz]')
         plt.grid(True)
         plt.savefig('./periodogram.pdf')
-        plt.show()
+        plt.close()
 
         # Calcola lo spettrogramma utilizzando il metodo di Welch
         f, t_spec, Sxx = spectrogram(ts, fs=fs, nperseg=256, noverlap=50)
@@ -231,7 +233,7 @@ def run_script(folder_name, subj_name):
         plt.xlabel('Time [s]')
         plt.colorbar(label='Power [dB]')
         plt.savefig('./spectrogram.pdf')
-        plt.show()
+        plt.close()
 
         # pupillometry
         event = events.name[0]
@@ -261,11 +263,11 @@ def run_script(folder_name, subj_name):
                     break
 
         print('gaze fatto')
-        plt.plot(pupillometry_data['pupil diameter [mm]'])
+        plt.plot(pupillometry_data['pupil diameter left [mm]'])
         fig, ax = plt.subplots(figsize=(10,5))
 
         # Plot dei dati
-        ax.plot(pupillometry_data['pupil diameter [mm]'], marker='o', linestyle='-',markersize=1)
+        ax.plot(pupillometry_data['pupil diameter left [mm]'], marker='o', linestyle='-',markersize=1)
 
         # Colorazione dello sfondo in base alla colonna 'on surface'
         for idx, value in enumerate(pupillometry_data['on surface']):
@@ -276,46 +278,79 @@ def run_script(folder_name, subj_name):
 
         # Etichette e titolo
         ax.set_xlabel('Time')
-        ax.set_ylabel('Pupil Diameter [mm]')
+        ax.set_ylabel('pupil diameter left [mm]')
         ax.set_title('Pupil Diameter with Background Indicator')
 
         plt.savefig('./pupil_surface.pdf')
+        plt.close()
 
         # HISTOGRAMS
 
+        gaze = pd.read_csv('./eyetracking_file/gaze_not_enr.csv')
+        fixations = pd.read_csv('./eyetracking_file/fixations.csv')
         plt.hist(gaze['elevation [deg]'])
         plt.savefig('./hist_gaze.pdf')
+        plt.close()
 
-        plt.hist(pupillometry_data['pupil diameter [mm]'])
+        plt.hist(pupillometry_data['pupil diameter left [mm]'])
         plt.savefig('./hist_pupillometry.pdf')
+        plt.close()
 
         plt.hist(fixations['duration [ms]'])
         plt.savefig('./hist_fixations.pdf')
+        plt.close()
 
-        plt.hist(blinks['duration [ms]'])
+        plt.hist(blink['duration [ms]'])
         plt.savefig('./hist_blinks.pdf')
+        plt.close()
+
+        # Saccades
+
+        saccades  = pd.read_csv('./eyetracking_file/saccades.csv')
 
         plt.hist(saccades['duration [ms]'])
         plt.savefig('./hist_saccades.pdf')
+        plt.close()
 
         # PATH GRAPH
 
-        plt.scatter(gaze['gaze x [px]'],gaze['gaze x [px]'],'-')
+        plt.scatter(gaze['gaze x [px]'],gaze['gaze y [px]'], marker='o', linestyle='-')
         plt.savefig('./path_gaze.pdf')
+        plt.close()
 
-        plt.scatter(fixations['fixation x [px]'],fixations['fixation x [px]'],'-')
-        plt.savefig('./path_fixation.pdf')      
+        plt.scatter(fixations['fixation x [normalized]'],fixations['fixation y [normalized]'], marker='o', linestyle='-')
+        plt.savefig('./path_fixation.pdf')
+        plt.close()
 
-        plt.scatter(np.array(lista_movimenti['spostamento_tot'][:,6]),np.array(lista_movimenti['spostamento_tot'][:,7]),'o')
-        plt.savefig('./total_mov.pdf')      
 
-        plt.scatter(np.array(lista_movimenti['spostamento_effettivo'][:,6]),np.array(lista_movimenti['spostamento_effettivo'][:,7]),'o')
-        plt.savefig('./effective_mov.pdf')   
+        for i in range(lista_movimenti.shape[0]):
+            start_x = np.array(lista_movimenti.at[i, 'spostamento_start'][0])
+            start_y = np.array(lista_movimenti.at[i, 'spostamento_start'][1])
+            end_x = np.array(lista_movimenti.at[i, 'spostamento_end'][0])
+            end_y = np.array(lista_movimenti.at[i, 'spostamento_end'][1])
+
+            plt.scatter(start_x, start_y, marker='o', c='b')
+            plt.scatter(end_x, end_y, marker='o', c='b')
+
+            plt.plot([start_x, end_x], [start_y, end_y], linestyle='-', c='b')
+
+        plt.savefig('./total_mov.pdf')
+        plt.close()
+
+        shape = lista_movimenti.shape[0]-1
+        plt.scatter(np.array(lista_movimenti.at[0,'spostamento_start'][0]),np.array(lista_movimenti.at[0,'spostamento_start'][1]),marker='o', linestyle='-')
+        plt.scatter(np.array(lista_movimenti.at[shape,'spostamento_end'][0]),np.array(lista_movimenti.at[shape,'spostamento_end'][1]),marker='o', linestyle='-')
+        plt.savefig('./effective_mov.pdf')
+        plt.close()
 
 
         # CLOUD POINT
 
-        kde = gaussian_kde([fixations['fixation x [px]'],fixations['fixation y [px]']])
+        scale = 1000
+        fix_x = fixations['fixation x [normalized]']*scale
+        fix_y = fixations['fixation y [normalized]']*scale
+
+        kde = gaussian_kde([fix_x,fix_y])
         x_grid, y_grid = np.mgrid[0:scale:scale*1j, 0:scale:scale*1j]
         z = kde(np.vstack([x_grid.ravel(), y_grid.ravel()]))
         plt.figure(figsize=(8, 4))
@@ -326,8 +361,13 @@ def run_script(folder_name, subj_name):
         plt.xlim(0,scale)
         plt.ylim(0,scale)
         plt.savefig('./cloud_fix.pdf')
-        
-        kde = gaussian_kde([gaze['gaze x [px]'], gaze['gaze y [px]']])
+        plt.close()
+
+        scale = 1000
+        gaze_x = gaze_mark['gaze position on surface x [normalized]']*scale
+        gaze_y = gaze_mark['gaze position on surface y [normalized]']*scale
+
+        kde = gaussian_kde([gaze_x,gaze_y])
         x_grid, y_grid = np.mgrid[0:scale:scale*1j, 0:scale:scale*1j]
         z = kde(np.vstack([x_grid.ravel(), y_grid.ravel()]))
         plt.figure(figsize=(8, 4))
@@ -338,49 +378,44 @@ def run_script(folder_name, subj_name):
         plt.xlim(0,scale)
         plt.ylim(0,scale)
         plt.savefig('./cloud_gaze.pdf')
-        
-        # Saccades
+        plt.close()
 
-        saccades  = pd.read_csv('./eyetracking_file/saccades.csv')
-        #%%
-        # Determina il tempo massimo per il plot
-        saccades['start timestamp [ns]'] =saccades['start timestamp [ns]']/1000
-        saccades['end timestamp [ns]'] =saccades['end timestamp [ns]']/1000
-        saccades['start timestamp [ns]'] = saccades['start timestamp [ns]'].astype('int')
-        saccades['end timestamp [ns]'] = saccades['end timestamp [ns]'].astype('int')
+        if saccades.shape[0] != 0:
 
-        min_time = saccades['start timestamp [ns]'].min()
-        max_time = saccades['end timestamp [ns]'].max()
+            saccades['start timestamp [ns]'] =saccades['start timestamp [ns]']/1000
+            saccades['end timestamp [ns]'] =saccades['end timestamp [ns]']/1000
+            saccades['start timestamp [ns]'] = saccades['start timestamp [ns]'].astype('int')
+            saccades['end timestamp [ns]'] = saccades['end timestamp [ns]'].astype('int')
 
-        # Crea una serie temporale
-        time_series = np.zeros(max_time + 1-min_time)
+            min_time = saccades['start timestamp [ns]'].min()
+            max_time = saccades['end timestamp [ns]'].max()
 
-        # Imposta i valori a 1 durante i periodi di blink
-        for _, row in saccades.iterrows():
-            time_series[row['start timestamp [ns]']-min_time:row['end timestamp [ns]']-min_time + 1] = 1
+            time_series = np.zeros(max_time + 1-min_time)
 
-        # Crea la lista di tempi
-        time = np.arange(len(time_series))
+            for _, row in saccades.iterrows():
+                time_series[row['start timestamp [ns]']-min_time:row['end timestamp [ns]']-min_time + 1] = 1
 
-        # Plot della serie temporale
-        fig, ax = plt.subplots(figsize=(20,5))
+            time = np.arange(len(time_series))
 
-        ax.plot(time, time_series, drawstyle='steps-post', marker='o', markersize=2)
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Blink (0 = No, 1 = Yes)')
-        ax.set_title('Time Series of Saccades')
+            fig, ax = plt.subplots(figsize=(20,5))
 
-        plt.plot(saccades['amplitude [px]'])
-        plt.savefig('./amplitude.pdf')
-        plt.plot(saccades['mean velocity [px/s]'])
-        plt.plot(saccades['peak velocity [px/s]'])
-        plt.savefig('./velocity.pdf')
+            ax.plot(time, time_series, drawstyle='steps-post', marker='o', markersize=2)
+            ax.set_xlabel('Time')
+            ax.set_ylabel('Blink (0 = No, 1 = Yes)')
+            ax.set_title('Time Series of Saccades')
 
-        
+            plt.plot(saccades['amplitude [px]'])
+            plt.savefig('./amplitude.pdf')
+            plt.close()
+            plt.plot(saccades['mean velocity [px/s]'])
+            plt.plot(saccades['peak velocity [px/s]'])
+            plt.savefig('./velocity.pdf')
+            plt.close()
+
         import cv2
         import matplotlib.pyplot as plt
         from matplotlib.animation import FuncAnimation
-        
+
         def downsample_video(input_file, output_file, input_fps, output_fps):
             cap = cv2.VideoCapture(input_file)
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -388,110 +423,92 @@ def run_script(folder_name, subj_name):
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             out = cv2.VideoWriter(output_file, fourcc, output_fps, (width, height))
-        
+
             frame_interval = int(input_fps / output_fps)
-        
+
             for i in range(frame_count):
                 ret, frame = cap.read()
                 if not ret:
                     break
                 if i % frame_interval == 0:
                     out.write(frame)
-    
+
             cap.release()
             out.release()
-    
-        # Sottocampiona il video degli occhi
-        downsampled_video_file = 'downsampled_video2.mp4'
-        downsample_video('eye.mp4', downsampled_video_file, 200, 40)
-        
-        # Carica la serie temporale da un file Excel
-        time_series = pupillometry_data['pupil diameter [mm]'].values.flatten()
-        
-        # Carica il video degli occhi sottocampionato
+
+        downsampled_video_file = './eyetracking_file/downsampled_video2.mp4'
+        downsample_video('./eyetracking_file/internal.mp4', downsampled_video_file, 200, 40)
+
+        time_series = pupillometry_data['pupil diameter left [mm]'].values.flatten()
+
         video_file1 = downsampled_video_file
         cap1 = cv2.VideoCapture(video_file1)
-        
-        # Carica il secondo video della telecamera esterna
-        video_file2 = 'external.mp4'
+
+        video_file2 = './eyetracking_file/external.mp4'
         cap2 = cv2.VideoCapture(video_file2)
-        
-        # Creazione della finestra di visualizzazione
+
         fig, (video_axes1, video_axes2, time_series_axes) = plt.subplots(3, 1, figsize=(10, 8))
-        
-        # Leggi il primo frame del primo video per ottenere le dimensioni
+
         ret1, frame1 = cap1.read()
         frame_height1, frame_width1, _ = frame1.shape
-        
-        # Leggi il primo frame del secondo video per ottenere le dimensioni
+
         ret2, frame2 = cap2.read()
         frame_height2, frame_width2, _ = frame2.shape
-        
-        # Mostra il primo frame del primo video
+
         video_axes1.imshow(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
         video_axes1.axis('off')
-        
-        # Mostra il primo frame del secondo video
         video_axes2.imshow(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
         video_axes2.axis('off')
-        
-        # Plotta la serie temporale iniziale nella finestra scorrevole
-        window_size = 1000  # Dimensione della finestra scorrevole
+
+        window_size = 1000
         initial_idx = np.arange(window_size)
         time_series_plot, = time_series_axes.plot(initial_idx, time_series[initial_idx], 'b')
         time_series_axes.set_xlabel('Frames (n)')
         time_series_axes.set_ylabel('Diameter (mm)')
         ball, = time_series_axes.plot([1], [time_series[0]], 'ro', markersize=10)
         window_line, = time_series_axes.plot([0, window_size], [time_series[window_size // 2]] * 2, 'b--')
-        
-        # Imposta il writer video
+
         output_file = 'output_video.mp4'
         fps = cap1.get(cv2.CAP_PROP_FPS)
         output_size = (fig.canvas.get_width_height()[0], fig.canvas.get_width_height()[1])
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_file, fourcc, fps, output_size)
-        
-        # Funzione di aggiornamento per l'animazione
+
         def update(frame):
             ret1, frame1 = cap1.read()
             ret2, frame2 = cap2.read()
             if not ret1 or not ret2:
                 return
-            
+
             video_axes1.imshow(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
             video_axes2.imshow(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
-        
+
             i = frame
             ball.set_data([i], [time_series[i]])
-        
+
             idx_start = max(0, i - window_size // 2)
             idx_end = min(len(time_series), i + window_size // 2)
             idx = np.arange(idx_start, idx_end)
-        
+
             time_series_plot.set_data(idx, time_series[idx])
             window_line.set_data([idx_start, idx_end], [time_series[i]] * 2)
-            
-            # Disegna il frame aggiornato
+
             fig.canvas.draw()
-            
-            # Converti il plot in un'immagine
+
             img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
             img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        
-            # Scrivi il frame al video
+
             out.write(img)
-            
+
             return video_axes1, video_axes2, time_series_plot, ball, window_line
-        
-        # Anima il plot
+
         num_frames = int(min(cap1.get(cv2.CAP_PROP_FRAME_COUNT), cap2.get(cv2.CAP_PROP_FRAME_COUNT)))
         ani = FuncAnimation(fig, update, frames=range(num_frames), interval=1000 / fps)
-        
-        # Avvia l'animazione e salva il video
-        for frame in range(0,80):#range(num_frames):
+
+        for frame in range(num_frames):
             update(frame)
-        
+
         cap1.release()
         cap2.release()
         out.release()
