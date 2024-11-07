@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog
 import os
-from speed_script_5 import run_script  # Importa solo la funzione run_script dallo script speed_script.py
+from speed_script_10_events import run_script  # Importa solo la funzione run_script dallo script speed_script.py
 
 def select_folder():
     folder_path = filedialog.askdirectory()
