@@ -15,6 +15,9 @@ def run_script(folder_name='dati_prova', subj_name='subj_01'):
     import matplotlib.pyplot as plt
     from scipy.stats import gaussian_kde
     from sklearn.preprocessing import MinMaxScaler
+    import cv2
+    import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation
     
     def conv_time(ns):
         date = datetime.datetime.fromtimestamp(ns*(10**-9))
@@ -337,12 +340,12 @@ def run_script(folder_name='dati_prova', subj_name='subj_01'):
         
             # PATH GRAPH
         
-            plt.scatter(gaze['gaze x [px]'],gaze['gaze y [px]'], marker='o', linestyle='-')
+            plt.plot(gaze['gaze x [px]'],gaze['gaze y [px]'], marker='o', linestyle='-', color='green')
             plt.savefig('./path_gaze_'+subj_name+'_'+str(event)+'.pdf')
             plt.close()
         
-            plt.scatter(fixations['fixation x [normalized]'],fixations['fixation y [normalized]'], marker='o', linestyle='-')
-            plt.savefig('./path_fixation_'+subj_name+'_'+str(event)+'.pdf')
+            plt.plot(fixations['fixation x [normalized]'],fixations['fixation y [normalized]'], marker='o', linestyle='-')
+            plt.savefig('./path_fixation_'+subj_name+'_'+str(event)+'.pdf', color='green')
             plt.close()
         
         
@@ -434,11 +437,11 @@ def run_script(folder_name='dati_prova', subj_name='subj_01'):
                 ax.set_title('Time Series of Saccades')
         
                 plt.plot(saccades['amplitude [px]'])
-                plt.savefig('./amplitude_'+subj_name+'_'+str(event)+'.pdf')
+                plt.savefig('./amplitude_saccades_'+subj_name+'_'+str(event)+'.pdf',dpi=72)
                 plt.close()
                 plt.plot(saccades['mean velocity [px/s]'])
                 plt.plot(saccades['peak velocity [px/s]'])
-                plt.savefig('./velocity_'+subj_name+'_'+str(event)+'.pdf')
+                plt.savefig('./velocity_saccades_'+subj_name+'_'+str(event)+'.pdf',dpi=72)
                 plt.close()
         except:
             print('error in ',event)
