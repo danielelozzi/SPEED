@@ -11,3 +11,5 @@ Load in the same folder named "eyetracking_files" all files downloaded from Pupi
 The gaze not enriched file in the analysis file folder must also be included called "gaze_not_enr.csv"
 
 The script is called SPEED_0_1_gui.py and requires python 3.
+
+An example of the data is attached to the code. The video of the internal camera is blurred to hide the biometric data.
