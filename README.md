@@ -11,15 +11,3 @@ Load in the same folder named "eyetracking_files" all files downloaded from Pupi
 The gaze not enriched file in the analysis file folder must also be included called "gaze_not_enr.csv"
 
 The script is called SPEED_0_1_gui.py and requires python 3.
-
-An example of the data is attached to the code. The video of the internal camera is blurred to hide the biometric data.
-
-# Eyetracker analysis with adapted version of SPEED and PsychoPy
-
-The psychopy *.py files needs to be loaded after the installation of the following libraries on Python ver > 3:
-- nest_asyncio
-- pupil_labs.realtime_api
-
-then the neon pupil lab eyetracker must be connected via hotspot or ethernet connection using a usb hub.
-
-Analyses must be performed with the SPEED script moficated to interface with PsychoPy data "script_preprocessing_output.py".
