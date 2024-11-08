@@ -435,7 +435,10 @@ def run_script(folder_name='dati_prova', subj_name='subj_01'):
             ax.set_xlabel('Time')
             ax.set_ylabel('Blink (0 = No, 1 = Yes)')
             ax.set_title('Time Series of Saccades')
-    
+
+            plt.savefig('./blink_'+subj_name+'_'+str(event)+'.pdf',dpi=72)
+            plt.close()
+
             plt.plot(saccades['amplitude [px]'])
             plt.savefig('./amplitude_saccades_'+subj_name+'_'+str(event)+'.pdf',dpi=72)
             plt.close()
