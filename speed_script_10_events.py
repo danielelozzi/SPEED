@@ -412,39 +412,50 @@ def run_script(folder_name='dati_prova', subj_name='subj_01'):
         plt.savefig('./cloud_gaze_'+subj_name+'_'+str(event)+'.pdf')
         plt.close()
     
+        # Verifica che saccades non sia vuoto
         if saccades.shape[0] != 0:
-    
-            saccades['start timestamp [ns]'] =saccades['start timestamp [ns]']/1000
-            saccades['end timestamp [ns]'] =saccades['end timestamp [ns]']/1000
+            
+            # Conversione dei timestamp da nanosecondi a microsecondi
+            saccades['start timestamp [ns]'] /= 1000
+            saccades['end timestamp [ns]'] /= 1000
             saccades['start timestamp [ns]'] = saccades['start timestamp [ns]'].astype('int')
             saccades['end timestamp [ns]'] = saccades['end timestamp [ns]'].astype('int')
-    
+            
+            # Calcola il tempo minimo e massimo
             min_time = saccades['start timestamp [ns]'].min()
             max_time = saccades['end timestamp [ns]'].max()
-    
-            time_series = np.zeros(max_time + 1-min_time)
-    
+            
+            # Crea la serie temporale dei saccades
+            time_series = np.zeros(max_time + 1 - min_time)
             for _, row in saccades.iterrows():
-                time_series[row['start timestamp [ns]']-min_time:row['end timestamp [ns]']-min_time + 1] = 1
-    
-            time = np.arange(len(time_series))
-    
-            fig, ax = plt.subplots(figsize=(20,5))
-    
+                time_series[row['start timestamp [ns]'] - min_time : row['end timestamp [ns]'] - min_time + 1] = 1
+            
+            # Scala la serie temporale a un massimo di 1000 punti
+            max_points = 1000
+            if len(time_series) > max_points:
+                factor = len(time_series) // max_points
+                time_series = time_series[::factor]
+                time = np.arange(len(time_series)) * factor
+            else:
+                time = np.arange(len(time_series))
+            
+            # Plot della serie temporale ridotta
+            fig, ax = plt.subplots(figsize=(20, 5))
             ax.plot(time, time_series, drawstyle='steps-post', marker='o', markersize=2)
             ax.set_xlabel('Time')
             ax.set_ylabel('Blink (0 = No, 1 = Yes)')
             ax.set_title('Time Series of Saccades')
-
-            plt.savefig('./blink_'+subj_name+'_'+str(event)+'.pdf',dpi=72)
+            plt.savefig('./blink_'+subj_name+'_'+str(event)+'.pdf', dpi=72)
             plt.close()
-
+            
+            # Plot di amplitude e velocity
             plt.plot(saccades['amplitude [px]'])
-            plt.savefig('./amplitude_saccades_'+subj_name+'_'+str(event)+'.pdf',dpi=72)
+            plt.savefig('./amplitude_saccades_'+subj_name+'_'+str(event)+'.pdf', dpi=72)
             plt.close()
+            
             plt.plot(saccades['mean velocity [px/s]'])
             plt.plot(saccades['peak velocity [px/s]'])
-            plt.savefig('./velocity_saccades_'+subj_name+'_'+str(event)+'.pdf',dpi=72)
+            plt.savefig('./velocity_saccades_'+subj_name+'_'+str(event)+'.pdf', dpi=72)
             plt.close()
         #except:
         #    print('error in ',event)
