@@ -459,10 +459,6 @@ def run_script(folder_name='dati_prova', subj_name='subj_01'):
                 plt.close()
         except:
             print('error in ',event)
-    
-    import cv2
-    import matplotlib.pyplot as plt
-    from matplotlib.animation import FuncAnimation
 
     def downsample_video(input_file, output_file, input_fps, output_fps):
         cap = cv2.VideoCapture(input_file)
