@@ -6,7 +6,13 @@ It is developed by the members and collaborators of the LabSCoC - Laboratorio di
 
 Authors: Daniele Lozzi, Ilaria Di Pompeo, Martina Marcaccio, Matias Ademaj, Simone Migliore, Giuseppe Curcio.
 
-Load in the same folder named "eyetracking_files" all files downloaded from Pupil Cloud and rename the internal video as "internal.mp4" and the video from external camera as "external.mp4"
+Instructions:
+
+1) create a folder named "eyetracking_files"
+2) download all files from Pupil Cloud video using "" function
+3) rename the internal video as "internal.mp4" 
+4) rename the video from external camera as "external.mp4"
+5) run SPEED
 
 The gaze not enriched file in the analysis file folder must also be included called "gaze_not_enr.csv"
 
