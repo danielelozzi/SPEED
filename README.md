@@ -9,7 +9,7 @@ Authors: Daniele Lozzi, Ilaria Di Pompeo, Martina Marcaccio, Matias Ademaj, Simo
 Instructions:
 
 1) create a folder named "eyetracking_file"
-2) download all files from Pupil Cloud video using "" function
+2) download all files from Pupil Cloud video using "Marker Mapper" enrichment function
 3) rename the internal video as "internal.mp4" 
 4) rename the video from external camera as "external.mp4"
 5) run SPEED
