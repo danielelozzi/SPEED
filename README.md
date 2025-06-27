@@ -94,10 +94,12 @@ This directory will contain:
 
 ## 🛠️ Project Structure
 
-.
 ├── SPEED_0_2_gui.py           # The Graphical User Interface application
+
 ├── speed_script_10_events.py  # The core eye-tracking data analysis logic
+
 ├── README.md                  # This documentation file
+
 └── requirements.txt           # List of Python dependencies
 
 ## 🧠 Core Logic (`speed_script_10_events.py`)
