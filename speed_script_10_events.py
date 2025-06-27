@@ -1,558 +1,498 @@
-def run_script(folder_name='dati_prova', subj_name='subj_01'):
-    
-    import pandas as pd
-    import numpy as np
-    import matplotlib.pyplot as plt
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.max_rows', 250)
-    import datetime
-    import os
-    import math
-    import sys
-    import numpy as np
-    import matplotlib.pyplot as plt
-    from scipy.signal import welch, spectrogram
-    import matplotlib.pyplot as plt
-    from scipy.stats import gaussian_kde
-    from sklearn.preprocessing import MinMaxScaler
-    import cv2
-    import matplotlib.pyplot as plt
-    from matplotlib.animation import FuncAnimation
-    
-    def conv_time(ns):
-        date = datetime.datetime.fromtimestamp(ns*(10**-9))
-        return date
-    
-    def convert_to_unix(timestamp_str):
-        # Esempio di formato: '2024-01-26_09h47.19.968706'
-        # Usiamo il metodo strptime per analizzare la stringa e ottenere un oggetto datetime
-        dt = datetime.datetime.strptime(timestamp_str, '%Y-%m-%d %Hh%M.%S.%f')
-    
-        # Convertiamo l'oggetto datetime in un timestamp UNIX
-        unix_timestamp_ns = int(dt.timestamp() * 1e9)  # Moltiplicato per 1 miliardo per convertire in nanosecondi
-        return unix_timestamp_ns
-    
-    def conv_time(ms):
-        ms = datetime.datetime.fromtimestamp(ms)
-        return ms
-    
-    def convert_seconds_to_nanoseconds(seconds):
-        nanoseconds = seconds * 1e9
-        return nanoseconds
-    
-    def euclidean_distance(x1, y1, x2, y2):
-        return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-    
-    events = pd.read_csv('./eyetracking_file/events.csv')
-    events_list = np.arange(0,events.shape[0])
-    
-    for event in events_list:
-        try:
-        
-            timestamp = events.at[event,'timestamp [ns]']
-            rec_id = events.loc[event,'recording id']
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import datetime
+import os
+import math
+import cv2
+from scipy.signal import welch, spectrogram
+from scipy.stats import gaussian_kde
+from pathlib import Path
 
-            event = events.name[event]
-        
-            #subj_name = str('subj_03')
-            gaze_mark = pd.read_csv('./eyetracking_file/gaze.csv')
-            gaze_mark = gaze_mark.loc[(gaze_mark['timestamp [ns]'] > timestamp)]
-            gaze_mark.reset_index(inplace=True)
-            
-            pupillometry_data  = pd.read_csv('./eyetracking_file/3d_eye_states.csv')
-            pupillometry_data = pupillometry_data.loc[(pupillometry_data['timestamp [ns]'] > timestamp)]
-            pupillometry_data.reset_index(inplace=True)
-            fixations_mark = pd.read_csv('./eyetracking_file/fixations.csv')
-            fixations_mark= fixations_mark.loc[(fixations_mark['start timestamp [ns]'] > timestamp)]
-            fixations_mark.reset_index(inplace=True)
-            blink  = pd.read_csv('./eyetracking_file/blinks.csv')
-            blink = blink.loc[(blink['start timestamp [ns]'] > timestamp)]
-            blink.reset_index(inplace=True)
-            
-            fixations_mark = fixations_mark.loc[(fixations_mark['recording id']==rec_id)]
-            fixations_mark.reset_index(drop=True, inplace=True)
-        
-            gaze_mark = gaze_mark.loc[(gaze_mark['recording id']==rec_id)]
-            gaze_mark.reset_index(drop=True,inplace=True)
-            #gaze_mark.reset_index(drop=True,inplace=True)
-            gaze_mark['fixation id'].fillna(-1,inplace=True)
-            gaze_mark = gaze_mark.loc[(gaze_mark['gaze detected on surface'] == True)]
-            gaze_mark.reset_index(drop=True,inplace=True)
-            n_movement = 0
-            for n,g in enumerate(range(gaze_mark.shape[0]-1)):
-                if gaze_mark.at[n,'fixation id'] == -1:
-                    n_gaze = n
-                    while (n_gaze!=gaze_mark.shape[0]) and (gaze_mark.at[n_gaze,'fixation id']== -1):
-                        gaze_mark.at[n_gaze,'fixation id'] = n+1+0.5
-                        n_gaze+=1
-            lista_movimenti = list()
-            index = 0
-            fixations_id_fatti = list()
-            for n in range(gaze_mark.shape[0]-1):
-                if (gaze_mark.at[n,'fixation id']%1 != 0) & (n==0) & (gaze_mark.at[n,'fixation id'] not in fixations_id_fatti):
-                    fixations_id_fatti.append(gaze_mark.at[n,'fixation id'])
-                    start = gaze_mark.at[n,'timestamp [ns]']
-                    index = gaze_mark.at[n,'fixation id']
-                    surface = gaze_mark.at[n,'gaze detected on surface']
-                    n_gaze = n
-                    first = True
-                    lista_percorso = list()
-                    while (gaze_mark.at[n_gaze,'fixation id']%1 != 0) or (n_gaze==gaze_mark.shape[0]):
-                        end = gaze_mark.at[n_gaze,'timestamp [ns]']
-                        if first == False:
-                            x1 = gaze_mark.at[n_gaze-1,'gaze position on surface x [normalized]']
-                            y1 = gaze_mark.at[n_gaze-1,'gaze position on surface y [normalized]']
-                            x2 = gaze_mark.at[n_gaze,'gaze position on surface x [normalized]']
-                            y2 = gaze_mark.at[n_gaze,'gaze position on surface y [normalized]']
-                            spostamento = euclidean_distance(x1, y1, x2, y2)
-                            lista_percorso.append(spostamento)
-                        else:
-                            start_x = gaze_mark.at[n_gaze,'gaze position on surface x [normalized]']
-                            start_y = gaze_mark.at[n_gaze,'gaze position on surface y [normalized]']
-                        first = False
-                        n_gaze+=1
-                    end_x = gaze_mark.at[n_gaze-1,'gaze position on surface x [normalized]']
-                    end_y = gaze_mark.at[n_gaze-1,'gaze position on surface y [normalized]']
-                    spostamento_tot = sum(lista_percorso)
-                    spostamento_effettivo = euclidean_distance(start_x,start_y,end_x,end_y)
-                    lista_movimenti.append([index,start,end,end-start,surface,spostamento_tot,(start_x,start_y),(end_x,end_y),spostamento_effettivo])
-                elif (gaze_mark.at[n,'fixation id']%1 != 0) & (n!=0) & (gaze_mark.at[n,'fixation id'] not in fixations_id_fatti):
-                    if index != gaze_mark.at[n-1,'fixation id']:
-                        fixations_id_fatti.append(gaze_mark.at[n,'fixation id'])
-                        start = gaze_mark.at[n,'timestamp [ns]']
-                        index = gaze_mark.at[n,'fixation id']
-                        surface = gaze_mark.at[n,'gaze detected on surface']
-                        n_gaze = n
-                        first = True
-                        lista_percorso = list()
-                        while (n_gaze!=gaze_mark.shape[0]) and (gaze_mark.at[n_gaze,'fixation id']%1 != 0):
-                            end = gaze_mark.at[n_gaze,'timestamp [ns]']
-                            if first == False:
-                                x1 = gaze_mark.at[n_gaze-1,'gaze position on surface x [normalized]']
-                                y1 = gaze_mark.at[n_gaze-1,'gaze position on surface y [normalized]']
-                                x2 = gaze_mark.at[n_gaze,'gaze position on surface x [normalized]']
-                                y2 = gaze_mark.at[n_gaze,'gaze position on surface y [normalized]']
-                                spostamento = euclidean_distance(x1, y1, x2, y2)
-                                lista_percorso.append(spostamento)
-                            else:
-                                start_x = gaze_mark.at[n_gaze,'gaze position on surface x [normalized]']
-                                start_y = gaze_mark.at[n_gaze,'gaze position on surface y [normalized]']
-                            first = False
-                            n_gaze+=1
-                        end_x = gaze_mark.at[n_gaze-1,'gaze position on surface x [normalized]']
-                        end_y = gaze_mark.at[n_gaze-1,'gaze position on surface y [normalized]']
-                        spostamento_tot = sum(lista_percorso)
-                        spostamento_effettivo = euclidean_distance(start_x,start_y,end_x,end_y)
-                        lista_movimenti.append([index,start,end,end-start,surface,spostamento_tot,(start_x,start_y),(end_x,end_y),spostamento_effettivo])
-        
-            lista_movimenti = pd.DataFrame(lista_movimenti,columns=['fixation id','start','end','duration','surface','spostamento_tot','spostamento_start','spostamento_end','spostamento_effettivo'])
+# --- Constants ---
+SAMPLING_FREQ = 200  # Hz
+NS_TO_S = 1e9
 
-            
-            n_fixation = max(fixations_mark['fixation id']) 
-            fixation_avg = fixations_mark['duration [ms]'].mean()
-            fixation_std = fixations_mark['duration [ms]'].std()
-            fixation_point_x = fixations_mark['fixation x [normalized]'].mean()
-            fixation_point_x_std = fixations_mark['fixation x [normalized]'].std()
-            fixation_point_y = fixations_mark['fixation y [normalized]'].mean()
-            fixation_point_y_std = fixations_mark['fixation x [normalized]'].std()
-        
-            n_blink = blink.shape[0]
-            blink_avg = blink['duration [ms]'].mean()
-            blink_std = blink['duration [ms]'].std()
-        
-            pupillometry_start = pupillometry_data.reset_index().at[0,'pupil diameter left [mm]']
-            pupillometry_end = pupillometry_data.at[pupillometry_data.shape[0]-1,'pupil diameter left [mm]']
-            pupillometry_avg = pupillometry_data['pupil diameter left [mm]'].mean()
-            pupillometry_std = pupillometry_data['pupil diameter left [mm]'].std()
-        
-            n_moviments = len(lista_movimenti)
-            sum_time_movement = np.sum(lista_movimenti['duration'])/10**9
-            avg_time_movement = np.mean(lista_movimenti['duration'])/10**9
-            std_time_movement = np.std(lista_movimenti['duration'])/10**9
-        
-            gaze_fixation = list()
-            for fixation in fixations_mark['fixation id'].loc[(fixations_mark['fixation id']%1==0)].to_numpy():
-                gaze_fixation.append(gaze_mark.loc[(gaze_mark['fixation id']==fixation)].shape[0])
-            n_gaze_fixation_avg = np.array(gaze_fixation).mean()
-        
-            gaze_movement = list()
-            for fixation in lista_movimenti['fixation id'].to_numpy():
-                gaze_movement.append(gaze_mark.loc[(gaze_mark['fixation id']==fixation)].shape[0])
-            n_gaze_movement_avg = np.array(gaze_movement).mean()
-        
-            spostamento_totale_sum = (lista_movimenti['spostamento_tot']).sum()
-            spostamento_totale_avg = (lista_movimenti['spostamento_tot']).mean()
-            spostamento_totale_std = (lista_movimenti['spostamento_tot']).std()
-        
-            spostamento_effettivo_sum = (lista_movimenti['spostamento_effettivo']).sum()
-            spostamento_effettivo_avg = (lista_movimenti['spostamento_effettivo']).mean()
-            spostamento_effettivo_std = (lista_movimenti['spostamento_effettivo']).std()
-        
-            results = {
-                'participant':subj_name,
-                'n_fixation':n_fixation,
-                'fixation_avg':fixation_avg,
-                'fixation_std':fixation_std,
-                'fixation_point_x':fixation_point_x,
-                'fixation_point_x_std':fixation_point_x_std,
-                'fixation_point_y':fixation_point_y,
-                'fixation_point_y_std':fixation_point_y_std,
-                'n_blink':n_blink,
-                'blink_avg':blink_avg,
-                'blink_std':blink_std,
-                'pupillometry_start':pupillometry_start,
-                'pupillometry_end':pupillometry_end,
-                'pupillometry_avg':pupillometry_avg,
-                'pupillometry_std':pupillometry_std,
-                'n_moviments':n_moviments,
-                'sum_time_movement':sum_time_movement,
-                'avg_time_movement':avg_time_movement,
-                'std_time_movement':std_time_movement,
-                'n_gaze_fixation_avg':n_gaze_fixation_avg,
-                'n_gaze_movement_avg':n_gaze_movement_avg,
-                'spostamento_totale_sum':spostamento_totale_sum,
-                'spostamento_totale_avg':spostamento_totale_avg,
-                'spostamento_totale_std':spostamento_totale_std,
-                'spostamento_effettivo_sum':spostamento_effettivo_sum,
-                'spostamento_effettivo_avg':spostamento_effettivo_avg,
-                'spostamento_effettivo_std':spostamento_effettivo_std
-            }
-        
-            results = pd.DataFrame(results,index=[0])
-            results.to_csv('./results_'+subj_name+'_'+str(event)+'.csv')
-            ts = pupillometry_data['pupil diameter left [mm]'].to_numpy()
-            import numpy as np
-            import matplotlib.pyplot as plt
-            from scipy.signal import welch, spectrogram
-        
-            # Genera dei dati di esempio
-            fs = 200  # Frequenza di campionamento
-            # Calcola il periodogramma utilizzando il metodo di Welch
-            frequencies, periodogram = welch(ts, fs=fs, nperseg=100)
-        
-            # Stampa il periodogramma
-            plt.figure(figsize=(10, 5))
-            plt.semilogy(frequencies, periodogram)
-            plt.title('Periodogram')
-            plt.xlabel('Frequency [Hz]')
-            plt.ylabel('Power spectral Density [V^2/Hz]')
-            plt.grid(True)
-            plt.savefig('./periodogram_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-            # Calcola lo spettrogramma utilizzando il metodo di Welch
-            f, t_spec, Sxx = spectrogram(ts, fs=fs, nperseg=256, noverlap=50)
-        
-            # Stampa lo spettrogramma
-            plt.figure(figsize=(10, 5))
-            plt.pcolormesh(t_spec, f, 10 * np.log10(Sxx), shading='gouraud')
-            plt.title('Spectrogram')
-            plt.ylabel('Frequency [Hz]')
-            plt.xlabel('Time [s]')
-            plt.colorbar(label='Power [dB]')
-            plt.savefig('./spectrogram_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-            # pupillometry
 
-            #%%
-            fixations_copy = fixations_mark.copy()
-            fixations_copy = fixations_copy.loc[(fixations_mark['fixation detected on surface'] == True)]
-            fixations_copy.reset_index(drop=True,inplace=True)
-            for row in range(pupillometry_data.shape[0]):
-                for row2 in range(fixations_copy.shape[0]):
-                    if ((pupillometry_data.at[row,'timestamp [ns]']>=fixations_copy.at[row2,'start timestamp [ns]']) and (pupillometry_data.at[row,'timestamp [ns]']<=fixations_copy.at[row2,'end timestamp [ns]'])):
-                        pupillometry_data.at[row,'on surface'] = True
-                        fixations_copy.drop(axis=0,labels=row2,inplace=True)
-                        fixations_copy.reset_index(drop=True,inplace=True)
-                        break
+def euclidean_distance(x1, y1, x2, y2):
+    """Calculates euclidean distance between two points, works on scalars or series."""
+    return np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+
+
+def load_all_data(data_dir: Path):
+    """Loads all necessary CSV files from the data directory."""
+    files_to_load = {
+        'events': 'events.csv',
+        'gaze': 'gaze.csv',
+        'gaze_not_enr': 'gaze_not_enr.csv',
+        'pupil': '3d_eye_states.csv',
+        'fixations': 'fixations.csv',
+        'blinks': 'blinks.csv',
+        'saccades': 'saccades.csv'
+    }
+    dataframes = {}
+    try:
+        for name, filename in files_to_load.items():
+            dataframes[name] = pd.read_csv(data_dir / filename)
+    except FileNotFoundError as e:
+        print(f"Errore: Un file dati richiesto non è stato trovato: {e}")
+        raise
+    return dataframes
+
+
+def filter_data_by_event(all_data, event_timestamp, rec_id):
+    """Filters all dataframes for a specific event based on timestamp and recording ID."""
+    event_data = {}
+    event_data['gaze'] = all_data['gaze'][
+        (all_data['gaze']['timestamp [ns]'] > event_timestamp) &
+        (all_data['gaze']['recording id'] == rec_id)
+    ].copy().reset_index(drop=True)
+
+    event_data['pupil'] = all_data['pupil'][
+        (all_data['pupil']['timestamp [ns]'] > event_timestamp)
+    ].copy().reset_index(drop=True)
+
+    event_data['fixations'] = all_data['fixations'][
+        (all_data['fixations']['start timestamp [ns]'] > event_timestamp) &
+        (all_data['fixations']['recording id'] == rec_id)
+    ].copy().reset_index(drop=True)
+
+    event_data['blinks'] = all_data['blinks'][
+        (all_data['blinks']['start timestamp [ns]'] > event_timestamp)
+    ].copy().reset_index(drop=True)
+
+    event_data['saccades'] = all_data['saccades'][
+        (all_data['saccades']['start timestamp [ns]'] > event_timestamp)
+    ].copy().reset_index(drop=True)
+    
+    # This data seems to be used for plotting only
+    event_data['gaze_not_enr'] = all_data['gaze_not_enr'][
+        (all_data['gaze_not_enr']['timestamp [ns]'] > event_timestamp)
+    ].copy().reset_index(drop=True)
+
+    return event_data
+
+
+def process_gaze_movements(gaze_df):
+    """Identifies and processes gaze movements (saccades) from gaze data."""
+    if gaze_df.empty:
+        return pd.DataFrame()
+
+    gaze_df['fixation id'].fillna(-1, inplace=True)
+    gaze_on_surface = gaze_df[gaze_df['gaze detected on surface'] == True].copy()
+    
+    if gaze_on_surface.empty:
+        return pd.DataFrame()
+
+    # Identify movements (periods where fixation id is -1)
+    is_movement = gaze_on_surface['fixation id'] == -1
+    movement_groups = (is_movement != is_movement.shift()).cumsum()
+    gaze_on_surface.loc[is_movement, 'movement_id'] = movement_groups[is_movement]
+
+    movements = []
+    movement_data = gaze_on_surface.dropna(subset=['movement_id'])
+    
+    for _, group in movement_data.groupby('movement_id'):
+        if len(group) < 2:
+            continue
+
+        start_row = group.iloc[0]
+        end_row = group.iloc[-1]
+
+        start_time = start_row['timestamp [ns]']
+        end_time = end_row['timestamp [ns]']
         
-            print('fissazioni fatte')
-        
-            gaze_copy = gaze_mark.copy()
-            gaze_copy = gaze_copy.loc[(gaze_copy['gaze detected on surface'] == True)]
-            gaze_copy.reset_index(drop=True,inplace=True)
-            for row in range(pupillometry_data.shape[0]):
-                for row3 in range(gaze_copy.shape[0]):
-                    if (pupillometry_data.at[row,'timestamp [ns]']==gaze_copy.at[row3,'timestamp [ns]']):
-                        pupillometry_data.at[row,'on surface'] = True
-                        gaze_copy.drop(axis=0,labels=row2,inplace=True)
-                        gaze_copy.reset_index(drop=True,inplace=True)
-                        break
-        
-            print('gaze fatto')
-            plt.plot(pupillometry_data['pupil diameter left [mm]'])
-            fig, ax = plt.subplots(figsize=(10,5))
-        
-            # Plot dei dati
-            ax.plot(pupillometry_data['pupil diameter left [mm]'], marker='o', linestyle='-',markersize=1)
-        
-            # Colorazione dello sfondo in base alla colonna 'on surface'
-            for idx, value in enumerate(pupillometry_data['on surface']):
-                if value == 1:
-                    ax.axvspan(idx - 0.5, idx + 0.5, facecolor='lightgreen', alpha=0.5)
-                else:
-                    ax.axvspan(idx - 0.5, idx + 0.5, facecolor='lightcoral', alpha=0.5)
-        
-            # Etichette e titolo
-            ax.set_xlabel('Time')
-            ax.set_ylabel('pupil diameter left [mm]')
-            ax.set_title('Pupil Diameter with Background Indicator')
-        
-            plt.savefig('./pupil_surface_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-            # HISTOGRAMS
-        
-            gaze = pd.read_csv('./eyetracking_file/gaze_not_enr.csv')
-            gaze = gaze.loc[(gaze['timestamp [ns]'] > timestamp)]
-            gaze.reset_index(inplace=True)
-            
-            fixations = pd.read_csv('./eyetracking_file/fixations.csv')
-            fixations = fixations.loc[(fixations['start timestamp [ns]'] > timestamp)]
-            fixations.reset_index(inplace=True)
-            
-            plt.hist(gaze['elevation [deg]'])
-            plt.savefig('./hist_gaze_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-            plt.hist(pupillometry_data['pupil diameter left [mm]'])
-            plt.savefig('./hist_pupillometry_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-            plt.hist(fixations['duration [ms]'])
-            plt.savefig('./hist_fixations_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-            plt.hist(blink['duration [ms]'])
-            plt.savefig('./hist_blinks_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-            # Saccades
-        
-            saccades  = pd.read_csv('./eyetracking_file/saccades.csv')
-            saccades = saccades.loc[(saccades['start timestamp [ns]'] > timestamp)]
-            saccades.reset_index(inplace=True)
-            
-            plt.hist(saccades['duration [ms]'])
-            plt.savefig('./hist_saccades_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-            # PATH GRAPH
-        
-            plt.plot(gaze['gaze x [px]'],gaze['gaze y [px]'], marker='o', linestyle='-', color='green')
-            plt.savefig('./path_gaze_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-            plt.plot(fixations['fixation x [normalized]'],fixations['fixation y [normalized]'], marker='o', linestyle='-', color='green')
-            plt.savefig('./path_fixation_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-        
-            for i in range(lista_movimenti.shape[0]):
-                start_x = np.array(lista_movimenti.at[i, 'spostamento_start'][0])
-                start_y = np.array(lista_movimenti.at[i, 'spostamento_start'][1])
-                end_x = np.array(lista_movimenti.at[i, 'spostamento_end'][0])
-                end_y = np.array(lista_movimenti.at[i, 'spostamento_end'][1])
-        
-                plt.scatter(start_x, start_y, marker='o', c='b')
-                plt.scatter(end_x, end_y, marker='o', c='b')
-        
-                plt.plot([start_x, end_x], [start_y, end_y], linestyle='-', c='b')
-        
-            plt.savefig('./total_mov_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-            shape = lista_movimenti.shape[0]-1
-            scatter_list_x = [np.array(lista_movimenti.at[0,'spostamento_start'][0]), np.array(lista_movimenti.at[shape,'spostamento_end'][0])]
-            scatter_list_y = [np.array(lista_movimenti.at[0,'spostamento_start'][1]), np.array(lista_movimenti.at[shape,'spostamento_end'][1])]
-            
-            # SCATTER PLOT
-            plt.scatter(scatter_list_x, scatter_list_y, marker='o')
-            
-            # LINE
-            plt.plot(scatter_list_x, scatter_list_y, linestyle='-', color='blue')
-            plt.savefig('./effective_mov_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-        
-            # CLOUD POINT
-        
-            scale = 1000
-            fix_x = fixations['fixation x [normalized]']*scale
-            fix_y = fixations['fixation y [normalized]']*scale
-        
-            kde = gaussian_kde([fix_x,fix_y])
-            x_grid, y_grid = np.mgrid[0:scale:scale*1j, 0:scale:scale*1j]
+        start_pos = (start_row['gaze position on surface x [normalized]'], start_row['gaze position on surface y [normalized]'])
+        end_pos = (end_row['gaze position on surface x [normalized]'], end_row['gaze position on surface y [normalized]'])
+
+        # Calculate total path length
+        x = group['gaze position on surface x [normalized]']
+        y = group['gaze position on surface y [normalized]']
+        total_displacement = euclidean_distance(x.shift(), y.shift(), x, y).sum()
+
+        # Calculate effective displacement (start to end)
+        effective_displacement = euclidean_distance(start_pos[0], start_pos[1], end_pos[0], end_pos[1])
+
+        movements.append({
+            'movement_id': start_row['movement_id'],
+            'start_time': start_time,
+            'end_time': end_time,
+            'duration_ns': end_time - start_time,
+            'surface': start_row['gaze detected on surface'],
+            'total_displacement': total_displacement,
+            'start_pos': start_pos,
+            'end_pos': end_pos,
+            'effective_displacement': effective_displacement
+        })
+
+    return pd.DataFrame(movements)
+
+
+def calculate_summary_features(data, movements_df, subj_name, event_name):
+    """Calculates a dictionary of summary features from the processed data."""
+    fixations = data['fixations']
+    blinks = data['blinks']
+    pupil = data['pupil']
+    gaze = data['gaze']
+
+    results = {'participant': subj_name, 'event': event_name}
+
+    # Fixation features
+    if not fixations.empty:
+        results.update({
+            'n_fixation': fixations['fixation id'].nunique(),
+            'fixation_avg_duration_ms': fixations['duration [ms]'].mean(),
+            'fixation_std_duration_ms': fixations['duration [ms]'].std(),
+            'fixation_avg_x': fixations['fixation x [normalized]'].mean(),
+            'fixation_std_x': fixations['fixation x [normalized]'].std(),
+            'fixation_avg_y': fixations['fixation y [normalized]'].mean(),
+            'fixation_std_y': fixations['fixation y [normalized]'].std(),
+        })
+
+    # Blink features
+    if not blinks.empty:
+        results.update({
+            'n_blink': len(blinks),
+            'blink_avg_duration_ms': blinks['duration [ms]'].mean(),
+            'blink_std_duration_ms': blinks['duration [ms]'].std(),
+        })
+
+    # Pupillometry features
+    if not pupil.empty:
+        pupil_diam = pupil['pupil diameter left [mm]']
+        results.update({
+            'pupil_start_mm': pupil_diam.iloc[0],
+            'pupil_end_mm': pupil_diam.iloc[-1],
+            'pupil_avg_mm': pupil_diam.mean(),
+            'pupil_std_mm': pupil_diam.std(),
+        })
+
+    # Movement features
+    if not movements_df.empty:
+        results.update({
+            'n_movements': len(movements_df),
+            'sum_time_movement_s': movements_df['duration_ns'].sum() / NS_TO_S,
+            'avg_time_movement_s': movements_df['duration_ns'].mean() / NS_TO_S,
+            'std_time_movement_s': movements_df['duration_ns'].std() / NS_TO_S,
+            'total_disp_sum': movements_df['total_displacement'].sum(),
+            'total_disp_avg': movements_df['total_displacement'].mean(),
+            'total_disp_std': movements_df['total_displacement'].std(),
+            'effective_disp_sum': movements_df['effective_displacement'].sum(),
+            'effective_disp_avg': movements_df['effective_displacement'].mean(),
+            'effective_disp_std': movements_df['effective_displacement'].std(),
+        })
+
+    # Gaze per fixation/movement
+    if not gaze.empty and not fixations.empty:
+        gaze_per_fix = gaze.groupby('fixation id').size().mean()
+        results['n_gaze_per_fixation_avg'] = gaze_per_fix
+
+    return results
+
+
+def generate_plots(data, movements_df, subj_name, event_name, output_dir: Path):
+    """Generates and saves all plots for the event."""
+    # Ensure output directory exists
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Plot Periodogram and Spectrogram
+    if not data['pupil'].empty:
+        ts = data['pupil']['pupil diameter left [mm]'].to_numpy()
+        freqs, Pxx = welch(ts, fs=SAMPLING_FREQ, nperseg=100)
+        plt.figure(figsize=(10, 5))
+        plt.semilogy(freqs, Pxx)
+        plt.title(f'Periodogramma - {subj_name} - {event_name}')
+        plt.xlabel('Frequenza [Hz]')
+        plt.ylabel('Densità spettrale di potenza [V^2/Hz]')
+        plt.grid(True)
+        plt.savefig(output_dir / f'periodogram_{subj_name}_{event_name}.pdf')
+        plt.close()
+
+        f, t, Sxx = spectrogram(ts, fs=SAMPLING_FREQ, nperseg=256, noverlap=50)
+        plt.figure(figsize=(10, 5))
+        plt.pcolormesh(t, f, 10 * np.log10(Sxx), shading='gouraud')
+        plt.title(f'Spettrogramma - {subj_name} - {event_name}')
+        plt.ylabel('Frequenza [Hz]')
+        plt.xlabel('Tempo [s]')
+        plt.colorbar(label='Potenza [dB]')
+        plt.savefig(output_dir / f'spectrogram_{subj_name}_{event_name}.pdf')
+        plt.close()
+
+    # Histograms
+    if not data['gaze_not_enr'].empty:
+        plt.hist(data['gaze_not_enr']['elevation [deg]'].dropna())
+        plt.title(f"Istogramma Elevazione Sguardo - {subj_name} - {event_name}")
+        plt.savefig(output_dir / f'hist_gaze_{subj_name}_{event_name}.pdf')
+        plt.close()
+
+    if not data['pupil'].empty:
+        plt.hist(data['pupil']['pupil diameter left [mm]'].dropna())
+        plt.title(f"Istogramma Diametro Pupilla - {subj_name} - {event_name}")
+        plt.savefig(output_dir / f'hist_pupillometry_{subj_name}_{event_name}.pdf')
+        plt.close()
+
+    if not data['fixations'].empty:
+        plt.hist(data['fixations']['duration [ms]'].dropna())
+        plt.title(f"Istogramma Durata Fissazioni - {subj_name} - {event_name}")
+        plt.savefig(output_dir / f'hist_fixations_{subj_name}_{event_name}.pdf')
+        plt.close()
+
+    if not data['blinks'].empty:
+        plt.hist(data['blinks']['duration [ms]'].dropna())
+        plt.title(f"Istogramma Durata Blink - {subj_name} - {event_name}")
+        plt.savefig(output_dir / f'hist_blinks_{subj_name}_{event_name}.pdf')
+        plt.close()
+
+    if not data['saccades'].empty:
+        plt.hist(data['saccades']['duration [ms]'].dropna())
+        plt.title(f"Istogramma Durata Saccadi - {subj_name} - {event_name}")
+        plt.savefig(output_dir / f'hist_saccades_{subj_name}_{event_name}.pdf')
+        plt.close()
+
+    # Path graphs
+    if not data['gaze_not_enr'].empty:
+        plt.plot(data['gaze_not_enr']['gaze x [px]'], data['gaze_not_enr']['gaze y [px]'], marker='o', linestyle='-', color='green')
+        plt.title(f"Percorso Sguardo - {subj_name} - {event_name}")
+        plt.savefig(output_dir / f'path_gaze_{subj_name}_{event_name}.pdf')
+        plt.close()
+
+    if not data['fixations'].empty:
+        plt.plot(data['fixations']['fixation x [normalized]'], data['fixations']['fixation y [normalized]'], marker='o', linestyle='-', color='green')
+        plt.title(f"Percorso Fissazioni - {subj_name} - {event_name}")
+        plt.savefig(output_dir / f'path_fixation_{subj_name}_{event_name}.pdf')
+        plt.close()
+
+    # Movement paths
+    if not movements_df.empty:
+        for _, row in movements_df.iterrows():
+            start_x, start_y = row['start_pos']
+            end_x, end_y = row['end_pos']
+            plt.plot([start_x, end_x], [start_y, end_y], linestyle='-', c='b', alpha=0.5)
+            plt.scatter([start_x, end_x], [start_y, end_y], marker='o', c='b', s=10)
+        plt.title(f"Percorso Movimenti Totali - {subj_name} - {event_name}")
+        plt.savefig(output_dir / f'total_mov_{subj_name}_{event_name}.pdf')
+        plt.close()
+
+    # Heatmaps
+    scale = 1000
+    if not data['fixations'].empty:
+        fix_x = data['fixations']['fixation x [normalized]'].dropna() * scale
+        fix_y = data['fixations']['fixation y [normalized]'].dropna() * scale
+        if len(fix_x) > 1:
+            kde = gaussian_kde([fix_x, fix_y])
+            x_grid, y_grid = np.mgrid[0:scale:complex(scale), 0:scale:complex(scale)]
             z = kde(np.vstack([x_grid.ravel(), y_grid.ravel()]))
             plt.figure(figsize=(8, 4))
             plt.contourf(x_grid, y_grid, z.reshape(x_grid.shape), cmap='Reds', alpha=0.7)
             plt.colorbar()
-            plt.scatter(fix_x,fix_y, alpha=0.4)
-            #plt.imshow(np.rot90(background,k=2))
-            plt.xlim(0,scale)
-            plt.ylim(0,scale)
-            plt.savefig('./cloud_fix_'+subj_name+'_'+str(event)+'.pdf')
+            plt.scatter(fix_x, fix_y, alpha=0.4, s=5)
+            plt.xlim(0, scale)
+            plt.ylim(0, scale)
+            plt.title(f"Mappa di Calore Fissazioni - {subj_name} - {event_name}")
+            plt.savefig(output_dir / f'cloud_fix_{subj_name}_{event_name}.pdf')
             plt.close()
-        
-            scale = 1000
-            gaze_x = gaze_mark['gaze position on surface x [normalized]']*scale
-            gaze_y = gaze_mark['gaze position on surface y [normalized]']*scale
-        
-            kde = gaussian_kde([gaze_x,gaze_y])
-            x_grid, y_grid = np.mgrid[0:scale:scale*1j, 0:scale:scale*1j]
-            z = kde(np.vstack([x_grid.ravel(), y_grid.ravel()]))
-            plt.figure(figsize=(8, 4))
-            plt.contourf(x_grid, y_grid, z.reshape(x_grid.shape), cmap='Reds', alpha=0.7)
-            plt.colorbar()
-            plt.scatter(gaze_x,gaze_y, alpha=0.4)
-            #plt.imshow(np.rot90(background,k=2))
-            plt.xlim(0,scale)
-            plt.ylim(0,scale)
-            plt.savefig('./cloud_gaze_'+subj_name+'_'+str(event)+'.pdf')
-            plt.close()
-        
-            # Verifica che saccades non sia vuoto
-            if saccades.shape[0] != 0:
-                
-                # Conversione dei timestamp da nanosecondi a microsecondi
-                saccades['start timestamp [ns]'] /= 1000
-                saccades['end timestamp [ns]'] /= 1000
-                saccades['start timestamp [ns]'] = saccades['start timestamp [ns]'].astype('int')
-                saccades['end timestamp [ns]'] = saccades['end timestamp [ns]'].astype('int')
-                
-                # Calcola il tempo minimo e massimo
-                min_time = saccades['start timestamp [ns]'].min()
-                max_time = saccades['end timestamp [ns]'].max()
-                
-                # Crea la serie temporale dei saccades
-                time_series = np.zeros(max_time + 1 - min_time)
-                for _, row in saccades.iterrows():
-                    time_series[row['start timestamp [ns]'] - min_time : row['end timestamp [ns]'] - min_time + 1] = 1
-                
-                # Scala la serie temporale a un massimo di 1000 punti
-                max_points = 1000
-                if len(time_series) > max_points:
-                    factor = len(time_series) // max_points
-                    time_series = time_series[::factor]
-                    time = np.arange(len(time_series)) * factor
-                else:
-                    time = np.arange(len(time_series))
-                
-                # Plot della serie temporale ridotta
-                fig, ax = plt.subplots(figsize=(20, 5))
-                ax.plot(time, time_series, drawstyle='steps-post', marker='o', markersize=2)
-                ax.set_xlabel('Time')
-                ax.set_ylabel('Blink (0 = No, 1 = Yes)')
-                ax.set_title('Time Series of Saccades')
-                plt.savefig('./blink_'+subj_name+'_'+str(event)+'.pdf', dpi=72)
-                plt.close()
-                
-                # Plot di amplitude e velocity
-                plt.plot(saccades['amplitude [px]'])
-                plt.savefig('./amplitude_saccades_'+subj_name+'_'+str(event)+'.pdf', dpi=72)
-                plt.close()
-                
-                plt.plot(saccades['mean velocity [px/s]'])
-                plt.plot(saccades['peak velocity [px/s]'])
-                plt.savefig('./velocity_saccades_'+subj_name+'_'+str(event)+'.pdf', dpi=72)
-                plt.close()
-        except:
-            print('error in ',event)
 
-    def downsample_video(input_file, output_file, input_fps, output_fps):
-        cap = cv2.VideoCapture(input_file)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_file, fourcc, output_fps, (width, height))
 
-        frame_interval = int(input_fps / output_fps)
+def process_event(event_row, all_data, subj_name, output_dir):
+    """Main processing pipeline for a single event."""
+    event_name = event_row.get('name', event_row.name)
+    print(f"Elaborazione evento: {event_name} per il partecipante: {subj_name}")
 
-        for i in range(frame_count):
-            ret, frame = cap.read()
-            if not ret:
-                break
-            if i % frame_interval == 0:
-                out.write(frame)
+    timestamp = event_row['timestamp [ns]']
+    rec_id = event_row['recording id']
 
-        cap.release()
-        out.release()
+    # 1. Filter data for the current event
+    event_data = filter_data_by_event(all_data, timestamp, rec_id)
 
-    downsampled_video_file = './eyetracking_file/downsampled_video2.mp4'
-    downsample_video('./eyetracking_file/internal.mp4', downsampled_video_file, 200, 40)
-    pupillometry_data  = pd.read_csv('./eyetracking_file/3d_eye_states.csv')
-    time_series = pupillometry_data['pupil diameter left [mm]'].values.flatten()
+    # 2. Process gaze data to find movements
+    movements_df = process_gaze_movements(event_data['gaze'])
 
-    video_file1 = downsampled_video_file
-    cap1 = cv2.VideoCapture(video_file1)
+    # 3. Calculate summary features
+    results = calculate_summary_features(event_data, movements_df, subj_name, event_name)
 
-    video_file2 = './eyetracking_file/external.mp4'
-    cap2 = cv2.VideoCapture(video_file2)
+    # 4. Save results to a temporary file (or append to a list)
+    # This part is handled in the main loop to save a single file at the end.
 
-    fig, (video_axes1, video_axes2, time_series_axes) = plt.subplots(3, 1, figsize=(10, 8))
+    # 5. Generate all plots
+    generate_plots(event_data, movements_df, subj_name, event_name, output_dir)
+    
+    return results
 
-    ret1, frame1 = cap1.read()
-    frame_height1, frame_width1, _ = frame1.shape
 
-    ret2, frame2 = cap2.read()
-    frame_height2, frame_width2, _ = frame2.shape
+def downsample_video(input_file, output_file, input_fps, output_fps):
+    """Downsamples a video file to a lower FPS."""
+    cap = cv2.VideoCapture(str(input_file))
+    if not cap.isOpened():
+        print(f"Errore: Impossibile aprire il file video {input_file}")
+        return
 
-    video_axes1.imshow(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
-    video_axes1.axis('off')
-    video_axes2.imshow(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
-    video_axes2.axis('off')
-
-    window_size = 1000
-    initial_idx = np.arange(window_size)
-    time_series_plot, = time_series_axes.plot(initial_idx, time_series[initial_idx], 'b')
-    time_series_axes.set_xlabel('Frames (n)')
-    time_series_axes.set_ylabel('Diameter (mm)')
-    ball, = time_series_axes.plot([1], [time_series[0]], 'ro', markersize=10)
-    window_line, = time_series_axes.plot([0, window_size], [time_series[window_size // 2]] * 2, 'b--')
-
-    output_file = 'output_video.mp4'
-    fps = cap1.get(cv2.CAP_PROP_FPS)
-    output_size = (fig.canvas.get_width_height()[0], fig.canvas.get_width_height()[1])
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_file, fourcc, fps, output_size)
+    out = cv2.VideoWriter(str(output_file), fourcc, output_fps, (width, height))
 
-    def update(frame):
-        ret1, frame1 = cap1.read()
-        ret2, frame2 = cap2.read()
-        if not ret1 or not ret2:
+    frame_interval = int(input_fps / output_fps)
+
+    for i in range(frame_count):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if i % frame_interval == 0:
+            out.write(frame)
+
+    cap.release()
+    out.release()
+    print(f"Video sottocampionato in {output_file}")
+
+
+def create_analysis_video(data_dir: Path, output_dir: Path):
+    """Creates a video combining eye tracking, external view, and pupil diameter."""
+    print("Creazione video in corso...")
+    try:
+        # Downsample internal video
+        internal_video_path = data_dir / 'internal.mp4'
+        downsampled_video_path = output_dir / 'downsampled_internal_video.mp4'
+        downsample_video(internal_video_path, downsampled_video_path, 200, 40)
+
+        # Load data for video
+        pupillometry_data = pd.read_csv(data_dir / '3d_eye_states.csv')
+        time_series = pupillometry_data['pupil diameter left [mm]'].values.flatten()
+
+        cap1 = cv2.VideoCapture(str(downsampled_video_path))
+        cap2 = cv2.VideoCapture(str(data_dir / 'external.mp4'))
+
+        if not cap1.isOpened() or not cap2.isOpened():
+            print("Errore nell'apertura dei file video per l'animazione.")
             return
 
-        video_axes1.imshow(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
-        video_axes2.imshow(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
+        # Setup plot
+        fig, (video_axes1, video_axes2, time_series_axes) = plt.subplots(3, 1, figsize=(10, 8))
+        fig.tight_layout(pad=3.0)
 
-        i = frame
-        ball.set_data([i], [time_series[i]])
+        # Init video writer
+        output_video_path = output_dir / 'output_analysis_video.mp4'
+        fps = cap1.get(cv2.CAP_PROP_FPS)
+        w, h = fig.canvas.get_width_height()
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(str(output_video_path), fourcc, fps, (w, h))
 
-        idx_start = max(0, i - window_size // 2)
-        idx_end = min(len(time_series), i + window_size // 2)
-        idx = np.arange(idx_start, idx_end)
+        # Init plots
+        video_axes1.set_title("Vista Interna (Occhio)")
+        video_axes1.axis('off')
+        video_axes2.set_title("Vista Esterna")
+        video_axes2.axis('off')
+        time_series_axes.set_title("Serie Temporale Diametro Pupilla")
+        time_series_axes.set_xlabel('Frame (n)')
+        time_series_axes.set_ylabel('Diametro (mm)')
+        
+        num_frames = int(min(cap1.get(cv2.CAP_PROP_FRAME_COUNT), cap2.get(cv2.CAP_PROP_FRAME_COUNT), len(time_series)))
 
-        time_series_plot.set_data(idx, time_series[idx])
-        window_line.set_data([idx_start, idx_end], [time_series[i]] * 2)
+        # Manual loop to create video frames
+        for i in range(num_frames):
+            ret1, frame1 = cap1.read()
+            ret2, frame2 = cap2.read()
+            if not ret1 or not ret2:
+                break
+            
+            # Clear axes for new frame
+            video_axes1.clear()
+            video_axes2.clear()
+            time_series_axes.clear()
 
-        fig.canvas.draw()
+            # Redraw video frames
+            video_axes1.imshow(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
+            video_axes1.axis('off')
+            video_axes2.imshow(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
+            video_axes2.axis('off')
 
-        img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            # Redraw time series plot
+            window_size = 1000
+            idx_start = max(0, i - window_size // 2)
+            idx_end = min(len(time_series), i + window_size // 2)
+            idx = np.arange(idx_start, idx_end)
+            
+            time_series_axes.plot(idx, time_series[idx], 'b-')
+            time_series_axes.plot(i, time_series[i], 'ro', markersize=10) # Punto corrente
+            time_series_axes.set_xlim(idx_start, idx_end)
+            time_series_axes.set_ylim(np.nanmin(time_series) * 0.95, np.nanmax(time_series) * 1.05)
+            time_series_axes.set_xlabel('Frame (n)')
+            time_series_axes.set_ylabel('Diametro (mm)')
 
-        out.write(img)
+            # Draw figure and write to video
+            fig.canvas.draw()
+            img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            out.write(img)
+            
+            if (i+1) % 100 == 0:
+                print(f"  ...elaborato frame {i+1}/{num_frames}")
 
-        return video_axes1, video_axes2, time_series_plot, ball, window_line
+        # Release resources
+        cap1.release()
+        cap2.release()
+        out.release()
+        plt.close(fig)
+        print(f"Video di analisi salvato in {output_video_path}")
 
-    num_frames = int(min(cap1.get(cv2.CAP_PROP_FRAME_COUNT), cap2.get(cv2.CAP_PROP_FRAME_COUNT)))
-    ani = FuncAnimation(fig, update, frames=range(num_frames), interval=1000 / fps)
+    except FileNotFoundError as e:
+        print(f"Errore durante la creazione del video, file non trovato: {e}")
+    except Exception as e:
+        print(f"Si è verificato un errore imprevisto durante la creazione del video: {e}")
 
-    for frame in range(0,num_frames):
-        update(frame)
 
-    cap1.release()
-    cap2.release()
-    out.release()
+def run_analysis(subj_name='subj_01', data_dir_str='./eyetracking_file', output_dir_str='./results'):
+    """
+    Main function to run the complete analysis pipeline.
+    It processes each event, saves summary results and plots, and generates a final analysis video.
+    """
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.max_rows', 250)
+
+    data_dir = Path(data_dir_str)
+    output_dir = Path(output_dir_str)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        all_data = load_all_data(data_dir)
+    except FileNotFoundError:
+        return # Stop execution if essential files are missing
+
+    events_df = all_data['events']
+    all_results = []
+
+    # --- Process each event ---
+    for _, event_row in events_df.iterrows():
+        try:
+            event_results = process_event(event_row, all_data, subj_name, output_dir)
+            all_results.append(event_results)
+        except Exception as e:
+            event_name = event_row.get('name', event_row.name)
+            print(f"Impossibile elaborare l'evento '{event_name}'. Errore: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # --- Save aggregated results ---
+    if all_results:
+        results_df = pd.DataFrame(all_results)
+        results_filename = output_dir / f'summary_results_{subj_name}.csv'
+        results_df.to_csv(results_filename, index=False)
+        print(f"\nRisultati aggregati salvati in {results_filename}")
+
+    # --- Generate analysis video (runs on full data, not per event) ---
+    create_analysis_video(data_dir, output_dir)
+
+
+if __name__ == '__main__':
+    # Esempio di come eseguire lo script
+    # È possibile modificare questi parametri secondo necessità
+    SUBJECT_ID = 'subj_01'
+    DATA_DIRECTORY = './eyetracking_file'
+    RESULTS_DIRECTORY = f'./analysis_results_{SUBJECT_ID}'
+
+    run_analysis(
+        subj_name=SUBJECT_ID,
+        data_dir_str=DATA_DIRECTORY,
+        output_dir_str=RESULTS_DIRECTORY
+    )
