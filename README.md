@@ -3,11 +3,11 @@
 SPEED (LabSCoC Processing and Extraction of Eye-tracking Data) is a Python-based GUI application designed to streamline the processing and feature extraction of data acquired with Pupil Labs Neon eye trackers. Developed by the members and collaborators of the LabSCoC - Laboratorio di Scienze Cognitive e del Comportamento (Cognitive and Behavioural Science Lab) at the University of L'Aquila, SPEED simplifies the initial steps of eye-tracking data analysis.
 
 *Authors*
-Daniele Lozzi
-Ilaria Di Pompeo
-Martina Marcaccio
-Matias Ademaj
-Simone Migliore
+Daniele Lozzi,
+Ilaria Di Pompeo,
+Martina Marcaccio,
+Matias Ademaj,
+Simone Migliore,
 Giuseppe Curcio
 
 *Getting Started*
