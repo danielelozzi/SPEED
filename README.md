@@ -1,4 +1,4 @@
-# SPEED (v0.2) - Eye-Tracking Data Analysis Software
+# SPEED (abScoc Processing and Extraction of Eye tracking Data - v0.2) - Eye-Tracking Data Analysis Software
 
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)
 ![Tkinter](https://img.shields.io/badge/GUI-Tkinter-green.svg)
