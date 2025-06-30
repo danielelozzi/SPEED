@@ -130,7 +130,7 @@ This script contains the main algorithms for processing eye-tracking data.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the `LICENSE` file for details. (Note: You'll need to create a `LICENSE` file if you don't have one).
+This project is licensed under the MIT License - see the `LICENSE` file for details.
 
 ## 📞 Contact
 
