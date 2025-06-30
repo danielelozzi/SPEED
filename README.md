@@ -136,5 +136,25 @@ This project is licensed under the MIT License - see the `LICENSE` file for deta
 
 For questions or support, please visit the [Laboratorio di Scienze Cognitive e del Comportamento website](https://labscoc.wordpress.com/).
 
+## ✍️ How to Cite
+
+If you use this software for your research, please cite the following paper to support its development:
+
+**MDPI and ACS Style**
+
+Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Ademaj, M.; Migliore, S.; Curcio, G. SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. *NeuroSci* **2025**, *6*, 35. https://doi.org/10.3390/neurosci6020035
+
+**AMA Style**
+
+Lozzi D, Di Pompeo I, Marcaccio M, Ademaj M, Migliore S, Curcio G. SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. *NeuroSci*. 2025; 6(2):35. https://doi.org/10.3390/neurosci6020035
+
+**Chicago/Turabian Style**
+
+Lozzi, Daniele, Ilaria Di Pompeo, Martina Marcaccio, Matias Ademaj, Simone Migliore, and Giuseppe Curcio. 2025. "SPEED: A Graphical User Interface Software for Processing Eye Tracking Data" *NeuroSci* 6, no. 2: 35. https://doi.org/10.3390/neurosci6020035
+
+**APA Style**
+
+Lozzi, D., Di Pompeo, I., Marcaccio, M., Ademaj, M., Migliore, S., & Curcio, G. (2025). SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. *NeuroSci*, *6*(2), 35. https://doi.org/10.3390/neurosci6020035
+
 ---
 *Developed by Laboratorio di Scienze Cognitive e del Comportamento*
