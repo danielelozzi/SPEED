@@ -146,23 +146,11 @@ For questions or support, please visit the [Laboratorio di Scienze Cognitive e d
 
 ## ✍️ How to Cite
 
-If you use this software for your research, please cite the following paper to support its development:
+If you use this script in your research or work, please cite the following publications:
 
-**MDPI and ACS Style**
+Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Ademaj, M.; Migliore, S.; Curcio, G. SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. NeuroSci 2025, 6, 35. https://doi.org/10.3390/neurosci6020035
 
-Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Ademaj, M.; Migliore, S.; Curcio, G. SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. *NeuroSci* **2025**, *6*, 35. https://doi.org/10.3390/neurosci6020035
-
-**AMA Style**
-
-Lozzi D, Di Pompeo I, Marcaccio M, Ademaj M, Migliore S, Curcio G. SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. *NeuroSci*. 2025; 6(2):35. https://doi.org/10.3390/neurosci6020035
-
-**Chicago/Turabian Style**
-
-Lozzi, Daniele, Ilaria Di Pompeo, Martina Marcaccio, Matias Ademaj, Simone Migliore, and Giuseppe Curcio. 2025. "SPEED: A Graphical User Interface Software for Processing Eye Tracking Data" *NeuroSci* 6, no. 2: 35. https://doi.org/10.3390/neurosci6020035
-
-**APA Style**
-
-Lozzi, D., Di Pompeo, I., Marcaccio, M., Ademaj, M., Migliore, S., & Curcio, G. (2025). SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. *NeuroSci*, *6*(2), 35. https://doi.org/10.3390/neurosci6020035
+Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Alemanno, M.; Krüger, M.; Curcio, G.; Migliore, S. AI-Powered Analysis of Eye Tracker Data in Basketball Game. Sensors 2025, 25, 3572. https://doi.org/10.3390/s25113572
 
 ---
 *Developed by Laboratorio di Scienze Cognitive e del Comportamento*
