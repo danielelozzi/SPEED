@@ -1,4 +1,4 @@
-# SPEED (abScoc Processing and Extraction of Eye tracking Data - v0.3) 
+# SPEED (labScoc Processing and Extraction of Eye tracking Data - v0.3) 
 
 *EyeTracking Data Analysis Software*
 
