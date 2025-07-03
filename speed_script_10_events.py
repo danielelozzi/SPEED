@@ -1,498 +1,164 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import datetime
+import tkinter as tk
+from tkinter import filedialog, messagebox
 import os
-import math
-import cv2
-from scipy.signal import welch, spectrogram
-from scipy.stats import gaussian_kde
+import shutil
+import webbrowser
 from pathlib import Path
 
-# --- Constants ---
-SAMPLING_FREQ = 200  # Hz
-NS_TO_S = 1e9
+# Importa la funzione di analisi principale dallo script refattorizzato
+from speed_script_10_events import run_analysis # Import the main analysis function from the refactored script
 
+# --- Configurazione ---
+# Defines the standard file names that the analysis script expects
+REQUIRED_FILES = {
+    "events.csv": "Select the events CSV file",
+    "gaze.csv": "Select the gaze CSV file (enriched)",
+    "gaze_not_enr.csv": "Select the un-enriched gaze CSV file",
+    "3d_eye_states.csv": "Select the 3D eye states CSV file (pupil)",
+    "fixations.csv": "Select the fixations CSV file",
+    "blinks.csv": "Select the blinks CSV file",
+    "saccades.csv": "Select the saccades CSV file",
+    "internal.mp4": "Select the internal video (eye)",
+    "external.mp4": "Select the external video (scene)",
+}
 
-def euclidean_distance(x1, y1, x2, y2):
-    """Calculates euclidean distance between two points, works on scalars or series."""
-    return np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+# Files that are optional when 'un-enriched data only' is selected
+OPTIONAL_FOR_UNENRICHED = ["gaze.csv", "fixations.csv"]
 
-
-def load_all_data(data_dir: Path):
-    """Loads all necessary CSV files from the data directory."""
-    files_to_load = {
-        'events': 'events.csv',
-        'gaze': 'gaze.csv',
-        'gaze_not_enr': 'gaze_not_enr.csv',
-        'pupil': '3d_eye_states.csv',
-        'fixations': 'fixations.csv',
-        'blinks': 'blinks.csv',
-        'saccades': 'saccades.csv'
-    }
-    dataframes = {}
-    try:
-        for name, filename in files_to_load.items():
-            dataframes[name] = pd.read_csv(data_dir / filename)
-    except FileNotFoundError as e:
-        print(f"Errore: Un file dati richiesto non è stato trovato: {e}")
-        raise
-    return dataframes
-
-
-def filter_data_by_event(all_data, event_timestamp, rec_id):
-    """Filters all dataframes for a specific event based on timestamp and recording ID."""
-    event_data = {}
-    event_data['gaze'] = all_data['gaze'][
-        (all_data['gaze']['timestamp [ns]'] > event_timestamp) &
-        (all_data['gaze']['recording id'] == rec_id)
-    ].copy().reset_index(drop=True)
-
-    event_data['pupil'] = all_data['pupil'][
-        (all_data['pupil']['timestamp [ns]'] > event_timestamp)
-    ].copy().reset_index(drop=True)
-
-    event_data['fixations'] = all_data['fixations'][
-        (all_data['fixations']['start timestamp [ns]'] > event_timestamp) &
-        (all_data['fixations']['recording id'] == rec_id)
-    ].copy().reset_index(drop=True)
-
-    event_data['blinks'] = all_data['blinks'][
-        (all_data['blinks']['start timestamp [ns]'] > event_timestamp)
-    ].copy().reset_index(drop=True)
-
-    event_data['saccades'] = all_data['saccades'][
-        (all_data['saccades']['start timestamp [ns]'] > event_timestamp)
-    ].copy().reset_index(drop=True)
-    
-    # This data seems to be used for plotting only
-    event_data['gaze_not_enr'] = all_data['gaze_not_enr'][
-        (all_data['gaze_not_enr']['timestamp [ns]'] > event_timestamp)
-    ].copy().reset_index(drop=True)
-
-    return event_data
-
-
-def process_gaze_movements(gaze_df):
-    """Identifies and processes gaze movements (saccades) from gaze data."""
-    if gaze_df.empty:
-        return pd.DataFrame()
-
-    gaze_df['fixation id'].fillna(-1, inplace=True)
-    gaze_on_surface = gaze_df[gaze_df['gaze detected on surface'] == True].copy()
-    
-    if gaze_on_surface.empty:
-        return pd.DataFrame()
-
-    # Identify movements (periods where fixation id is -1)
-    is_movement = gaze_on_surface['fixation id'] == -1
-    movement_groups = (is_movement != is_movement.shift()).cumsum()
-    gaze_on_surface.loc[is_movement, 'movement_id'] = movement_groups[is_movement]
-
-    movements = []
-    movement_data = gaze_on_surface.dropna(subset=['movement_id'])
-    
-    for _, group in movement_data.groupby('movement_id'):
-        if len(group) < 2:
-            continue
-
-        start_row = group.iloc[0]
-        end_row = group.iloc[-1]
-
-        start_time = start_row['timestamp [ns]']
-        end_time = end_row['timestamp [ns]']
+class SpeedApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("SPEED v 0.3 - Laboratorio di Scienze Cognitive e del Comportamento")
         
-        start_pos = (start_row['gaze position on surface x [normalized]'], start_row['gaze position on surface y [normalized]'])
-        end_pos = (end_row['gaze position on surface x [normalized]'], end_row['gaze position on surface y [normalized]'])
+        self.file_entries = {}
+        
+        # --- GUI Setup ---
+        main_frame = tk.Frame(root, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Calculate total path length
-        x = group['gaze position on surface x [normalized]']
-        y = group['gaze position on surface y [normalized]']
-        total_displacement = euclidean_distance(x.shift(), y.shift(), x, y).sum()
+        # Participant Name
+        name_frame = tk.Frame(main_frame)
+        name_frame.pack(fill=tk.X, pady=5)
+        name_label = tk.Label(name_frame, text="Participant Name:", width=20, anchor='w')
+        name_label.pack(side=tk.LEFT)
+        self.name_entry = tk.Entry(name_frame)
+        self.name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Calculate effective displacement (start to end)
-        effective_displacement = euclidean_distance(start_pos[0], start_pos[1], end_pos[0], end_pos[1])
+        # Un-enriched Data Checkbox
+        self.unenriched_var = tk.BooleanVar()
+        self.unenriched_checkbox = tk.Checkbutton(main_frame, text="Analyze un-enriched data only (gaze.csv and fixations.csv become optional)", variable=self.unenriched_var, command=self.toggle_file_requirements)
+        self.unenriched_checkbox.pack(anchor='w', pady=5)
 
-        movements.append({
-            'movement_id': start_row['movement_id'],
-            'start_time': start_time,
-            'end_time': end_time,
-            'duration_ns': end_time - start_time,
-            'surface': start_row['gaze detected on surface'],
-            'total_displacement': total_displacement,
-            'start_pos': start_pos,
-            'end_pos': end_pos,
-            'effective_displacement': effective_displacement
-        })
+        # File Selection
+        files_frame = tk.LabelFrame(main_frame, text="Select Data Files", padx=5, pady=5)
+        files_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-    return pd.DataFrame(movements)
+        for i, (std_name, description) in enumerate(REQUIRED_FILES.items()):
+            row_frame = tk.Frame(files_frame)
+            row_frame.pack(fill=tk.X, pady=2)
+            
+            label = tk.Label(row_frame, text=f"{std_name}:", width=20, anchor='w')
+            label.pack(side=tk.LEFT)
+            
+            entry = tk.Entry(row_frame)
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            self.file_entries[std_name] = entry
 
+            button = tk.Button(row_frame, text="Browse...", command=lambda e=entry, d=description: self.select_file(e, d))
+            button.pack(side=tk.RIGHT)
+        
+        self.toggle_file_requirements() # Set initial state
 
-def calculate_summary_features(data, movements_df, subj_name, event_name):
-    """Calculates a dictionary of summary features from the processed data."""
-    fixations = data['fixations']
-    blinks = data['blinks']
-    pupil = data['pupil']
-    gaze = data['gaze']
+        # Start Button
+        run_button = tk.Button(main_frame, text="Start Analysis", command=self.run_analysis_process, font=('Helvetica', 10, 'bold'))
+        run_button.pack(pady=10)
+        
+        # Status Label
+        self.status_label = tk.Label(main_frame, text="", fg="blue")
+        self.status_label.pack(pady=5)
 
-    results = {'participant': subj_name, 'event': event_name}
+        # Lab Website Link
+        lab_link = tk.Label(main_frame, text="https://labscoc.wordpress.com/", fg="blue", cursor="hand2") # Lab website link
+        lab_link.pack(side=tk.BOTTOM, pady=(5, 10))
+        lab_link.bind("<Button-1>", lambda e: self.open_link("https://labscoc.wordpress.com/"))
 
-    # Fixation features
-    if not fixations.empty:
-        results.update({
-            'n_fixation': fixations['fixation id'].nunique(),
-            'fixation_avg_duration_ms': fixations['duration [ms]'].mean(),
-            'fixation_std_duration_ms': fixations['duration [ms]'].std(),
-            'fixation_avg_x': fixations['fixation x [normalized]'].mean(),
-            'fixation_std_x': fixations['fixation x [normalized]'].std(),
-            'fixation_avg_y': fixations['fixation y [normalized]'].mean(),
-            'fixation_std_y': fixations['fixation y [normalized]'].std(),
-        })
+    def toggle_file_requirements(self):
+        is_unenriched = self.unenriched_var.get()
+        for std_name in OPTIONAL_FOR_UNENRICHED:
+            entry_widget = self.file_entries[std_name]
+            if is_unenriched:
+                entry_widget.config(state=tk.DISABLED)
+                entry_widget.delete(0, tk.END) # Clear content when disabled
+            else:
+                entry_widget.config(state=tk.NORMAL)
 
-    # Blink features
-    if not blinks.empty:
-        results.update({
-            'n_blink': len(blinks),
-            'blink_avg_duration_ms': blinks['duration [ms]'].mean(),
-            'blink_std_duration_ms': blinks['duration [ms]'].std(),
-        })
+    def select_file(self, entry_widget, description):
+        file_path = filedialog.askopenfilename(title=description)
+        if file_path:
+            entry_widget.delete(0, tk.END)
+            entry_widget.insert(0, file_path)
 
-    # Pupillometry features
-    if not pupil.empty:
-        pupil_diam = pupil['pupil diameter left [mm]']
-        results.update({
-            'pupil_start_mm': pupil_diam.iloc[0],
-            'pupil_end_mm': pupil_diam.iloc[-1],
-            'pupil_avg_mm': pupil_diam.mean(),
-            'pupil_std_mm': pupil_diam.std(),
-        })
+    def open_link(self, url): # Opens the specified URL in the default web browser.
+        webbrowser.open_new(url)
 
-    # Movement features
-    if not movements_df.empty:
-        results.update({
-            'n_movements': len(movements_df),
-            'sum_time_movement_s': movements_df['duration_ns'].sum() / NS_TO_S,
-            'avg_time_movement_s': movements_df['duration_ns'].mean() / NS_TO_S,
-            'std_time_movement_s': movements_df['duration_ns'].std() / NS_TO_S,
-            'total_disp_sum': movements_df['total_displacement'].sum(),
-            'total_disp_avg': movements_df['total_displacement'].mean(),
-            'total_disp_std': movements_df['total_displacement'].std(),
-            'effective_disp_sum': movements_df['effective_displacement'].sum(),
-            'effective_disp_avg': movements_df['effective_displacement'].mean(),
-            'effective_disp_std': movements_df['effective_displacement'].std(),
-        })
-
-    # Gaze per fixation/movement
-    if not gaze.empty and not fixations.empty:
-        gaze_per_fix = gaze.groupby('fixation id').size().mean()
-        results['n_gaze_per_fixation_avg'] = gaze_per_fix
-
-    return results
-
-
-def generate_plots(data, movements_df, subj_name, event_name, output_dir: Path):
-    """Generates and saves all plots for the event."""
-    # Ensure output directory exists
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Plot Periodogram and Spectrogram
-    if not data['pupil'].empty:
-        ts = data['pupil']['pupil diameter left [mm]'].to_numpy()
-        freqs, Pxx = welch(ts, fs=SAMPLING_FREQ, nperseg=100)
-        plt.figure(figsize=(10, 5))
-        plt.semilogy(freqs, Pxx)
-        plt.title(f'Periodogramma - {subj_name} - {event_name}')
-        plt.xlabel('Frequenza [Hz]')
-        plt.ylabel('Densità spettrale di potenza [V^2/Hz]')
-        plt.grid(True)
-        plt.savefig(output_dir / f'periodogram_{subj_name}_{event_name}.pdf')
-        plt.close()
-
-        f, t, Sxx = spectrogram(ts, fs=SAMPLING_FREQ, nperseg=256, noverlap=50)
-        plt.figure(figsize=(10, 5))
-        plt.pcolormesh(t, f, 10 * np.log10(Sxx), shading='gouraud')
-        plt.title(f'Spettrogramma - {subj_name} - {event_name}')
-        plt.ylabel('Frequenza [Hz]')
-        plt.xlabel('Tempo [s]')
-        plt.colorbar(label='Potenza [dB]')
-        plt.savefig(output_dir / f'spectrogram_{subj_name}_{event_name}.pdf')
-        plt.close()
-
-    # Histograms
-    if not data['gaze_not_enr'].empty:
-        plt.hist(data['gaze_not_enr']['elevation [deg]'].dropna())
-        plt.title(f"Istogramma Elevazione Sguardo - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'hist_gaze_{subj_name}_{event_name}.pdf')
-        plt.close()
-
-    if not data['pupil'].empty:
-        plt.hist(data['pupil']['pupil diameter left [mm]'].dropna())
-        plt.title(f"Istogramma Diametro Pupilla - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'hist_pupillometry_{subj_name}_{event_name}.pdf')
-        plt.close()
-
-    if not data['fixations'].empty:
-        plt.hist(data['fixations']['duration [ms]'].dropna())
-        plt.title(f"Istogramma Durata Fissazioni - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'hist_fixations_{subj_name}_{event_name}.pdf')
-        plt.close()
-
-    if not data['blinks'].empty:
-        plt.hist(data['blinks']['duration [ms]'].dropna())
-        plt.title(f"Istogramma Durata Blink - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'hist_blinks_{subj_name}_{event_name}.pdf')
-        plt.close()
-
-    if not data['saccades'].empty:
-        plt.hist(data['saccades']['duration [ms]'].dropna())
-        plt.title(f"Istogramma Durata Saccadi - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'hist_saccades_{subj_name}_{event_name}.pdf')
-        plt.close()
-
-    # Path graphs
-    if not data['gaze_not_enr'].empty:
-        plt.plot(data['gaze_not_enr']['gaze x [px]'], data['gaze_not_enr']['gaze y [px]'], marker='o', linestyle='-', color='green')
-        plt.title(f"Percorso Sguardo - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'path_gaze_{subj_name}_{event_name}.pdf')
-        plt.close()
-
-    if not data['fixations'].empty:
-        plt.plot(data['fixations']['fixation x [normalized]'], data['fixations']['fixation y [normalized]'], marker='o', linestyle='-', color='green')
-        plt.title(f"Percorso Fissazioni - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'path_fixation_{subj_name}_{event_name}.pdf')
-        plt.close()
-
-    # Movement paths
-    if not movements_df.empty:
-        for _, row in movements_df.iterrows():
-            start_x, start_y = row['start_pos']
-            end_x, end_y = row['end_pos']
-            plt.plot([start_x, end_x], [start_y, end_y], linestyle='-', c='b', alpha=0.5)
-            plt.scatter([start_x, end_x], [start_y, end_y], marker='o', c='b', s=10)
-        plt.title(f"Percorso Movimenti Totali - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'total_mov_{subj_name}_{event_name}.pdf')
-        plt.close()
-
-    # Heatmaps
-    scale = 1000
-    if not data['fixations'].empty:
-        fix_x = data['fixations']['fixation x [normalized]'].dropna() * scale
-        fix_y = data['fixations']['fixation y [normalized]'].dropna() * scale
-        if len(fix_x) > 1:
-            kde = gaussian_kde([fix_x, fix_y])
-            x_grid, y_grid = np.mgrid[0:scale:complex(scale), 0:scale:complex(scale)]
-            z = kde(np.vstack([x_grid.ravel(), y_grid.ravel()]))
-            plt.figure(figsize=(8, 4))
-            plt.contourf(x_grid, y_grid, z.reshape(x_grid.shape), cmap='Reds', alpha=0.7)
-            plt.colorbar()
-            plt.scatter(fix_x, fix_y, alpha=0.4, s=5)
-            plt.xlim(0, scale)
-            plt.ylim(0, scale)
-            plt.title(f"Mappa di Calore Fissazioni - {subj_name} - {event_name}")
-            plt.savefig(output_dir / f'cloud_fix_{subj_name}_{event_name}.pdf')
-            plt.close()
-
-
-def process_event(event_row, all_data, subj_name, output_dir):
-    """Main processing pipeline for a single event."""
-    event_name = event_row.get('name', event_row.name)
-    print(f"Elaborazione evento: {event_name} per il partecipante: {subj_name}")
-
-    timestamp = event_row['timestamp [ns]']
-    rec_id = event_row['recording id']
-
-    # 1. Filter data for the current event
-    event_data = filter_data_by_event(all_data, timestamp, rec_id)
-
-    # 2. Process gaze data to find movements
-    movements_df = process_gaze_movements(event_data['gaze'])
-
-    # 3. Calculate summary features
-    results = calculate_summary_features(event_data, movements_df, subj_name, event_name)
-
-    # 4. Save results to a temporary file (or append to a list)
-    # This part is handled in the main loop to save a single file at the end.
-
-    # 5. Generate all plots
-    generate_plots(event_data, movements_df, subj_name, event_name, output_dir)
-    
-    return results
-
-
-def downsample_video(input_file, output_file, input_fps, output_fps):
-    """Downsamples a video file to a lower FPS."""
-    cap = cv2.VideoCapture(str(input_file))
-    if not cap.isOpened():
-        print(f"Errore: Impossibile aprire il file video {input_file}")
-        return
-
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(output_file), fourcc, output_fps, (width, height))
-
-    frame_interval = int(input_fps / output_fps)
-
-    for i in range(frame_count):
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if i % frame_interval == 0:
-            out.write(frame)
-
-    cap.release()
-    out.release()
-    print(f"Video sottocampionato in {output_file}")
-
-
-def create_analysis_video(data_dir: Path, output_dir: Path):
-    """Creates a video combining eye tracking, external view, and pupil diameter."""
-    print("Creazione video in corso...")
-    try:
-        # Downsample internal video
-        internal_video_path = data_dir / 'internal.mp4'
-        downsampled_video_path = output_dir / 'downsampled_internal_video.mp4'
-        downsample_video(internal_video_path, downsampled_video_path, 200, 40)
-
-        # Load data for video
-        pupillometry_data = pd.read_csv(data_dir / '3d_eye_states.csv')
-        time_series = pupillometry_data['pupil diameter left [mm]'].values.flatten()
-
-        cap1 = cv2.VideoCapture(str(downsampled_video_path))
-        cap2 = cv2.VideoCapture(str(data_dir / 'external.mp4'))
-
-        if not cap1.isOpened() or not cap2.isOpened():
-            print("Errore nell'apertura dei file video per l'animazione.")
+    def run_analysis_process(self):
+        subj_name = self.name_entry.get().strip()
+        if not subj_name:
+            messagebox.showerror("Error", "Please enter a participant name.")
             return
 
-        # Setup plot
-        fig, (video_axes1, video_axes2, time_series_axes) = plt.subplots(3, 1, figsize=(10, 8))
-        fig.tight_layout(pad=3.0)
+        is_unenriched = self.unenriched_var.get()
+        selected_files = {std_name: entry.get().strip() for std_name, entry in self.file_entries.items()}
 
-        # Init video writer
-        output_video_path = output_dir / 'output_analysis_video.mp4'
-        fps = cap1.get(cv2.CAP_PROP_FPS)
-        w, h = fig.canvas.get_width_height()
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(str(output_video_path), fourcc, fps, (w, h))
+        # Check that all *required* files have been selected
+        missing_files = []
+        for std_name, path in selected_files.items():
+            if not path:
+                if is_unenriched and std_name in OPTIONAL_FOR_UNENRICHED:
+                    continue # Skip if optional and un-enriched mode is active
+                else:
+                    missing_files.append(std_name)
 
-        # Init plots
-        video_axes1.set_title("Vista Interna (Occhio)")
-        video_axes1.axis('off')
-        video_axes2.set_title("Vista Esterna")
-        video_axes2.axis('off')
-        time_series_axes.set_title("Serie Temporale Diametro Pupilla")
-        time_series_axes.set_xlabel('Frame (n)')
-        time_series_axes.set_ylabel('Diametro (mm)')
-        
-        num_frames = int(min(cap1.get(cv2.CAP_PROP_FRAME_COUNT), cap2.get(cv2.CAP_PROP_FRAME_COUNT), len(time_series)))
+        if missing_files:
+            messagebox.showerror("Error", f"Please select all required files. Missing: {', '.join(missing_files)}")
+            return
 
-        # Manual loop to create video frames
-        for i in range(num_frames):
-            ret1, frame1 = cap1.read()
-            ret2, frame2 = cap2.read()
-            if not ret1 or not ret2:
-                break
-            
-            # Clear axes for new frame
-            video_axes1.clear()
-            video_axes2.clear()
-            time_series_axes.clear()
-
-            # Redraw video frames
-            video_axes1.imshow(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
-            video_axes1.axis('off')
-            video_axes2.imshow(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
-            video_axes2.axis('off')
-
-            # Redraw time series plot
-            window_size = 1000
-            idx_start = max(0, i - window_size // 2)
-            idx_end = min(len(time_series), i + window_size // 2)
-            idx = np.arange(idx_start, idx_end)
-            
-            time_series_axes.plot(idx, time_series[idx], 'b-')
-            time_series_axes.plot(i, time_series[i], 'ro', markersize=10) # Punto corrente
-            time_series_axes.set_xlim(idx_start, idx_end)
-            time_series_axes.set_ylim(np.nanmin(time_series) * 0.95, np.nanmax(time_series) * 1.05)
-            time_series_axes.set_xlabel('Frame (n)')
-            time_series_axes.set_ylabel('Diametro (mm)')
-
-            # Draw figure and write to video
-            fig.canvas.draw()
-            img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-            img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-            out.write(img)
-            
-            if (i+1) % 100 == 0:
-                print(f"  ...elaborato frame {i+1}/{num_frames}")
-
-        # Release resources
-        cap1.release()
-        cap2.release()
-        out.release()
-        plt.close(fig)
-        print(f"Video di analisi salvato in {output_video_path}")
-
-    except FileNotFoundError as e:
-        print(f"Errore durante la creazione del video, file non trovato: {e}")
-    except Exception as e:
-        print(f"Si è verificato un errore imprevisto durante la creazione del video: {e}")
-
-
-def run_analysis(subj_name='subj_01', data_dir_str='./eyetracking_file', output_dir_str='./results'):
-    """
-    Main function to run the complete analysis pipeline.
-    It processes each event, saves summary results and plots, and generates a final analysis video.
-    """
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.max_rows', 250)
-
-    data_dir = Path(data_dir_str)
-    output_dir = Path(output_dir_str)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        all_data = load_all_data(data_dir)
-    except FileNotFoundError:
-        return # Stop execution if essential files are missing
-
-    events_df = all_data['events']
-    all_results = []
-
-    # --- Process each event ---
-    for _, event_row in events_df.iterrows():
         try:
-            event_results = process_event(event_row, all_data, subj_name, output_dir)
-            all_results.append(event_results)
+            self.status_label.config(text=f"Preparing folders for {subj_name}...", fg="blue")
+            self.root.update_idletasks()
+
+            # Define output and data folders
+            base_output_dir = Path(f'./analysis_results_{subj_name}')
+            data_dir = base_output_dir / 'eyetracking_file'
+            data_dir.mkdir(parents=True, exist_ok=True)
+
+            self.status_label.config(text="Copying files...")
+            self.root.update_idletasks()
+
+            # Copy selected files to the data folder with standard names
+            for std_name, source_path_str in selected_files.items():
+                if source_path_str: # Only copy if a path was provided
+                    shutil.copy(Path(source_path_str), data_dir / std_name)
+                elif not is_unenriched and std_name in OPTIONAL_FOR_UNENRICHED:
+                     # If not un-enriched and an optional file is missing, this should have been caught by missing_files check
+                     pass # Already handled by the earlier check
+
+            self.status_label.config(text="Avvio dell'analisi... L'operazione potrebbe richiedere tempo.")
+            self.root.update_idletasks()
+            
+            # Pass the un_enriched_mode flag to the analysis script
+            run_analysis(subj_name=subj_name, data_dir_str=str(data_dir), output_dir_str=str(base_output_dir), un_enriched_mode=is_unenriched)
+            
+            self.status_label.config(text="Analysis complete!", fg="green")
+            messagebox.showinfo("Success", f"Analysis for {subj_name} has finished.\nResults are located in '{base_output_dir}'.")
+
         except Exception as e:
-            event_name = event_row.get('name', event_row.name)
-            print(f"Impossibile elaborare l'evento '{event_name}'. Errore: {e}")
+            self.status_label.config(text="An error occurred.", fg="red")
+            messagebox.showerror("Error", f"An error occurred during the process:\n{e}")
             import traceback
             traceback.print_exc()
 
-    # --- Save aggregated results ---
-    if all_results:
-        results_df = pd.DataFrame(all_results)
-        results_filename = output_dir / f'summary_results_{subj_name}.csv'
-        results_df.to_csv(results_filename, index=False)
-        print(f"\nRisultati aggregati salvati in {results_filename}")
-
-    # --- Generate analysis video (runs on full data, not per event) ---
-    create_analysis_video(data_dir, output_dir)
-
-
 if __name__ == '__main__':
-    # Esempio di come eseguire lo script
-    # È possibile modificare questi parametri secondo necessità
-    SUBJECT_ID = 'subj_01'
-    DATA_DIRECTORY = './eyetracking_file'
-    RESULTS_DIRECTORY = f'./analysis_results_{SUBJECT_ID}'
-
-    run_analysis(
-        subj_name=SUBJECT_ID,
-        data_dir_str=DATA_DIRECTORY,
-        output_dir_str=RESULTS_DIRECTORY
-    )
+    root = tk.Tk()
+    app = SpeedApp(root)
+    root.mainloop()

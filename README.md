@@ -1,4 +1,4 @@
-# SPEED (abScoc Processing and Extraction of Eye tracking Data - v0.2) 
+# SPEED (abScoc Processing and Extraction of Eye tracking Data - v0.3) 
 
 *EyeTracking Data Analysis Software*
 
@@ -8,9 +8,12 @@
 
 ## 🎯 Overview
 
-SPEED (v0.2) is a comprehensive eye-tracking data analysis software developed by the [Laboratorio di Scienze Cognitive e del Comportamento](https://labscoc.wordpress.com/). It provides a user-friendly Graphical User Interface (GUI) for processing raw eye-tracking data, extracting meaningful features, generating various visualizations, and creating an integrated analysis video.
+SPEED (v0.3) is a comprehensive eye-tracking data analysis software developed by the [Laboratorio di Scienze Cognitive e del Comportamento](https://labscoc.wordpress.com/). It provides a user-friendly Graphical User Interface (GUI) for processing raw eye-tracking data, extracting meaningful features, generating various visualizations, and creating an integrated analysis video.
 
 The software is designed to streamline the analysis workflow for researchers working with eye-tracking data, particularly from Pupil Labs devices (though adaptable if data formats match).
+
+**Nuove Funzionalità in v0.3:**
+Questa versione introduce la capacità di analizzare dati di eye-tracking anche in assenza di un "arricchimento" completo (cioè, senza le colonne che indicano se lo sguardo è rilevato su una superficie o l'ID della fissazione). Questo permette una maggiore flessibilità per set di dati che non includono queste metriche avanzate.
 
 ## ✨ Features
 
@@ -18,17 +21,19 @@ The software is designed to streamline the analysis workflow for researchers wor
 * **Participant Management:** Specify a participant name for organized output.
 * **Automated Data Preparation:** Copies and renames input files to standard formats in a dedicated `eyetracking_file` directory.
 * **Event-Based Analysis:** Processes data segmented by events defined in `events.csv`.
+* **Supporto Dati Non Arricchiti:** Nuova opzione nella GUI per indicare l'analisi di dati "non arricchiti". Quando questa opzione è selezionata, i file `gaze.csv` (arricchito) e `fixations.csv` diventano opzionali, e l'analisi si adatta per calcolare solo le metriche e generare i plot possibili con i dati disponibili (es. pupillometria, blinks, saccadi, percorsi sguardo base).
 * **Feature Extraction:** Calculates key metrics for:
-    * Fixations (number, duration, position)
+    * Fixations (number, duration, position) - *Disponibile solo con dati arricchiti.*
     * Blinks (number, duration)
     * Pupillometry (start, end, average, std diameter)
-    * Gaze Movements (number, duration, displacement)
+    * Gaze Movements (number, duration, displacement) - *Disponibile solo con dati arricchiti.*
 * **Comprehensive Visualizations (PDF):**
     * Pupil diameter periodograms and spectrograms.
     * Histograms for gaze elevation, pupil diameter, fixation duration, blink duration, and saccade duration.
     * Gaze path and fixation path plots.
     * Heatmaps of fixation density.
     * Movement path plots.
+    * *Nota: I plot relativi a fissazioni, heatmaps e movimenti sono generati solo se si utilizzano dati arricchiti o se le colonne necessarie sono presenti nei dati non arricchiti.*
 * **Integrated Analysis Video (MP4):** Combines internal (eye) and external (scene) video feeds with a real-time pupil diameter time series plot.
 * **Summary Results:** Aggregates all calculated features into a single `summary_results_<participant_name>.csv` file.
 * **Error Handling:** Provides informative messages for missing files or processing errors.
@@ -37,17 +42,17 @@ The software is designed to streamline the analysis workflow for researchers wor
 
 The software expects a specific set of files, which will be copied into the `eyetracking_file` subdirectory within your output folder and renamed to the standard names if they differ:
 
-| Standard Filename    | Description                                   | Format |
-| :------------------- | :-------------------------------------------- | :----- |
-| `events.csv`         | Eye-tracking events data                      | CSV    |
-| `gaze.csv`           | Enriched gaze data                            | CSV    |
-| `gaze_not_enr.csv`   | Un-enriched gaze data (for plotting)          | CSV    |
-| `3d_eye_states.csv`  | 3D eye states data (pupil diameter)           | CSV    |
-| `fixations.csv`      | Detected fixations data                       | CSV    |
-| `blinks.csv`         | Detected blinks data                          | CSV    |
-| `saccades.csv`       | Detected saccades data                        | CSV    |
-| `internal.mp4`       | Video feed from the internal (eye) camera     | MP4    |
-| `external.mp4`       | Video feed from the external (scene) camera   | MP4    |
+| Standard Filename | Description | Format | Obbligatorio (modalità arricchita) | Obbligatorio (modalità non arricchita) |
+| :---------------- | :-------------------------------------------- | :----- | :--------------------------------- | :--------------------------------------- |
+| `events.csv`      | Eye-tracking events data                      | CSV    | Sì                                 | Sì                                       |
+| `gaze.csv`        | Enriched gaze data                            | CSV    | Sì                                 | No                                       |
+| `gaze_not_enr.csv`| Un-enriched gaze data (for plotting)          | CSV    | Sì                                 | Sì                                       |
+| `3d_eye_states.csv`| 3D eye states data (pupil diameter)         | CSV    | Sì                                 | Sì                                       |
+| `fixations.csv`   | Detected fixations data                     | CSV    | Sì                                 | No                                       |
+| `blinks.csv`      | Detected blinks data                        | CSV    | Sì                                 | Sì                                       |
+| `saccades.csv`    | Detected saccades data                      | CSV    | Sì                                 | Sì                                       |
+| `internal.mp4`    | Video feed from the internal (eye) camera     | MP4    | Sì                                 | Sì                                       |
+| `external.mp4`    | Video feed from the external (scene) camera   | MP4    | Sì                                 | Sì                                       |
 
 ## 🚀 Getting Started
 
@@ -75,11 +80,14 @@ The software expects a specific set of files, which will be copied into the `eye
 
 1.  **Run the GUI:**
     ```bash
-    python SPEED_0_2_gui.py
+    python SPEED_0_3_gui.py
     ```
 2.  **Enter Participant Name:** In the GUI, type the name of the participant (e.g., `subj_001`).
-3.  **Select Files:** Click "Browse..." next to each required file type (`events.csv`, `gaze.csv`, etc.) and select the corresponding file from your system.
-4.  **Start Analysis:** Click the "Start Analysis" button.
+3.  **Select Analysis Mode:**
+    * **"Analyze un-enriched data only"**: Selezionare questa checkbox se si desidera eseguire l'analisi solo con dati non arricchiti. In questo caso, i campi per `gaze.csv` e `fixations.csv` diventeranno disabilitati e la loro selezione non sarà richiesta.
+    * **Deselezionato (default)**: Se i dati sono arricchiti e si desidera un'analisi completa, lasciare questa checkbox deselezionata. Sarà necessario fornire tutti i file richiesti, inclusi `gaze.csv` e `fixations.csv`.
+4.  **Select Files:** Click "Browse..." next to each required file type (`events.csv`, `gaze.csv`, etc.) and select the corresponding file from your system.
+5.  **Start Analysis:** Click the "Start Analysis" button.
 
 The GUI will show status updates. Once completed, a success message will appear.
 
@@ -96,9 +104,9 @@ This directory will contain:
 
 ## 🛠️ Project Structure
 
-├── SPEED_0_2_gui.py           # The Graphical User Interface application
+├── SPEED_0_3_gui.py           # The Graphical User Interface application (Updated for v0.3)
 
-├── speed_script_10_events.py  # The core eye-tracking data analysis logic
+├── speed_script_10_events.py  # The core eye-tracking data analysis logic (Updated for v0.3)
 
 ├── README.md                  # This documentation file
 
@@ -110,14 +118,14 @@ This script contains the main algorithms for processing eye-tracking data.
 
 ### Key Functions:
 
-* `load_all_data()`: Loads all necessary CSV files.
-* `filter_data_by_event()`: Filters data for a specific event based on timestamps.
-* `process_gaze_movements()`: Identifies and quantifies periods of gaze movement (non-fixations).
-* `calculate_summary_features()`: Computes various statistical measures for fixations, blinks, pupil diameter, and movements.
-* `generate_plots()`: Creates and saves various types of plots (histograms, paths, heatmaps, spectral analysis).
+* `load_all_data()`: Loads all necessary CSV files, adapting based on `un_enriched_mode`.
+* `filter_data_by_event()`: Filters data for a specific event based on timestamps and recording ID, adapting for `un_enriched_mode`.
+* `process_gaze_movements()`: Identifies and quantifies periods of gaze movement (non-fixations). *Skipped in `un_enriched_mode`.*
+* `calculate_summary_features()`: Computes various statistical measures for fixations, blinks, pupil diameter, and movements, adapting based on `un_enriched_mode`.
+* `generate_plots()`: Creates and saves various types of plots (histograms, paths, heatmaps, spectral analysis), selectively generating plots based on `un_enriched_mode` and data availability.
 * `downsample_video()`: Utility function to reduce video frame rate.
 * `create_analysis_video()`: Combines video feeds and pupil time series into an integrated output video.
-* `run_analysis()`: The orchestrator function that drives the entire analysis pipeline, called by the GUI.
+* `run_analysis()`: The orchestrator function that drives the entire analysis pipeline, called by the GUI, now accepting the `un_enriched_mode` flag.
 
 ## Authors
 
