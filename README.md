@@ -84,8 +84,8 @@ The software expects a specific set of files, which will be copied into the `eye
     ```
 2.  **Enter Participant Name:** In the GUI, type the name of the participant (e.g., `subj_001`).
 3.  **Select Analysis Mode:**
-    * **"Analyze un-enriched data only"**: Selezionare questa checkbox se si desidera eseguire l'analisi solo con dati non arricchiti. In questo caso, i campi per `gaze.csv` e `fixations.csv` diventeranno disabilitati e la loro selezione non sarà richiesta.
-    * **Deselezionato (default)**: Se i dati sono arricchiti e si desidera un'analisi completa, lasciare questa checkbox deselezionata. Sarà necessario fornire tutti i file richiesti, inclusi `gaze.csv` e `fixations.csv`.
+    * **"Analyze un-enriched data only"**: Select this checkbox if you want to run the analysis only with unenriched data. In this case, the fields for `gaze.csv` and `fixations.csv` will become disabled and their selection will not be required.
+*   **Unchecked (default)**: If your data is enriched and you want a full analysis, leave this checkbox unchecked. You will need to provide all the required files, including `gaze.csv` and `fixations.csv`.
 4.  **Select Files:** Click "Browse..." next to each required file type (`events.csv`, `gaze.csv`, etc.) and select the corresponding file from your system.
 5.  **Start Analysis:** Click the "Start Analysis" button.
 
