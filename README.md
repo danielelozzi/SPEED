@@ -12,8 +12,8 @@ SPEED (v0.3) is a comprehensive eye-tracking data analysis software developed by
 
 The software is designed to streamline the analysis workflow for researchers working with eye-tracking data, particularly from Pupil Labs devices (though adaptable if data formats match).
 
-**Nuove Funzionalità in v0.3:**
-Questa versione introduce la capacità di analizzare dati di eye-tracking anche in assenza di un "arricchimento" completo (cioè, senza le colonne che indicano se lo sguardo è rilevato su una superficie o l'ID della fissazione). Questo permette una maggiore flessibilità per set di dati che non includono queste metriche avanzate.
+**New Features in v0.3:**
+This release introduces the ability to analyze eye-tracking data even without full "enrichment" (i.e., without columns indicating whether gaze is detected on a surface or fixation ID). This allows for greater flexibility for datasets that do not include these advanced metrics.
 
 ## ✨ Features
 
