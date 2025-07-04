@@ -146,7 +146,7 @@ For questions or support, please visit the [Laboratorio di Scienze Cognitive e d
 
 ## ✍️ How to Cite
 
-If you use this script in your research or work, please cite the following publications:
+*If you use this script in your research or work, please cite the following publications:*
 
 Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Ademaj, M.; Migliore, S.; Curcio, G. SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. NeuroSci 2025, 6, 35. https://doi.org/10.3390/neurosci6020035
 
