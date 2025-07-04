@@ -21,19 +21,19 @@ This release introduces the ability to analyze eye-tracking data even without fu
 * **Participant Management:** Specify a participant name for organized output.
 * **Automated Data Preparation:** Copies and renames input files to standard formats in a dedicated `eyetracking_file` directory.
 * **Event-Based Analysis:** Processes data segmented by events defined in `events.csv`.
-* **Supporto Dati Non Arricchiti:** Nuova opzione nella GUI per indicare l'analisi di dati "non arricchiti". Quando questa opzione è selezionata, i file `gaze.csv` (arricchito) e `fixations.csv` diventano opzionali, e l'analisi si adatta per calcolare solo le metriche e generare i plot possibili con i dati disponibili (es. pupillometria, blinks, saccadi, percorsi sguardo base).
+* **Unenriched Data Support:** New GUI option to indicate analysis of "unenriched" data. When this option is selected, the `gaze.csv` (enriched) and `fixations.csv` files become optional, and the analysis defaults to only compute metrics and generate plots that are possible with the available data (e.g. pupillometry, blinks, saccades, baseline gaze paths).
 * **Feature Extraction:** Calculates key metrics for:
     * Fixations (number, duration, position) - *Disponibile solo con dati arricchiti.*
     * Blinks (number, duration)
     * Pupillometry (start, end, average, std diameter)
-    * Gaze Movements (number, duration, displacement) - *Disponibile solo con dati arricchiti.*
+    * Gaze Movements (number, duration, displacement) - *Only available with enriched data.*
 * **Comprehensive Visualizations (PDF):**
     * Pupil diameter periodograms and spectrograms.
     * Histograms for gaze elevation, pupil diameter, fixation duration, blink duration, and saccade duration.
     * Gaze path and fixation path plots.
     * Heatmaps of fixation density.
     * Movement path plots.
-    * *Nota: I plot relativi a fissazioni, heatmaps e movimenti sono generati solo se si utilizzano dati arricchiti o se le colonne necessarie sono presenti nei dati non arricchiti.*
+* *Note: Fixation, heatmap and movement plots are only generated if enriched data is used or if the required columns are present in the unenriched data.*
 * **Integrated Analysis Video (MP4):** Combines internal (eye) and external (scene) video feeds with a real-time pupil diameter time series plot.
 * **Summary Results:** Aggregates all calculated features into a single `summary_results_<participant_name>.csv` file.
 * **Error Handling:** Provides informative messages for missing files or processing errors.
@@ -42,17 +42,19 @@ This release introduces the ability to analyze eye-tracking data even without fu
 
 The software expects a specific set of files, which will be copied into the `eyetracking_file` subdirectory within your output folder and renamed to the standard names if they differ:
 
-| Standard Filename | Description | Format | Obbligatorio (modalità arricchita) | Obbligatorio (modalità non arricchita) |
+| Standard Filename | Description | Format | Required (enriched mode) | Required (non-enriched mode) |
 | :---------------- | :-------------------------------------------- | :----- | :--------------------------------- | :--------------------------------------- |
-| `events.csv`      | Eye-tracking events data                      | CSV    | Sì                                 | Sì                                       |
-| `gaze.csv`        | Enriched gaze data                            | CSV    | Sì                                 | No                                       |
-| `gaze_not_enr.csv`| Un-enriched gaze data (for plotting)          | CSV    | Sì                                 | Sì                                       |
-| `3d_eye_states.csv`| 3D eye states data (pupil diameter)         | CSV    | Sì                                 | Sì                                       |
-| `fixations.csv`   | Detected fixations data                     | CSV    | Sì                                 | No                                       |
-| `blinks.csv`      | Detected blinks data                        | CSV    | Sì                                 | Sì                                       |
-| `saccades.csv`    | Detected saccades data                      | CSV    | Sì                                 | Sì                                       |
-| `internal.mp4`    | Video feed from the internal (eye) camera     | MP4    | Sì                                 | Sì                                       |
-| `external.mp4`    | Video feed from the external (scene) camera   | MP4    | Sì                                 | Sì                                       |
+| `events.csv`      | Eye-tracking events data                      | CSV    | Yes                                | Yes      
+|
+| `gaze.csv`        | Enriched gaze data                            | CSV    | Yes     
+| No                                       |
+| `gaze_not_enr.csv`| Un-enriched gaze data (for plotting)          | CSV    | Yes | Yes|
+| `3d_eye_states.csv`| 3D eye states data (pupil diameter)         | CSV    | Yes                                 | Yes                                      |
+| `fixations.csv`   | Detected fixations data                     | CSV    | Yes | No                                       |
+| `blinks.csv`      | Detected blinks data                        | CSV    | Yes | Yes                                      |
+| `saccades.csv`    | Detected saccades data                      | CSV    | Yes                                 | Yes                                       |
+| `internal.mp4`    | Video feed from the internal (eye) camera     | MP4    | Yes                                 | Yes                                      |
+| `external.mp4`    | Video feed from the external (scene) camera   | MP4    | Yes                                | Yes                                      |
 
 ## 🚀 Getting Started
 
