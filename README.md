@@ -129,12 +129,12 @@ This script contains the main algorithms for processing eye-tracking data.
 
 ## Authors
 
-* Daniele Lozzi
-* Ilaria Di Pompeo
+* Dr. Daniele Lozzi
+* Dr. Ilaria Di Pompeo
 * Martina Marcaccio
 * Matias Ademaj
-* Simone Migliore
-* Giuseppe Curcio
+* Dr. Simone Migliore
+* Prof. Giuseppe Curcio
 
 ## 📄 License
 
