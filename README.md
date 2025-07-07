@@ -99,3 +99,52 @@ This directory will contain:
 -----
 
 ## 🛠️ Project Structure
+
+.
+├── SPEED_0_4_gui.py           # The Graphical User Interface application
+├── speed_script_events.py  # The core eye-tracking data analysis logic
+└── README.md                  # This documentation file
+
+
+-----
+
+## 🧠 Core Logic (`speed_script_events.py`)
+
+This script contains the main algorithms for processing eye-tracking data.
+
+### Key Functions:
+
+* `load_all_data()`: Loads all necessary CSV files, adapting based on `un_enriched_mode`.
+* `filter_data_by_event()`: Filters data for a specific event based on timestamps.
+* `process_gaze_movements()`: Identifies and quantifies periods of gaze movement (non-fixations). *Skipped in `un_enriched_mode`*.
+* `calculate_summary_features()`: Computes various statistical measures, adapting based on `un_enriched_mode`.
+* `generate_plots()`: Creates and saves all plots, selectively generating them based on data availability.
+* `create_analysis_video()`: Combines video feeds and pupil time series into an integrated output video.
+* `run_analysis()`: The main function that drives the entire analysis pipeline, called by the GUI.
+
+-----
+
+## Authors
+
+* Dr. Daniele Lozzi
+* Dr. Ilaria Di Pompeo
+* Martina Marcaccio
+* Matias Ademaj
+* Dr. Simone Migliore
+* Prof. Giuseppe Curcio
+
+-----
+
+## 📞 Contact
+
+For questions or support, please visit the [Cognitive and Behavioral Science Lab website](https://labscoc.wordpress.com/).
+
+-----
+
+## ✍️ How to Cite
+
+*If you use this script in your research or work, please cite the following publications:*
+
+Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Ademaj, M.; Migliore, S.; Curcio, G. SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. NeuroSci 2025, 6, 35. [https://doi.org/10.3390/neurosci6020035](https://doi.org/10.3390/neurosci6020035)
+
+Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Alemanno, M.; Krüger, M.; Curcio, G.; Migliore, S. AI-Powered Analysis of Eye Tracker Data in Basketball Game. Sensors 2025, 25, 3572. [https://doi.org/10.3390/s25113572](https://doi.org/10.3390/s25113572)
