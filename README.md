@@ -34,8 +34,8 @@ The software is designed to streamline the analysis workflow for researchers wor
     * **Blinks**: Number and duration.
     * **Pupillometry**: Start, end, average, and standard deviation of pupil diameter.
     * **Gaze Movements**: Number, duration, and displacement. Calculated from enriched gaze data if available, otherwise estimated from saccade data.
-* **Comprehensive Visualizations (PDF):** The software calculates the necessary metrics to generate periodograms, spectrograms, histograms (e.g., for fixation/saccade duration), gaze paths, and heatmaps. *Note: The actual generation of PDF files is commented out in the main analysis script (`speed_script_events.py`) but can be enabled*.
-* **Integrated Analysis Video (MP4):** The GUI includes an option to generate a video combining the internal (eye) and external (scene) video feeds with a real-time plot of the pupil diameter time series. *Note: The implementation of this feature is a placeholder in the main script and needs to be completed*.
+* **Comprehensive Visualizations (PDF):** The software calculates the necessary metrics to generate periodograms, spectrograms, histograms (e.g., for fixation/saccade duration), gaze paths, and heatmaps.
+* **Integrated Analysis Video (MP4):** The GUI includes an option to generate a video combining the internal (eye) and external (scene) video feeds with a real-time plot of the pupil diameter time series. 
 * **Summary Results:** Aggregates all calculated features into a single `summary_results_<participant_name>.csv` file.
 
 -----
@@ -122,8 +122,8 @@ This script contains the main algorithms for processing eye-tracking data.
 * `filter_data_by_segment()`: Filters data for a specific time segment based on events. This function was named `filter_data_by_event` in a previous version.
 * `process_gaze_movements()`: Identifies and quantifies periods of gaze movement (non-fixations). *Skipped in `un_enriched_mode`*.
 * `calculate_summary_features()`: Computes various statistical measures, adapting its logic based on `un_enriched_mode`. If enriched data is unavailable, it uses `saccades.csv` for movement metrics. It normalizes fixation coordinates if they are in pixels and video dimensions are known.
-* `generate_plots()`: *(Currently commented out in the script)* Would create and save all plots, selectively generating them based on data availability.
-* `create_analysis_video()`: *(Currently a placeholder)* Would combine video feeds and the pupil time series into an integrated output video.
+* `generate_plots()`: Would create and save all plots, selectively generating them based on data availability.
+* `create_analysis_video()`: Would combine video feeds and the pupil time series into an integrated output video.
 
 -----
 
