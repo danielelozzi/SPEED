@@ -262,13 +262,28 @@ def calculate_summary_features(data, movements_df, subj_name, event_name, un_enr
     return results
 
 
+def _plot_histogram(data_series, title, xlabel, output_path):
+    """Helper function to create a standardized, aesthetically pleasing histogram."""
+    if data_series.dropna().empty:
+        return
+    plt.figure(figsize=(10, 6))
+    plt.hist(data_series.dropna(), bins=25, color='royalblue', edgecolor='black', alpha=0.7)
+    plt.title(title, fontsize=15)
+    plt.xlabel(xlabel, fontsize=12)
+    plt.ylabel('Frequency', fontsize=12)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+
+
 def generate_plots(data, movements_df, subj_name, event_name, output_dir: Path, un_enriched_mode: bool):
     """Generates and saves all plots for the event, adapting for un-enriched mode."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Determine which fixation data to use for plots ---
-    fixations_enr = data.get('fixations_enr', pd.DataFrame()) # from fixations_enriched.csv
-    fixations_not_enr = data.get('fixations_not_enr', pd.DataFrame()) # from fixations.csv
+    fixations_enr = data.get('fixations_enr', pd.DataFrame())
+    fixations_not_enr = data.get('fixations_not_enr', pd.DataFrame())
     fixations_for_plots = pd.DataFrame()
 
     if not un_enriched_mode and not fixations_enr.empty and 'fixation detected on surface' in fixations_enr.columns:
@@ -305,42 +320,47 @@ def generate_plots(data, movements_df, subj_name, event_name, output_dir: Path, 
             print(f"Skipping Periodogram/Spectrogram for {event_name} due to insufficient pupil data points.")
 
     # Histograms
+    gaze_elevation_data = pd.Series(dtype=float)
+    gaze_elevation_label = ""
     # Plot from un-enriched gaze data ('gaze.csv') if available
     if 'gaze_not_enr' in data and not data['gaze_not_enr'].empty and 'elevation [deg]' in data['gaze_not_enr'].columns:
-        plt.hist(data['gaze_not_enr']['elevation [deg]'].dropna())
-        plt.title(f"Gaze Elevation Histogram (Un-enriched) - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'hist_gaze_unenriched_elevation_{subj_name}_{event_name}.pdf')
-        plt.close()
+        gaze_elevation_data = data['gaze_not_enr']['elevation [deg]']
+        gaze_elevation_label = "Gaze Elevation (Un-enriched)"
+        
     # Fallback to enriched gaze data ('gaze_enriched.csv')
     elif not un_enriched_mode and 'gaze' in data and not data['gaze'].empty and 'gaze direction elevation [deg]' in data['gaze'].columns:
-        plt.hist(data['gaze']['gaze direction elevation [deg]'].dropna())
-        plt.title(f"Gaze Elevation Histogram (Enriched) - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'hist_gaze_enriched_elevation_{subj_name}_{event_name}.pdf')
-        plt.close()
+        gaze_elevation_data = data['gaze']['gaze direction elevation [deg]']
+        gaze_elevation_label = "Gaze Elevation (Enriched)"
+
+    if not gaze_elevation_data.empty:
+        _plot_histogram(gaze_elevation_data,
+                        f"{gaze_elevation_label} Histogram - {subj_name} - {event_name}",
+                        "Elevation [deg]",
+                        output_dir / f'hist_gaze_elevation_{subj_name}_{event_name}.pdf')
 
     if 'pupil' in data and not data['pupil'].empty and 'pupil diameter left [mm]' in data['pupil'].columns:
-        plt.hist(data['pupil']['pupil diameter left [mm]'].dropna())
-        plt.title(f"Pupil Diameter Histogram - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'hist_pupillometry_{subj_name}_{event_name}.pdf')
-        plt.close()
+        _plot_histogram(data['pupil']['pupil diameter left [mm]'],
+                        f"Pupil Diameter Histogram - {subj_name} - {event_name}",
+                        "Diameter [mm]",
+                        output_dir / f'hist_pupillometry_{subj_name}_{event_name}.pdf')
 
     if not fixations_for_plots.empty and 'duration [ms]' in fixations_for_plots.columns:
-        plt.hist(fixations_for_plots['duration [ms]'].dropna())
-        plt.title(f"Fixation Duration Histogram - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'hist_fixations_{subj_name}_{event_name}.pdf')
-        plt.close()
+        _plot_histogram(fixations_for_plots['duration [ms]'],
+                        f"Fixation Duration Histogram - {subj_name} - {event_name}",
+                        "Duration [ms]",
+                        output_dir / f'hist_fixations_{subj_name}_{event_name}.pdf')
 
     if 'blinks' in data and not data['blinks'].empty and 'duration [ms]' in data['blinks'].columns:
-        plt.hist(data['blinks']['duration [ms]'].dropna())
-        plt.title(f"Blink Duration Histogram - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'hist_blinks_{subj_name}_{event_name}.pdf')
-        plt.close()
+        _plot_histogram(data['blinks']['duration [ms]'],
+                        f"Blink Duration Histogram - {subj_name} - {event_name}",
+                        "Duration [ms]",
+                        output_dir / f'hist_blinks_{subj_name}_{event_name}.pdf')
 
     if 'saccades' in data and not data['saccades'].empty and 'duration [ms]' in data['saccades'].columns:
-        plt.hist(data['saccades']['duration [ms]'].dropna())
-        plt.title(f"Saccade Duration Histogram - {subj_name} - {event_name}")
-        plt.savefig(output_dir / f'hist_saccades_{subj_name}_{event_name}.pdf')
-        plt.close()
+        _plot_histogram(data['saccades']['duration [ms]'],
+                        f"Saccade Duration Histogram - {subj_name} - {event_name}",
+                        "Duration [ms]",
+                        output_dir / f'hist_saccades_{subj_name}_{event_name}.pdf')
 
     # Path graphs
     # Plot path from un-enriched gaze data ('gaze.csv') if available
@@ -535,6 +555,7 @@ def create_analysis_video(data_dir: Path, output_dir: Path):
         import traceback
         traceback.print_exc()
 
+
 def run_analysis(subj_name='subj_01', data_dir_str='./eyetracking_file', output_dir_str='./results', un_enriched_mode=False):
     """Main function to run the complete analysis pipeline."""
     pd.set_option('display.max_columns', None); pd.set_option('display.max_rows', 250)
@@ -542,7 +563,7 @@ def run_analysis(subj_name='subj_01', data_dir_str='./eyetracking_file', output_
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        all_data = load_all_data(data__dir, un_enriched_mode)
+        all_data = load_all_data(data_dir, un_enriched_mode)
     except FileNotFoundError:
         print("Analysis stopped due to missing required files.")
         return
@@ -568,7 +589,10 @@ def run_analysis(subj_name='subj_01', data_dir_str='./eyetracking_file', output_
 
     create_analysis_video(data_dir, output_dir)
 
+
 if __name__ == '__main__':
+    # This block is for standalone execution and testing.
+    # The GUI provides these values dynamically.
     SUBJECT_ID = 'subj_01'
     DATA_DIRECTORY = './eyetracking_file'
     RESULTS_DIRECTORY = f'./analysis_results_{SUBJECT_ID}'

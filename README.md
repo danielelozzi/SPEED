@@ -13,6 +13,9 @@ The software is designed to streamline the analysis workflow for researchers wor
 **New Features in v0.4:**
 * **Clearer Filenames**: Standard filenames for gaze and fixation data have been updated to be more intuitive (`gaze_enriched.csv`, `gaze.csv`, etc.).
 * **Full English Interface**: All user-facing messages, plots, and outputs are now in English for broader accessibility.
+* **Custom Output Folder**: The GUI now allows users to specify a custom output directory for analysis results.
+* **Improved GUI Labels**: Video input labels are now more descriptive ("internal camera video", "external camera video").
+* **Enhanced Plots**: All histograms now include axis labels with units and have an improved aesthetic for better readability.
 
 -----
 
@@ -20,7 +23,8 @@ The software is designed to streamline the analysis workflow for researchers wor
 
 * **Intuitive GUI:** Easy selection of required eye-tracking data files (CSV and MP4).
 * **Participant Management:** Specify a participant name for organized output.
-* **Automated Data Preparation:** Copies and renames input files to standard formats in a dedicated `eyetracking_file` directory.
+* **Custom Output Directory:** Choose where to save the analysis results, with a smart default based on the participant's name.
+* **Automated Data Preparation:** Copies and renames input files to standard formats in a dedicated `eyetracking_file` directory within your chosen output folder.
 * **Event-Based Analysis:** Processes data segmented by events defined in `events.csv`.
 * **Un-Enriched Data Support:** An option in the GUI to indicate "un-enriched" data analysis. When selected, `gaze_enriched.csv` and `fixations_enriched.csv` become optional. The analysis adapts to calculate only the metrics possible with the available data.
 * **Feature Extraction:** Calculates key metrics for:
@@ -30,7 +34,7 @@ The software is designed to streamline the analysis workflow for researchers wor
     * Gaze Movements (number, duration, displacement) - *Available only with enriched data*.
 * **Comprehensive Visualizations (PDF):**
     * Pupil diameter periodograms and spectrograms.
-    * Histograms for gaze elevation, pupil diameter, fixation duration, blink duration, and saccade duration.
+    * Readable histograms with units for gaze elevation, pupil diameter, fixation duration, blink duration, and saccade duration.
     * Gaze path and fixation path plots.
     * Heatmaps of fixation density.
     * Movement path plots.
@@ -41,20 +45,20 @@ The software is designed to streamline the analysis workflow for researchers wor
 
 ## 📁 Required Input Files
 
-The software expects a specific set of files. The GUI will prompt you to select your data, which will then be copied into an `eyetracking_file` subdirectory and renamed to the standard names listed below.
+The software expects a specific set of files. The GUI will prompt you to select your data files using descriptive labels. These files will then be copied into an `eyetracking_file` subdirectory (inside your chosen output folder) and renamed to the standard names listed below, which the analysis script uses internally.
 
-| Standard Filename        | Description                                 | Format | Required (enriched mode) | Required (un-enriched mode) |
-| :----------------------- | :------------------------------------------ | :----- | :----------------------- | :-------------------------- |
-| `events.csv`             | Eye-tracking events data                    | CSV    | Yes                      | Yes                         |
-| `gaze_enriched.csv`      | Enriched gaze data                          | CSV    | Yes                      | No                          |
-| `fixations_enriched.csv` | Enriched fixations data (with surface info) | CSV    | Yes                      | No                          |
-| `gaze.csv`               | Un-enriched gaze data                       | CSV    | Yes                      | Yes                         |
-| `fixations.csv`          | Un-enriched fixations data                  | CSV    | Yes                      | Yes                         |
-| `3d_eye_states.csv`      | 3D eye states data (pupil diameter)         | CSV    | Yes                      | Yes                         |
-| `blinks.csv`             | Detected blinks data                        | CSV    | Yes                      | Yes                         |
-| `saccades.csv`           | Detected saccades data                      | CSV    | Yes                      | Yes                         |
-| `internal.mp4`           | Video feed from the internal (eye) camera   | MP4    | Yes                      | Yes                         |
-| `external.mp4`           | Video feed from the external (scene) camera | MP4    | Yes                      | Yes                         |
+| Standard Filename        | GUI Prompt Label          | Description                                 | Format | Required (enriched mode) | Required (un-enriched mode) |
+| :----------------------- | :------------------------ | :------------------------------------------ | :----- | :----------------------- | :-------------------------- |
+| `events.csv`             | `events.csv`              | Eye-tracking events data                    | CSV    | Yes                      | Yes                         |
+| `gaze_enriched.csv`      | `gaze_enriched.csv`       | Enriched gaze data                          | CSV    | Yes                      | No                          |
+| `fixations_enriched.csv` | `fixations_enriched.csv`  | Enriched fixations data (with surface info) | CSV    | Yes                      | No                          |
+| `gaze.csv`               | `gaze.csv`                | Un-enriched gaze data                       | CSV    | Yes                      | Yes                         |
+| `fixations.csv`          | `fixations.csv`           | Un-enriched fixations data                  | CSV    | Yes                      | Yes                         |
+| `3d_eye_states.csv`      | `3d_eye_states.csv`       | 3D eye states data (pupil diameter)         | CSV    | Yes                      | Yes                         |
+| `blinks.csv`             | `blinks.csv`              | Detected blinks data                        | CSV    | Yes                      | Yes                         |
+| `saccades.csv`           | `saccades.csv`            | Detected saccades data                      | CSV    | Yes                      | Yes                         |
+| `internal.mp4`           | `internal camera video`   | Video feed from the internal (eye) camera   | MP4    | Yes                      | Yes                         |
+| `external.mp4`           | `external camera video`   | Video feed from the external (scene) camera | MP4    | Yes                      | Yes                         |
 
 -----
 
@@ -65,7 +69,7 @@ The software expects a specific set of files. The GUI will prompt you to select 
 * Python 3.8+
 * Required Python libraries:
     ```bash
-    pip install pandas numpy matplotlib opencv-python scipy pathlib
+    pip install pandas numpy matplotlib opencv-python scipy
     ```
 
 ### Usage
@@ -74,12 +78,13 @@ The software expects a specific set of files. The GUI will prompt you to select 
     ```bash
     python SPEED_0_4_gui.py
     ```
-2.  **Enter Participant Name:** In the GUI, type the name of the participant (e.g., `subj_001`).
-3.  **Select Analysis Mode:**
+2.  **Enter Participant Name:** Type the name of the participant (e.g., `subj_001`).
+3.  **Select Output Folder:** An output folder path will be automatically suggested (e.g., `./analysis_results_subj_001`). You can keep it or click "Browse..." to choose a different location.
+4.  **Select Analysis Mode:**
     * **"Analyze un-enriched data only"**: Select this checkbox to run the analysis with only un-enriched data. The fields for `gaze_enriched.csv` and `fixations_enriched.csv` will be disabled.
     * **Unchecked (default)**: For a full analysis with enriched data, leave this unchecked. You must provide all required files, including the enriched ones.
-4.  **Select Files:** Click "Browse..." next to each required file type and select the corresponding file from your system.
-5.  **Start Analysis:** Click the "Start Analysis" button.
+5.  **Select Files:** Click "Browse..." next to each required file type and select the corresponding file from your system.
+6.  **Start Analysis:** Click the "Start Analysis" button.
 
 The GUI will show status updates. Once completed, a success message will appear.
 
@@ -87,7 +92,7 @@ The GUI will show status updates. Once completed, a success message will appear.
 
 ## 📊 Output
 
-All results will be saved in a new directory named `analysis_results_<participant_name>` (e.g., `analysis_results_subj_001`).
+All results will be saved in the output directory you specified (e.g., `analysis_results_subj_001`).
 
 This directory will contain:
 
@@ -118,7 +123,7 @@ This script contains the main algorithms for processing eye-tracking data.
 * `filter_data_by_event()`: Filters data for a specific event based on timestamps.
 * `process_gaze_movements()`: Identifies and quantifies periods of gaze movement (non-fixations). *Skipped in `un_enriched_mode`*.
 * `calculate_summary_features()`: Computes various statistical measures, adapting based on `un_enriched_mode`.
-* `generate_plots()`: Creates and saves all plots, selectively generating them based on data availability.
+* `generate_plots()`: Creates and saves all plots, selectively generating them based on data availability and with improved aesthetics.
 * `create_analysis_video()`: Combines video feeds and pupil time series into an integrated output video.
 * `run_analysis()`: The main function that drives the entire analysis pipeline, called by the GUI.
 

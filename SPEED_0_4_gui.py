@@ -10,7 +10,22 @@ from speed_script_events import run_analysis
 
 # --- Configuration ---
 # Defines the standard file names that the analysis script expects
+# The keys are the filenames the script will use, the values are user-friendly labels for the GUI
 REQUIRED_FILES = {
+    "events.csv": "events.csv",
+    "gaze_enriched.csv": "gaze_enriched.csv",
+    "fixations_enriched.csv": "fixations_enriched.csv",
+    "gaze.csv": "gaze.csv",
+    "fixations.csv": "fixations.csv",
+    "3d_eye_states.csv": "3d_eye_states.csv",
+    "blinks.csv": "blinks.csv",
+    "saccades.csv": "saccades.csv",
+    "internal.mp4": "internal camera video",
+    "external.mp4": "external camera video",
+}
+
+# User-facing descriptions for file dialogs
+FILE_DESCRIPTIONS = {
     "events.csv": "Select the events CSV file",
     "gaze_enriched.csv": "Select the gaze CSV file (enriched)",
     "fixations_enriched.csv": "Select the enriched fixations CSV file (with surface data)",
@@ -42,8 +57,20 @@ class SpeedApp:
         name_frame.pack(fill=tk.X, pady=5)
         name_label = tk.Label(name_frame, text="Participant Name:", width=20, anchor='w')
         name_label.pack(side=tk.LEFT)
-        self.name_entry = tk.Entry(name_frame)
+        self.participant_name_var = tk.StringVar()
+        self.participant_name_var.trace_add("write", self.update_output_dir_default)
+        self.name_entry = tk.Entry(name_frame, textvariable=self.participant_name_var)
         self.name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Output Directory
+        output_frame = tk.Frame(main_frame)
+        output_frame.pack(fill=tk.X, pady=5)
+        output_label = tk.Label(output_frame, text="Output Folder:", width=20, anchor='w')
+        output_label.pack(side=tk.LEFT)
+        self.output_dir_entry = tk.Entry(output_frame)
+        self.output_dir_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        output_button = tk.Button(output_frame, text="Browse...", command=self.select_output_dir)
+        output_button.pack(side=tk.RIGHT)
 
         # Un-enriched Data Checkbox
         self.unenriched_var = tk.BooleanVar()
@@ -54,17 +81,18 @@ class SpeedApp:
         files_frame = tk.LabelFrame(main_frame, text="Select Data Files", padx=5, pady=5)
         files_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        for i, (std_name, description) in enumerate(REQUIRED_FILES.items()):
+        for std_name, display_label in REQUIRED_FILES.items():
             row_frame = tk.Frame(files_frame)
             row_frame.pack(fill=tk.X, pady=2)
             
-            label = tk.Label(row_frame, text=f"{std_name}:", width=25, anchor='w')
+            label = tk.Label(row_frame, text=f"{display_label}:", width=25, anchor='w')
             label.pack(side=tk.LEFT)
             
             entry = tk.Entry(row_frame)
             entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
             self.file_entries[std_name] = entry
 
+            description = FILE_DESCRIPTIONS[std_name]
             button = tk.Button(row_frame, text="Browse...", command=lambda e=entry, d=description: self.select_file(e, d))
             button.pack(side=tk.RIGHT)
         
@@ -83,6 +111,21 @@ class SpeedApp:
         lab_link.pack(side=tk.BOTTOM, pady=(5, 10))
         lab_link.bind("<Button-1>", lambda e: self.open_link("https://labscoc.wordpress.com/"))
 
+    def update_output_dir_default(self, *args):
+        subj_name = self.participant_name_var.get().strip()
+        if subj_name:
+            default_path = Path(f'./analysis_results_{subj_name}')
+            self.output_dir_entry.delete(0, tk.END)
+            self.output_dir_entry.insert(0, str(default_path.resolve()))
+        else:
+            self.output_dir_entry.delete(0, tk.END)
+
+    def select_output_dir(self):
+        directory_path = filedialog.askdirectory(title="Select Output Folder")
+        if directory_path:
+            self.output_dir_entry.delete(0, tk.END)
+            self.output_dir_entry.insert(0, directory_path)
+
     def toggle_file_requirements(self):
         is_unenriched = self.unenriched_var.get()
         for std_name in OPTIONAL_FOR_UNENRICHED:
@@ -96,14 +139,13 @@ class SpeedApp:
                 entry_widget.config(state=tk.NORMAL)
                 label_widget.config(state=tk.NORMAL)
 
-
     def select_file(self, entry_widget, description):
         file_path = filedialog.askopenfilename(title=description)
         if file_path:
             entry_widget.delete(0, tk.END)
             entry_widget.insert(0, file_path)
 
-    def open_link(self, url): # Opens the specified URL in the default web browser.
+    def open_link(self, url):
         webbrowser.open_new(url)
 
     def run_analysis_process(self):
@@ -112,17 +154,21 @@ class SpeedApp:
             messagebox.showerror("Error", "Please enter a participant name.")
             return
 
+        output_dir_path = self.output_dir_entry.get().strip()
+        if not output_dir_path:
+            messagebox.showerror("Error", "Please select an output folder.")
+            return
+
         is_unenriched = self.unenriched_var.get()
         selected_files = {std_name: entry.get().strip() for std_name, entry in self.file_entries.items()}
 
-        # Check that all *required* files have been selected
         missing_files = []
         for std_name, path in selected_files.items():
             if not path:
                 if is_unenriched and std_name in OPTIONAL_FOR_UNENRICHED:
-                    continue # Skip if optional and un-enriched mode is active
+                    continue
                 else:
-                    missing_files.append(std_name)
+                    missing_files.append(REQUIRED_FILES[std_name])
 
         if missing_files:
             messagebox.showerror("Error", f"Please select all required files. Missing: {', '.join(missing_files)}")
@@ -132,25 +178,20 @@ class SpeedApp:
             self.status_label.config(text=f"Preparing folders for {subj_name}...", fg="blue")
             self.root.update_idletasks()
 
-            # Define output and data folders
-            base_output_dir = Path(f'./analysis_results_{subj_name}')
+            base_output_dir = Path(output_dir_path)
             data_dir = base_output_dir / 'eyetracking_file'
             data_dir.mkdir(parents=True, exist_ok=True)
 
             self.status_label.config(text="Copying files...")
             self.root.update_idletasks()
 
-            # Copy selected files to the data folder with standard names
             for std_name, source_path_str in selected_files.items():
-                if source_path_str: # Only copy if a path was provided
+                if source_path_str:
                     shutil.copy(Path(source_path_str), data_dir / std_name)
-                elif not is_unenriched and std_name in OPTIONAL_FOR_UNENRICHED:
-                     pass # Already handled by the earlier check
 
             self.status_label.config(text="Starting analysis... This might take some time.", fg="blue")
             self.root.update_idletasks()
             
-            # Pass the un_enriched_mode flag to the analysis script
             run_analysis(subj_name=subj_name, data_dir_str=str(data_dir), output_dir_str=str(base_output_dir), un_enriched_mode=is_unenriched)
             
             self.status_label.config(text="Analysis complete!", fg="green")
