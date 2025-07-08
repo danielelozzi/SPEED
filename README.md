@@ -1,4 +1,4 @@
-# SPEED (labScoc Processing and Extraction of Eye tracking Data - v0.5)
+# SPEED (labScoc Processing and Extraction of Eye tracking Data)
 
 *Eye-Tracking Data Analysis Software*
 
@@ -42,9 +42,9 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
 
 ## How to Use the Application 🚀
 
-1.  **Launch the GUI**: Run the `SPEED_0_4_gui.py` script from your terminal.
+1.  **Launch the GUI**: Run the `SPEED_gui.py` script from your terminal.
     ```bash
-    python SPEED_0_4_gui.py
+    python SPEED_gui.py
     ```
 
 2.  **Fill in the Information**:
@@ -79,24 +79,27 @@ The application requires several specific CSV and MP4 files from your eye-tracki
 | `internal.mp4` | `internal camera video` | The video recording of the participant's eye. | **Always** |
 | `external.mp4` | `external camera video` | The video recording of the participant's scene/view. **Used to get video dimensions.** | **Always** |
 
-## Output Files 📈
+### Output Files 📈
 
 The analysis generates a main folder named `analysis_results_{participant_name}` with the following contents:
 
 1.  **`eyetracking_file/`**
     * A subfolder containing copies of all the input files used for the analysis. This ensures reproducibility.
 
-2.  **Path Plots (`.pdf`)**
-    * These plots visualize eye movements during each event segment. The coordinates are normalized from 0 to 1.
-    * `path_fixations_{...}_{participant_name}_{event_name}.pdf`: A plot showing the sequence of fixations.
-    * `path_gaze_{...}_{participant_name}_{event_name}.pdf`: A plot showing the raw gaze path.
-    * **Note on Suffixes**: If "Dual Analysis Mode" is active, you will get separate plots for each mode: `_enriched.pdf` for surface-based data and `_not_enriched.pdf` for pixel-based data. If only one mode is run, the files will not have this suffix.
+2.  **Summary Results (`.csv`)**
+    * `summary_results_{subj_name}.csv`: A CSV file containing the main quantitative outcomes of the analysis. It includes one row per event segment and columns for various metrics like number of fixations, average fixation duration, pupil diameter statistics, and movement characteristics.
 
-3.  **Summary Results (`.csv`)**
-    * A CSV file containing the main quantitative outcomes of the analysis for each segment.
-    * `summary_results_{...}_{participant_name}.csv`: The file contains one row per event segment and columns for various metrics (e.g., number of fixations, average fixation duration, etc.).
-    * **Note on Suffixes**: Similar to the plots, the summary file will be suffixed with `_enriched.csv` or `_not_enriched.csv` when running in Dual Analysis Mode.
+3.  **Analysis Plots (`.pdf`)**
+    * These plots visualize different aspects of the eye-tracking data for each event segment.
+    * `hist_fixations_{subj_name}_{event_name}.pdf`: A histogram of fixation durations.
+    * `hist_blinks_{subj_name}_{event_name}.pdf`: A histogram of blink durations.
+    * `hist_saccades_{subj_name}_{event_name}.pdf`: A histogram of saccade durations.
+    * `path_fixation_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of fixations. The coordinates are normalized from 0 to 1.
+    * `periodogram_{subj_name}_{event_name}.pdf`: A Power Spectral Density plot of the pupil diameter signal, showing frequency components.
+    * `spectrogram_{subj_name}_{event_name}.pdf`: A spectrogram of the pupil diameter, showing how its frequency content changes over time.
 
+4.  **Analysis Video (`.mp4`)**
+    * `output_analysis_video.mp4`: An MP4 video that synchronizes the internal (eye) view, the external (scene) view, and a real-time plot of the pupil diameter. This is only generated if the "Generate Analysis Video" option is checked.
 ---
 
 ## ✍️ Authors & Citation
