@@ -183,11 +183,15 @@ def _plot_histogram(data_series, title, xlabel, output_path):
     plt.savefig(output_path)
     plt.close()
 
-def generate_plots(data, movements_df, subj_name, event_name, output_dir: Path, un_enriched_mode: bool):
+def generate_plots(data, movements_df, subj_name, event_name, output_dir: Path, un_enriched_mode: bool, video_width: int, video_height: int):
     """Genera e salva tutti i grafici per l'evento."""
     output_dir.mkdir(parents=True, exist_ok=True)
     fixations_enr, fixations_not_enr = data.get('fixations_enr', pd.DataFrame()), data.get('fixations_not_enr', pd.DataFrame())
     gaze_enr = data.get('gaze', pd.DataFrame()) # Get enriched gaze data
+
+    fixations_enr, fixations_not_enr = data.get('fixations_enr', pd.DataFrame()), data.get('fixations_not_enr', pd.DataFrame())
+    gaze_enr = data.get('gaze', pd.DataFrame()) # Get enriched gaze data
+    gaze_not_enr = data.get('gaze_not_enr', pd.DataFrame()) # Aggiungi questa riga per inizializzare gaze_not_enr
     pupil_df = data.get('pupil', pd.DataFrame()) # Get pupil data
     blinks_df = data.get('blinks', pd.DataFrame()) # Get blinks data
     saccades_df = data.get('saccades', pd.DataFrame()) # Get saccades data
@@ -280,13 +284,75 @@ def generate_plots(data, movements_df, subj_name, event_name, output_dir: Path, 
     if 'saccades' in data and not data['saccades'].empty and 'duration [ms]' in data['saccades'].columns:
         _plot_histogram(data['saccades']['duration [ms]'], f"Saccade Duration Histogram - {subj_name} - {event_name}", "Duration [ms]", output_dir / f'hist_saccades_{subj_name}_{event_name}.pdf')
 
-    # Grafici di percorso
-    if not fixations_for_plots.empty:
-        x_col_plot = 'fixation x [normalized]' if 'fixation x [normalized]' in fixations_for_plots.columns else 'norm_pos_x'
-        if x_col_plot in fixations_for_plots.columns: # Controlla se esiste una colonna di posizione
-            y_col_plot = 'fixation y [normalized]' if 'fixation y [normalized]' in fixations_for_plots.columns else 'norm_pos_y'
-            plt.plot(fixations_for_plots[x_col_plot], fixations_for_plots[y_col_plot], marker='o', linestyle='-', color='green')
-            plt.title(f"Fixation Path - {subj_name} - {event_name}"); plt.savefig(output_dir / f'path_fixation_{subj_name}_{event_name}.pdf'); plt.close()
+    # Grafici di percorso (Fixation Path)
+    # Fixation Path - Enriched
+    if not un_enriched_mode and not fixations_enr.empty and 'fixation x [normalized]' in fixations_enr.columns:
+        fixations_enriched_on_surface = fixations_enr[fixations_enr['fixation detected on surface'] == True].copy()
+        if not fixations_enriched_on_surface.empty:
+            plt.figure(figsize=(10, 6))
+            plt.plot(fixations_enriched_on_surface['fixation x [normalized]'], fixations_enriched_on_surface['fixation y [normalized]'], marker='o', linestyle='-', color='green')
+            plt.title(f"Fixation Path (Enriched) - {subj_name} - {event_name}"); plt.xlabel('Normalized X'); plt.ylabel('Normalized Y'); plt.grid(True)
+            plt.savefig(output_dir / f'path_fixation_enriched_{subj_name}_{event_name}.pdf')
+            plt.close()
+        else:
+            print(f"ATTENZIONE: Nessuna fissazione arricchita rilevata sulla superficie per l'evento '{event_name}'. Nessun grafico generato.")
+
+    # Fixation Path - Un-enriched
+    if not fixations_not_enr.empty and 'fixation x [px]' in fixations_not_enr.columns:
+        plt.figure(figsize=(10, 6))
+        
+        x_coords_px = fixations_not_enr['fixation x [px]']
+        y_coords_px = fixations_not_enr['fixation y [px]']
+
+        # Normalizzazione se le dimensioni del video sono disponibili
+        if video_width and video_height and video_width > 0 and video_height > 0:
+            x_coords_norm = x_coords_px / video_width
+            y_coords_norm = y_coords_px / video_height
+            xlabel_text, ylabel_text = 'Normalized X', 'Normalized Y'
+        else:
+            x_coords_norm, y_coords_norm = x_coords_px, y_coords_px
+            xlabel_text, ylabel_text = 'Pixel X', 'Pixel Y'
+            print("ATTENZIONE: Le coordinate delle fissazioni non arricchite sono in pixel e le dimensioni del video non sono disponibili per la normalizzazione.")
+
+        plt.plot(x_coords_norm, y_coords_norm, marker='o', linestyle='-', color='purple')
+        plt.title(f"Fixation Path (Un-enriched) - {subj_name} - {event_name}"); plt.xlabel(xlabel_text); plt.ylabel(ylabel_text); plt.grid(True)
+        plt.savefig(output_dir / f'path_fixation_not_enriched_{subj_name}_{event_name}.pdf')
+        plt.close()
+    else:
+        print(f"ATTENZIONE: Dati di fissazione non arricchiti insufficienti per l'evento '{event_name}'. Nessun grafico generato.")
+    
+    # Grafici di percorso (Gaze Path)
+    gaze_for_plots = pd.DataFrame()
+    if not un_enriched_mode and not gaze_enr.empty and 'gaze position on surface x [normalized]' in gaze_enr.columns:
+        gaze_for_plots = gaze_enr[gaze_enr['gaze detected on surface'] == True].copy()
+        if not gaze_for_plots.empty:
+            plt.figure(figsize=(10, 6))
+            plt.plot(gaze_for_plots['gaze position on surface x [normalized]'], gaze_for_plots['gaze position on surface y [normalized]'], marker='.', linestyle='-', color='red', alpha=0.5)
+            plt.title(f"Gaze Path - {subj_name} - {event_name}"); plt.xlabel('Normalized X'); plt.ylabel('Normalized Y'); plt.grid(True)
+            plt.savefig(output_dir / f'path_gaze_enriched_{subj_name}_{event_name}.pdf')
+            plt.close()
+    
+    if not gaze_not_enr.empty and 'gaze position x [px]' in gaze_not_enr.columns:
+        gaze_for_plots_unenriched = gaze_not_enr.copy()
+        if not gaze_for_plots_unenriched.empty:
+            x_coords_px = gaze_for_plots_unenriched['gaze position x [px]']
+            y_coords_px = gaze_for_plots_unenriched['gaze position y [px]']
+            
+            # Normalizzazione se le dimensioni del video sono disponibili
+            if video_width and video_height and video_width > 0 and video_height > 0:
+                x_coords_norm = x_coords_px / video_width
+                y_coords_norm = y_coords_px / video_height
+                xlabel_text, ylabel_text = 'Normalized X', 'Normalized Y'
+            else:
+                x_coords_norm, y_coords_norm = x_coords_px, y_coords_px
+                xlabel_text, ylabel_text = 'Pixel X', 'Pixel Y'
+                print("ATTENZIONE: Le coordinate dello sguardo non arricchite sono in pixel e le dimensioni del video non sono disponibili per la normalizzazione.")
+
+            plt.figure(figsize=(10, 6))
+            plt.plot(x_coords_norm, y_coords_norm, marker='.', linestyle='-', color='blue', alpha=0.5)
+            plt.title(f"Gaze Path (Un-enriched) - {subj_name} - {event_name}"); plt.xlabel(xlabel_text); plt.ylabel(ylabel_text); plt.grid(True)
+            plt.savefig(output_dir / f'path_gaze_not_enriched_{subj_name}_{event_name}.pdf')
+            plt.close()
 
     # --- Plot per Figure 5 (Saccade Velocities) ---
     if not saccades_df.empty and 'mean velocity [px/s]' in saccades_df.columns and 'peak velocity [px/s]' in saccades_df.columns:
@@ -395,7 +461,7 @@ def process_segment(event_row, start_ts, end_ts, all_data, subj_name, output_dir
     
     movements_df = process_gaze_movements(segment_data.get('gaze', pd.DataFrame()), un_enriched_mode)
     results = calculate_summary_features(segment_data, movements_df, subj_name, event_name, un_enriched_mode, video_width, video_height)
-    generate_plots(segment_data, movements_df, subj_name, event_name, output_dir, un_enriched_mode)
+    generate_plots(segment_data, movements_df, subj_name, event_name, output_dir, un_enriched_mode, video_width, video_height)
     return results
 
 def get_video_dimensions(video_path: Path):
