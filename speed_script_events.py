@@ -189,6 +189,8 @@ def generate_plots(data, movements_df, subj_name, event_name, output_dir: Path, 
     fixations_enr, fixations_not_enr = data.get('fixations_enr', pd.DataFrame()), data.get('fixations_not_enr', pd.DataFrame())
     gaze_enr = data.get('gaze', pd.DataFrame()) # Get enriched gaze data
     pupil_df = data.get('pupil', pd.DataFrame()) # Get pupil data
+    blinks_df = data.get('blinks', pd.DataFrame()) # Get blinks data
+    saccades_df = data.get('saccades', pd.DataFrame()) # Get saccades data
     
     fixations_for_plots = pd.DataFrame()
 
@@ -201,76 +203,66 @@ def generate_plots(data, movements_df, subj_name, event_name, output_dir: Path, 
     if not pupil_df.empty and 'pupil diameter left [mm]' in pupil_df.columns:
         # Merge pupil data with enriched gaze data to get 'gaze detected on surface' status
         # This assumes that 'timestamp [ns]' is the common column and sufficiently aligned.
-        if not un_enriched_mode and not gaze_enr.empty and 'gaze detected on surface' in gaze_enr.columns:
-            # Use a merge_asof or a careful merge for time-series alignment
-            # For simplicity, let's assume direct merge is sufficient for demonstration,
-            # but in real-world time-series, a nearest-neighbor join (merge_asof) is often better.
+        
+        # Ensure timestamps are unique in gaze_enr for merging
+        gaze_enr_unique_ts = gaze_enr.drop_duplicates(subset=['timestamp [ns]']).copy()
+        
+        pupil_with_gaze_status = pd.merge(
+            pupil_df,
+            gaze_enr_unique_ts[['timestamp [ns]', 'gaze detected on surface']],
+            on='timestamp [ns]',
+            how='left'
+        )
+        # Fill NaN in 'gaze detected on surface' if no direct match, assume False if not detected
+        pupil_with_gaze_status['gaze detected on surface'].fillna(False, inplace=True)
+
+        if not pupil_with_gaze_status.empty:
+            plt.figure(figsize=(12, 6))
             
-            # Ensure timestamps are unique in gaze_enr for merging
-            gaze_enr_unique_ts = gaze_enr.drop_duplicates(subset=['timestamp [ns]']).copy()
+            # Plot left pupil diameter
+            if 'pupil diameter left [mm]' in pupil_with_gaze_status.columns:
+                plt.plot(pupil_with_gaze_status['timestamp [ns]'] / NS_TO_S, pupil_with_gaze_status['pupil diameter left [mm]'], label='Pupil Diameter Left [mm]', color='blue', alpha=0.7)
             
-            pupil_with_gaze_status = pd.merge(
-                pupil_df,
-                gaze_enr_unique_ts[['timestamp [ns]', 'gaze detected on surface']],
-                on='timestamp [ns]',
-                how='left'
-            )
-            # Fill NaN in 'gaze detected on surface' if no direct match, assume False if not detected
-            pupil_with_gaze_status['gaze detected on surface'].fillna(False, inplace=True)
+            # Plot right pupil diameter (if available)
+            if 'pupil diameter right [mm]' in pupil_with_gaze_status.columns:
+                plt.plot(pupil_with_gaze_status['timestamp [ns]'] / NS_TO_S, pupil_with_gaze_status['pupil diameter right [mm]'], label='Pupil Diameter Right [mm]', color='purple', alpha=0.7)
 
-            if not pupil_with_gaze_status.empty:
-                plt.figure(figsize=(12, 6))
-                
-                # Plot left pupil diameter
-                if 'pupil diameter left [mm]' in pupil_with_gaze_status.columns:
-                    plt.plot(pupil_with_gaze_status['timestamp [ns]'] / NS_TO_S, pupil_with_gaze_status['pupil diameter left [mm]'], label='Pupil Diameter Left [mm]', color='blue', alpha=0.7)
-                
-                # Plot right pupil diameter (if available)
-                if 'pupil diameter right [mm]' in pupil_with_gaze_status.columns:
-                    plt.plot(pupil_with_gaze_status['timestamp [ns]'] / NS_TO_S, pupil_with_gaze_status['pupil diameter right [mm]'], label='Pupil Diameter Right [mm]', color='purple', alpha=0.7)
+            # Color background based on 'gaze detected on surface'
+            current_status = None
+            start_time = None
 
-                # Color background based on 'gaze detected on surface'
-                # Find contiguous blocks of True/False for more efficient plotting of spans
-                current_status = None
-                start_time = None
+            timestamps_seconds = pupil_with_gaze_status['timestamp [ns]'] / NS_TO_S
+            epsilon = (timestamps_seconds.iloc[1] - timestamps_seconds.iloc[0]) / 2 if len(timestamps_seconds) > 1 else 0.01
 
-                # Convert timestamps to seconds for plotting on x-axis
-                timestamps_seconds = pupil_with_gaze_status['timestamp [ns]'] / NS_TO_S
+            for i, row in pupil_with_gaze_status.iterrows():
+                ts = row['timestamp [ns]'] / NS_TO_S
+                gaze_on_surface = row['gaze detected on surface']
 
-                # Use a small epsilon to ensure spans cover the data points without gaps due to floats
-                epsilon = (timestamps_seconds.iloc[1] - timestamps_seconds.iloc[0]) / 2 if len(timestamps_seconds) > 1 else 0.01
-
-                for i, row in pupil_with_gaze_status.iterrows():
-                    ts = row['timestamp [ns]'] / NS_TO_S
-                    gaze_on_surface = row['gaze detected on surface']
-
-                    if current_status is None:
-                        current_status = gaze_on_surface
-                        start_time = ts
-                    elif gaze_on_surface != current_status:
-                        color = 'lightgreen' if current_status else 'lightcoral'
-                        plt.axvspan(start_time - epsilon, ts - epsilon, facecolor=color, alpha=0.5) # end at previous point
-                        current_status = gaze_on_surface
-                        start_time = ts
-                
-                # Plot the last segment
-                if start_time is not None:
+                if current_status is None:
+                    current_status = gaze_on_surface
+                    start_time = ts
+                elif gaze_on_surface != current_status:
                     color = 'lightgreen' if current_status else 'lightcoral'
-                    plt.axvspan(start_time - epsilon, timestamps_seconds.iloc[-1] + epsilon, facecolor=color, alpha=0.5)
+                    plt.axvspan(start_time - epsilon, ts - epsilon, facecolor=color, alpha=0.5)
+                    current_status = gaze_on_surface
+                    start_time = ts
+            
+            if start_time is not None:
+                color = 'lightgreen' if current_status else 'lightcoral'
+                plt.axvspan(start_time - epsilon, timestamps_seconds.iloc[-1] + epsilon, facecolor=color, alpha=0.5)
 
-                plt.title(f"Pupil Diameter with Gaze On Surface - {subj_name} - {event_name}", fontsize=15)
-                plt.xlabel('Time [s]', fontsize=12)
-                plt.ylabel('Pupil Diameter [mm]', fontsize=12)
-                plt.legend()
-                plt.grid(axis='y', linestyle='--', alpha=0.7)
-                plt.tight_layout()
-                plt.savefig(output_dir / f'pupil_diameter_gaze_surface_{subj_name}_{event_name}.pdf')
-                plt.close()
-            else:
-                print(f"ATTENZIONE: Nessun dato pupillare arricchito disponibile per l'evento '{event_name}' per il grafico con indicatore di superficie.")
+            plt.title(f"Pupil Diameter with Gaze On Surface - {subj_name} - {event_name}", fontsize=15)
+            plt.xlabel('Time [s]', fontsize=12)
+            plt.ylabel('Pupil Diameter [mm]', fontsize=12)
+            plt.legend()
+            plt.grid(axis='y', linestyle='--', alpha=0.7)
+            plt.tight_layout()
+            plt.savefig(output_dir / f'pupil_diameter_gaze_surface_{subj_name}_{event_name}.pdf')
+            plt.close()
+        else:
+            print(f"ATTENZIONE: Nessun dato pupillare arricchito disponibile per l'evento '{event_name}' per il grafico con indicatore di superficie.")
 
-
-    # Periodogramma e Spettrogramma (existing code, no changes needed here unless 'on surface' is to be shown which is not standard for these plots)
+    # Periodogramma e Spettrogramma
     if 'pupil' in data and not data['pupil'].empty and 'pupil diameter left [mm]' in data['pupil'].columns:
         ts = data['pupil']['pupil diameter left [mm]'].dropna().to_numpy()
         if len(ts) > SAMPLING_FREQ:
@@ -280,7 +272,7 @@ def generate_plots(data, movements_df, subj_name, event_name, output_dir: Path, 
             f, t, Sxx = spectrogram(ts, fs=SAMPLING_FREQ, nperseg=min(len(ts), 256), noverlap=min(len(ts)//2, 50))
             plt.figure(figsize=(10, 5)); plt.pcolormesh(t, f, 10 * np.log10(np.maximum(Sxx, 1e-10)), shading='gouraud'); plt.title(f'Spectrogram - {subj_name} - {event_name}'); plt.ylabel('Frequency [Hz]'); plt.xlabel('Time [s]'); plt.colorbar(label='Power [dB]'); plt.savefig(output_dir / f'spectrogram_{subj_name}_{event_name}.pdf'); plt.close()
 
-    # Istogrammi (existing code)
+    # Istogrammi
     if not fixations_for_plots.empty and 'duration [ms]' in fixations_for_plots.columns:
         _plot_histogram(fixations_for_plots['duration [ms]'], f"Fixation Duration Histogram - {subj_name} - {event_name}", "Duration [ms]", output_dir / f'hist_fixations_{subj_name}_{event_name}.pdf')
     if 'blinks' in data and not data['blinks'].empty and 'duration [ms]' in data['blinks'].columns:
@@ -288,13 +280,106 @@ def generate_plots(data, movements_df, subj_name, event_name, output_dir: Path, 
     if 'saccades' in data and not data['saccades'].empty and 'duration [ms]' in data['saccades'].columns:
         _plot_histogram(data['saccades']['duration [ms]'], f"Saccade Duration Histogram - {subj_name} - {event_name}", "Duration [ms]", output_dir / f'hist_saccades_{subj_name}_{event_name}.pdf')
 
-    # Grafici di percorso (existing code)
+    # Grafici di percorso
     if not fixations_for_plots.empty:
         x_col_plot = 'fixation x [normalized]' if 'fixation x [normalized]' in fixations_for_plots.columns else 'norm_pos_x'
         if x_col_plot in fixations_for_plots.columns: # Controlla se esiste una colonna di posizione
             y_col_plot = 'fixation y [normalized]' if 'fixation y [normalized]' in fixations_for_plots.columns else 'norm_pos_y'
             plt.plot(fixations_for_plots[x_col_plot], fixations_for_plots[y_col_plot], marker='o', linestyle='-', color='green')
             plt.title(f"Fixation Path - {subj_name} - {event_name}"); plt.savefig(output_dir / f'path_fixation_{subj_name}_{event_name}.pdf'); plt.close()
+
+    # --- Plot per Figure 5 (Saccade Velocities) ---
+    if not saccades_df.empty and 'mean velocity [px/s]' in saccades_df.columns and 'peak velocity [px/s]' in saccades_df.columns:
+        plt.figure(figsize=(10, 6))
+        plt.plot(saccades_df.index, saccades_df['mean velocity [px/s]'], label='mean velocity', color='blue')
+        plt.plot(saccades_df.index, saccades_df['peak velocity [px/s]'], label='peak velocity', color='orange')
+        plt.title(f'Mean and Peak Saccade Velocity - {subj_name} - {event_name}', fontsize=15)
+        plt.xlabel('Frames (n)', fontsize=12)
+        plt.ylabel('px/s', fontsize=12)
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        plt.savefig(output_dir / f'saccade_velocities_{subj_name}_{event_name}.pdf')
+        plt.close()
+    else:
+        print(f"ATTENZIONE: Dati di velocità delle saccadi insufficienti per l'evento '{event_name}'.")
+
+    # --- Plot per Figure 6 (Saccade Amplitude) ---
+    if not saccades_df.empty and 'amplitude [px]' in saccades_df.columns:
+        plt.figure(figsize=(10, 6))
+        plt.plot(saccades_df.index, saccades_df['amplitude [px]'], label='amplitude', color='teal')
+        plt.title(f'Saccade Amplitude - {subj_name} - {event_name}', fontsize=15)
+        plt.xlabel('Frames (n)', fontsize=12)
+        plt.ylabel('px', fontsize=12)
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        plt.savefig(output_dir / f'saccade_amplitude_{subj_name}_{event_name}.pdf')
+        plt.close()
+    else:
+        print(f"ATTENZIONE: Dati di ampiezza delle saccadi insufficienti per l'evento '{event_name}'.")
+
+    # --- Plot per Figure 7 (Blink Time Series) ---
+    if not blinks_df.empty and 'start timestamp [ns]' in blinks_df.columns and 'duration [ms]' in blinks_df.columns:
+        # Create a time series for blinks (binary: 0 or 1)
+        # Find the overall start and end timestamps for the segment to define the plot range
+        all_timestamps = []
+        if 'timestamp [ns]' in pupil_df.columns:
+            all_timestamps.extend(pupil_df['timestamp [ns]'].tolist())
+        if 'start timestamp [ns]' in blinks_df.columns:
+            all_timestamps.extend(blinks_df['start timestamp [ns]'].tolist())
+        if 'start timestamp [ns]' in saccades_df.columns:
+            all_timestamps.extend(saccades_df['start timestamp [ns]'].tolist())
+        
+        if not all_timestamps:
+            print(f"ATTENZIONE: Nessun timestamp disponibile per creare la serie temporale dei blink per l'evento '{event_name}'.")
+            return
+
+        min_ts = min(all_timestamps)
+        max_ts = max(all_timestamps)
+
+        # Create a series with 0s for the entire duration of the segment
+        # We need a granular timestamp array to represent each 'frame' or a small interval
+        # Let's use the sampling frequency to estimate the number of points needed
+        # Assuming SAMPLING_FREQ is the rate for gaze/pupil data, we can use it for time resolution
+        duration_s = (max_ts - min_ts) / NS_TO_S
+        num_points = int(duration_s * SAMPLING_FREQ)
+        
+        if num_points <= 0:
+            print(f"ATTENZIONE: Durata del segmento troppo breve per generare la serie temporale dei blink per l'evento '{event_name}'.")
+            return
+
+        # Create a time axis for the plot (frames or a scaled time)
+        time_axis_s = np.linspace(0, duration_s, num_points)
+        blink_time_series = np.zeros(num_points)
+
+        for _, row in blinks_df.iterrows():
+            blink_start_ns = row['start timestamp [ns]']
+            blink_end_ns = blink_start_ns + (row['duration [ms]'] * 1_000_000) # Convert ms to ns
+
+            # Map blink timestamps to the time_axis_s indices
+            start_idx = int(((blink_start_ns - min_ts) / NS_TO_S) * SAMPLING_FREQ)
+            end_idx = int(((blink_end_ns - min_ts) / NS_TO_S) * SAMPLING_FREQ)
+
+            start_idx = max(0, start_idx)
+            end_idx = min(num_points, end_idx) # Ensure index doesn't exceed array bounds
+
+            if start_idx < end_idx:
+                blink_time_series[start_idx:end_idx] = 1
+
+        plt.figure(figsize=(12, 4))
+        plt.plot(time_axis_s, blink_time_series, drawstyle='steps-post', color='blue')
+        plt.title(f'Blink Time Series - {subj_name} - {event_name}', fontsize=15)
+        plt.xlabel('Time [s]', fontsize=12)
+        plt.ylabel('Blink (0 = No, 1 = Yes)', fontsize=12)
+        plt.yticks([0, 1]) # Ensure y-axis only shows 0 and 1
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.ylim(-0.1, 1.1) # Add a small buffer for better visualization
+        plt.tight_layout()
+        plt.savefig(output_dir / f'blink_time_series_{subj_name}_{event_name}.pdf')
+        plt.close()
+    else:
+        print(f"ATTENZIONE: Dati di blink insufficienti per l'evento '{event_name}'.")
 
 
 def process_segment(event_row, start_ts, end_ts, all_data, subj_name, output_dir, un_enriched_mode, video_width, video_height):
