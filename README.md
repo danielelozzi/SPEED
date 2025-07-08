@@ -24,6 +24,8 @@ Before using this software, you need to acquire and prepare the data following a
 * **Summary Statistics**: Generates a final CSV file with aggregated metrics for each analysis segment.
 * **Automated File Management**: Creates a structured output folder for each participant, copying input files and saving results neatly.
 * **Enhanced Pupillometry Plotting**: Generates a detailed pupillometry time series plot with dynamic background coloring (green for gaze on surface, red for gaze off surface) and separate lines for left and right pupil diameters (if available), providing insights into attention and cognitive load.
+* **Saccade Analysis Plots**: Visualizes mean and peak saccade velocities over time, as well as saccade amplitude over time.
+* **Blink Time Series**: Provides a binary time series plot indicating the presence or absence of blinks.
 
 ## Environment Setup ⚙️
 
@@ -108,6 +110,9 @@ The analysis generates a main folder named `analysis_results_{participant_name}`
     * `periodogram_{subj_name}_{event_name}.pdf`: A Power Spectral Density plot of the pupil diameter signal, showing frequency components.
     * `spectrogram_{subj_name}_{event_name}.pdf`: A spectrogram of the pupil diameter, showing how its frequency content changes over time.
     * `pupil_diameter_gaze_surface_{subj_name}_{event_name}.pdf`: A time series plot of left and right pupil diameters. The background dynamically changes to green when gaze is detected on the surface and red when it is not, providing a visual indicator of attention within the ROI.
+    * `saccade_velocities_{subj_name}_{event_name}.pdf`: A time series plot showing the mean and peak velocity of saccades (in pixels/second).
+    * `saccade_amplitude_{subj_name}_{event_name}.pdf`: A time series plot showing the amplitude of saccades (in pixels).
+    * `blink_time_series_{subj_name}_{event_name}.pdf`: A binary time series plot indicating when blink events occurred (1 for blink, 0 for no blink).
 
 4.  **Analysis Video (`.mp4`)**
     * `output_analysis_video.mp4`: An MP4 video that synchronizes the internal (eye) view, the external (scene) view, and a real-time plot of the pupil diameter. This is only generated if the "Generate Analysis Video" option is checked.
