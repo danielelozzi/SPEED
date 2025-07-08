@@ -100,6 +100,8 @@ The analysis generates a main folder named `analysis_results_{participant_name}`
 
 4.  **Analysis Video (`.mp4`)**
     * `output_analysis_video.mp4`: An MP4 video that synchronizes the internal (eye) view, the external (scene) view, and a real-time plot of the pupil diameter. This is only generated if the "Generate Analysis Video" option is checked.
+
+* **Note on Suffixes**: If "Dual Analysis Mode" is active, you will get separate plots for each mode: `_enriched.pdf` for surface-based data and `_not_enriched.pdf` for pixel-based data. If only one mode is run, the files will not have this suffix. Similar to the plots, the summary file will be suffixed with `_enriched.csv` or `_not_enriched.csv` when running in Dual Analysis Mode.
 ---
 
 ## ✍️ Authors & Citation
