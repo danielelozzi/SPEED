@@ -23,6 +23,7 @@ Before using this software, you need to acquire and prepare the data following a
 * **Path Plot Generation**: Automatically creates and saves PDF plots for fixation paths and raw gaze paths for each event segment.
 * **Summary Statistics**: Generates a final CSV file with aggregated metrics for each analysis segment.
 * **Automated File Management**: Creates a structured output folder for each participant, copying input files and saving results neatly.
+* **Enhanced Pupillometry Plotting**: Generates a detailed pupillometry time series plot with dynamic background coloring (green for gaze on surface, red for gaze off surface) and separate lines for left and right pupil diameters (if available), providing insights into attention and cognitive load.
 
 ## Environment Setup ⚙️
 
@@ -106,6 +107,7 @@ The analysis generates a main folder named `analysis_results_{participant_name}`
     * `path_fixation_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of fixations. The coordinates are normalized from 0 to 1.
     * `periodogram_{subj_name}_{event_name}.pdf`: A Power Spectral Density plot of the pupil diameter signal, showing frequency components.
     * `spectrogram_{subj_name}_{event_name}.pdf`: A spectrogram of the pupil diameter, showing how its frequency content changes over time.
+    * `pupil_diameter_gaze_surface_{subj_name}_{event_name}.pdf`: A time series plot of left and right pupil diameters. The background dynamically changes to green when gaze is detected on the surface and red when it is not, providing a visual indicator of attention within the ROI.
 
 4.  **Analysis Video (`.mp4`)**
     * `output_analysis_video.mp4`: An MP4 video that synchronizes the internal (eye) view, the external (scene) view, and a real-time plot of the pupil diameter. This is only generated if the "Generate Analysis Video" option is checked.
