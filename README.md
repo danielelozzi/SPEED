@@ -27,6 +27,8 @@ Before using this software, you need to acquire and prepare the data following a
 * **Saccade Analysis Plots**: Visualizes mean and peak saccade velocities over time, as well as saccade amplitude over time.
 * **Blink Time Series**: Provides a binary time series plot indicating the presence or absence of blinks.
 
+
+
 ## Environment Setup ⚙️
 
 To run the SPEED analysis tool, you'll need Python 3 and several scientific computing libraries. It's highly recommended to use a virtual environment to manage dependencies.
@@ -73,6 +75,8 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
     * Once all required fields are filled and files are selected, click the **"Start Analysis"** button.
     * The status label at the bottom will show the progress of the analysis.
     * Upon successful completion, a confirmation message will appear, and the results will be available in the specified output folder.
+
+    ![alt text](gui_speed.png)
 
 ## Input Files 📂
 
