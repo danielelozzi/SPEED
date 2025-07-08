@@ -28,7 +28,7 @@ OPTIONAL_FOR_UNENRICHED = ["gaze_enriched.csv", "fixations_enriched.csv"]
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v 0.4 - Cognitive and Behavioral Science Lab")
+        self.root.title("SPEED v 1.0 - Cognitive and Behavioral Science Lab")
         self.file_entries = {}
         
         main_frame = tk.Frame(root, padx=10, pady=10)
@@ -73,6 +73,11 @@ class SpeedApp:
         self.status_label = tk.Label(main_frame, text="", fg="blue"); self.status_label.pack(pady=5)
         lab_link = tk.Label(main_frame, text="https://labscoc.wordpress.com/", fg="blue", cursor="hand2"); lab_link.pack(side=tk.BOTTOM, pady=(5, 10))
         lab_link.bind("<Button-1>", lambda e: self.open_link("https://labscoc.wordpress.com/"))
+
+        # GitHub Link 
+        github_link = tk.Label(main_frame, text="https://github.com/danielelozzi/", fg="blue", cursor="hand2")
+        github_link.pack(side=tk.BOTTOM, pady=(0, 10)) # Added pady to the bottom
+        github_link.bind("<Button-1>", lambda e: self.open_link("https://github.com/danielelozzi/"))
 
     def update_output_dir_default(self, *args):
         subj_name = self.participant_name_var.get().strip()
