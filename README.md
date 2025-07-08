@@ -93,7 +93,7 @@ The application requires several specific CSV and MP4 files from your eye-tracki
 | `blinks.csv` | `blinks CSV file` | Data on blink events. | **Always** |
 | `saccades.csv` | `saccades CSV file` | Data on saccadic movements. | **Always** |
 | `internal.mp4` | `internal camera video` | The video recording of the participant's eye. | **Always** |
-| `external.mp4` | `external camera video` | The video recording of the participant's scene/view. **Used to get video dimensions.** | **Always** |
+| `external.mp4` | `external camera video` | The video recording of the participant's scene/view. **Used to get video dimensions and for video generation.** | **Always** |
 
 ### Output Files 📈
 
