@@ -448,6 +448,121 @@ def generate_plots(data, movements_df, subj_name, event_name, output_dir: Path, 
         print(f"ATTENZIONE: Dati di blink insufficienti per l'evento '{event_name}'.")
 
 
+    # --- Heatmaps di densità (come Figura 2) ---
+    # Questa sezione genera heatmap che mostrano la densità dei punti di fissazione e di sguardo,
+    # sia per dati arricchiti (normalizzati) che non arricchiti (pixel o normalizzati da pixel).
+
+    # Heatmap delle Fissazioni (Arricchite, su superficie)
+    if not un_enriched_mode and not fixations_enr.empty and 'fixation x [normalized]' in fixations_enr.columns:
+        fixations_enriched_on_surface = fixations_enr[fixations_enr['fixation detected on surface'] == True].copy()
+        if not fixations_enriched_on_surface.empty:
+            x = fixations_enriched_on_surface['fixation x [normalized]'].dropna()
+            y = fixations_enriched_on_surface['fixation y [normalized]'].dropna()
+            
+            if len(x) > 2:
+                try:
+                    k = gaussian_kde(np.vstack([x, y]))
+                    xi, yi = np.mgrid[0:1:100j, 0:1:100j]
+                    zi = k(np.vstack([xi.flatten(), yi.flatten()]))
+
+                    plt.figure(figsize=(10, 8))
+                    plt.pcolormesh(xi, yi, zi.reshape(xi.shape), shading='auto', cmap='Reds', alpha=0.8)
+                    plt.plot(x, y, 'k.', markersize=4, alpha=0.4)
+                    plt.title(f"Fixation Density Heatmap (Enriched) - {subj_name} - {event_name}", fontsize=15)
+                    plt.xlabel('Normalized X'); plt.ylabel('Normalized Y')
+                    plt.xlim(0, 1); plt.ylim(0, 1)
+                    plt.grid(True, linestyle='--', alpha=0.5); plt.tight_layout()
+                    plt.savefig(output_dir / f'heatmap_fixation_enriched_{subj_name}_{event_name}.pdf'); plt.close()
+                except np.linalg.LinAlgError:
+                    print(f"ATTENZIONE: Impossibile generare heatmap per fissazioni arricchite (matrice singolare).")
+
+    # Heatmap delle Fissazioni (Non Arricchite)
+    if not fixations_not_enr.empty and 'fixation x [px]' in fixations_not_enr.columns:
+        x_px = fixations_not_enr['fixation x [px]'].dropna()
+        y_px = fixations_not_enr['fixation y [px]'].dropna()
+
+        if len(x_px) > 2:
+            if video_width and video_height and video_width > 0 and video_height > 0:
+                x_coords, y_coords = x_px / video_width, y_px / video_height
+                xlabel_text, ylabel_text = 'Normalized X', 'Normalized Y'
+                xlim, ylim = (0, 1), (0, 1)
+            else:
+                x_coords, y_coords = x_px, y_px
+                xlabel_text, ylabel_text = 'Pixel X', 'Pixel Y'
+                xlim, ylim = (0, x_coords.max()), (0, y_coords.max())
+
+            try:
+                k = gaussian_kde(np.vstack([x_coords, y_coords]))
+                xi, yi = np.mgrid[xlim[0]:xlim[1]:100j, ylim[0]:ylim[1]:100j]
+                zi = k(np.vstack([xi.flatten(), yi.flatten()]))
+
+                plt.figure(figsize=(10, 8))
+                plt.pcolormesh(xi, yi, zi.reshape(xi.shape), shading='auto', cmap='Reds', alpha=0.8)
+                plt.plot(x_coords, y_coords, 'k.', markersize=4, alpha=0.4)
+                plt.title(f"Fixation Density Heatmap (Un-enriched) - {subj_name} - {event_name}", fontsize=15)
+                plt.xlabel(xlabel_text); plt.ylabel(ylabel_text)
+                plt.xlim(xlim); plt.ylim(ylim)
+                plt.grid(True, linestyle='--', alpha=0.5); plt.tight_layout()
+                plt.savefig(output_dir / f'heatmap_fixation_not_enriched_{subj_name}_{event_name}.pdf'); plt.close()
+            except np.linalg.LinAlgError:
+                print(f"ATTENZIONE: Impossibile generare heatmap per fissazioni non arricchite (matrice singolare).")
+
+    # Heatmap dello Sguardo (Arricchito, su superficie)
+    if not un_enriched_mode and not gaze_enr.empty and 'gaze position on surface x [normalized]' in gaze_enr.columns:
+        gaze_on_surface = gaze_enr[gaze_enr['gaze detected on surface'] == True].copy()
+        if not gaze_on_surface.empty:
+            x = gaze_on_surface['gaze position on surface x [normalized]'].dropna()
+            y = gaze_on_surface['gaze position on surface y [normalized]'].dropna()
+
+            if len(x) > 2:
+                try:
+                    k = gaussian_kde(np.vstack([x, y]))
+                    xi, yi = np.mgrid[0:1:100j, 0:1:100j]
+                    zi = k(np.vstack([xi.flatten(), yi.flatten()]))
+                    
+                    plt.figure(figsize=(10, 8))
+                    plt.pcolormesh(xi, yi, zi.reshape(xi.shape), shading='auto', cmap='Reds', alpha=0.8)
+                    plt.plot(x, y, 'k.', markersize=2, alpha=0.2)
+                    plt.title(f"Gaze Density Heatmap (Enriched) - {subj_name} - {event_name}", fontsize=15)
+                    plt.xlabel('Normalized X'); plt.ylabel('Normalized Y')
+                    plt.xlim(0, 1); plt.ylim(0, 1)
+                    plt.grid(True, linestyle='--', alpha=0.5); plt.tight_layout()
+                    plt.savefig(output_dir / f'heatmap_gaze_enriched_{subj_name}_{event_name}.pdf'); plt.close()
+                except np.linalg.LinAlgError:
+                    print(f"ATTENZIONE: Impossibile generare heatmap per sguardi arricchiti (matrice singolare).")
+
+    # Heatmap dello Sguardo (Non Arricchito)
+    if not gaze_not_enr.empty and 'gaze position x [px]' in gaze_not_enr.columns:
+        x_px = gaze_not_enr['gaze position x [px]'].dropna()
+        y_px = gaze_not_enr['gaze position y [px]'].dropna()
+        
+        if len(x_px) > 2:
+            if video_width and video_height and video_width > 0 and video_height > 0:
+                x_coords, y_coords = x_px / video_width, y_px / video_height
+                xlabel_text, ylabel_text = 'Normalized X', 'Normalized Y'
+                xlim, ylim = (0, 1), (0, 1)
+            else:
+                x_coords, y_coords = x_px, y_px
+                xlabel_text, ylabel_text = 'Pixel X', 'Pixel Y'
+                xlim, ylim = (0, x_coords.max()), (0, y_coords.max())
+
+            try:
+                k = gaussian_kde(np.vstack([x_coords, y_coords]))
+                xi, yi = np.mgrid[xlim[0]:xlim[1]:100j, ylim[0]:ylim[1]:100j]
+                zi = k(np.vstack([xi.flatten(), yi.flatten()]))
+
+                plt.figure(figsize=(10, 8))
+                plt.pcolormesh(xi, yi, zi.reshape(xi.shape), shading='auto', cmap='Reds', alpha=0.8)
+                plt.plot(x_coords, y_coords, 'k.', markersize=2, alpha=0.2)
+                plt.title(f"Gaze Density Heatmap (Un-enriched) - {subj_name} - {event_name}", fontsize=15)
+                plt.xlabel(xlabel_text); plt.ylabel(ylabel_text)
+                plt.xlim(xlim); plt.ylim(ylim)
+                plt.grid(True, linestyle='--', alpha=0.5); plt.tight_layout()
+                plt.savefig(output_dir / f'heatmap_gaze_not_enriched_{subj_name}_{event_name}.pdf'); plt.close()
+            except np.linalg.LinAlgError:
+                print(f"ATTENZIONE: Impossibile generare heatmap per sguardi non arricchiti (matrice singolare).")
+
+
 def process_segment(event_row, start_ts, end_ts, all_data, subj_name, output_dir, un_enriched_mode, video_width, video_height):
     """Pipeline di elaborazione principale per un singolo segmento di evento."""
     event_name = event_row.get('name', f"segment_{event_row.name}")

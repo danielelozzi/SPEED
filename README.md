@@ -26,6 +26,7 @@ Before using this software, you need to acquire and prepare the data following a
 * **Enhanced Pupillometry Plotting**: Generates a detailed pupillometry time series plot with dynamic background coloring (green for gaze on surface, red for gaze off surface) and separate lines for left and right pupil diameters (if available), providing insights into attention and cognitive load.
 * **Saccade Analysis Plots**: Visualizes mean and peak saccade velocities over time, as well as saccade amplitude over time.
 * **Blink Time Series**: Provides a binary time series plot indicating the presence or absence of blinks.
+* **Density Heatmap Generation**: Creates heatmaps that visualize the areas of highest concentration for fixations and gaze points. This visualization, similar to Figure 2 in the reference article, uses a kernel density estimate (KDE) to graphically represent eye-tracking data.
 
 
 
@@ -119,6 +120,8 @@ The analysis generates a main folder named `analysis_results_{participant_name}`
     * `blink_time_series_{subj_name}_{event_name}.pdf`: A binary time series plot indicating when blink events occurred (1 for blink, 0 for no blink).
     * `path_gaze_enriched_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of gaze points when detected on a surface. The coordinates are normalized from 0 to 1.
     * `path_gaze_not_enriched_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of raw gaze points in pixels. Coordinates might be normalized if video dimensions are available.
+    * `heatmap_fixation_{subj_name}_{event_name}.pdf`: A density heatmap (based on KDE) showing areas of high fixation concentration.
+    * `heatmap_gaze_{subj_name}_{event_name}.pdf`: A density heatmap (based on KDE) showing areas of high gaze concentration.
 
 4.  **Analysis Video (`.mp4`)**
     * `output_analysis_video.mp4`: An MP4 video that synchronizes the internal (eye) view, the external (scene) view, and a real-time plot of the pupil diameter. This is only generated if the "Generate Analysis Video" option is checked.
