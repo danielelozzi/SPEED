@@ -107,8 +107,9 @@ The analysis generates a main folder named `analysis_results_{participant_name}`
     * `summary_results_{subj_name}.csv`: A CSV file containing the main quantitative outcomes of the analysis. It includes one row per event segment and columns for various metrics like number of fixations, average fixation duration, pupil diameter statistics, and movement characteristics.
 
 3.  **Analysis Plots (`.pdf`)**
+
     *These plots visualize different aspects of the eye-tracking data for each event segment. Depending on the analysis, filenames may contain _enriched or _not_enriched suffixes.*
-    
+
     * `hist_fixations_{subj_name}_{event_name}.pdf`: A histogram of fixation durations.
     * `hist_blinks_{subj_name}_{event_name}.pdf`: A histogram of blink durations.
     * `hist_saccades_{subj_name}_{event_name}.pdf`: A histogram of saccade durations.
