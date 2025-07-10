@@ -14,7 +14,6 @@ Before using this software, you need to acquire and prepare the data following a
 **Upload to Pupil Cloud**: Once the recording is complete, upload the data to the Pupil Cloud platform.
 * *optionally* **Enrichment with Marker Mapper**: Inside Pupil Cloud, start the Marker Mapper enrichment. This process analyzes the video, detects AprilTags and generates the file `surface_positions.csv`, which contains the surface coordinates for each frame and downloads all the data. Marker Mapper Usage Guide: [**Pupil Cloud Marker Mapper**](https://docs.pupil-labs.com/neon/pupil-cloud/enrichments/marker-mapper/#setup).
 
-
 ## Features ✨
 
 * **Graphical User Interface (GUI)**: An intuitive `Tkinter`-based interface for easy file selection and configuration.
@@ -27,8 +26,6 @@ Before using this software, you need to acquire and prepare the data following a
 * **Saccade Analysis Plots**: Visualizes mean and peak saccade velocities over time, as well as saccade amplitude over time.
 * **Blink Time Series**: Provides a binary time series plot indicating the presence or absence of blinks.
 * **Density Heatmap Generation**: Creates heatmaps that visualize the areas of highest concentration for fixations and gaze points. This visualization uses a kernel density estimate (KDE) to graphically represent eye-tracking data.
-
-
 
 ## Environment Setup ⚙️
 
