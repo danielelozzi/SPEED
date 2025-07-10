@@ -26,7 +26,7 @@ Before using this software, you need to acquire and prepare the data following a
 * **Enhanced Pupillometry Plotting**: Generates a detailed pupillometry time series plot with dynamic background coloring (green for gaze on surface, red for gaze off surface) and separate lines for left and right pupil diameters (if available), providing insights into attention and cognitive load.
 * **Saccade Analysis Plots**: Visualizes mean and peak saccade velocities over time, as well as saccade amplitude over time.
 * **Blink Time Series**: Provides a binary time series plot indicating the presence or absence of blinks.
-* **Density Heatmap Generation**: Creates heatmaps that visualize the areas of highest concentration for fixations and gaze points. This visualization, similar to Figure 2 in the reference article, uses a kernel density estimate (KDE) to graphically represent eye-tracking data.
+* **Density Heatmap Generation**: Creates heatmaps that visualize the areas of highest concentration for fixations and gaze points. This visualization uses a kernel density estimate (KDE) to graphically represent eye-tracking data.
 
 
 
@@ -107,24 +107,27 @@ The analysis generates a main folder named `analysis_results_{participant_name}`
     * `summary_results_{subj_name}.csv`: A CSV file containing the main quantitative outcomes of the analysis. It includes one row per event segment and columns for various metrics like number of fixations, average fixation duration, pupil diameter statistics, and movement characteristics.
 
 3.  **Analysis Plots (`.pdf`)**
-    * These plots visualize different aspects of the eye-tracking data for each event segment.
+    *These plots visualize different aspects of the eye-tracking data for each event segment. Depending on the analysis, filenames may contain _enriched or _not_enriched suffixes.*
+    
     * `hist_fixations_{subj_name}_{event_name}.pdf`: A histogram of fixation durations.
     * `hist_blinks_{subj_name}_{event_name}.pdf`: A histogram of blink durations.
     * `hist_saccades_{subj_name}_{event_name}.pdf`: A histogram of saccade durations.
-    * `path_fixation_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of fixations. The coordinates are normalized from 0 to 1.
+    * `path_fixation_enriched_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of fixations when detected on a surface. The coordinates are normalized from 0 to 1.
+    * `path_fixation_not_enriched_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of raw fixations in pixels.
+    * `path_gaze_enriched_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of gaze points when detected on a surface. The coordinates are normalized from 0 to 1.
+    * `path_gaze_not_enriched_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of raw gaze points in pixels.
+    * `heatmap_fixation_{subj_name}_{event_name}.pdf`: A density heatmap (based on KDE) showing areas of high fixation concentration.
+    * `heatmap_gaze_{subj_name}_{event_name}.pdf`: A density heatmap (based on KDE) showing areas of high gaze concentration.
     * `periodogram_{subj_name}_{event_name}.pdf`: A Power Spectral Density plot of the pupil diameter signal, showing frequency components.
     * `spectrogram_{subj_name}_{event_name}.pdf`: A spectrogram of the pupil diameter, showing how its frequency content changes over time.
-    * `pupil_diameter_gaze_surface_{subj_name}_{event_name}.pdf`: A time series plot of left and right pupil diameters. The background dynamically changes to green when gaze is detected on the surface and red when it is not, providing a visual indicator of attention within the ROI.
+    * `pupil_diameter_gaze_surface_{subj_name}_{event_name}.pdf`: A time series plot of left and right pupil diameters. The background dynamically changes to green when gaze is detected on the surface and red when it is not.
+    * `pupil_diameter_mean_gaze_surface_{subj_name}_{event_name}.pdf`: A time series plot of the mean pupil diameter. Similar to the other pupillometry plot, the background is colored to indicate gaze position.
     * `saccade_velocities_{subj_name}_{event_name}.pdf`: A time series plot showing the mean and peak velocity of saccades (in pixels/second).
     * `saccade_amplitude_{subj_name}_{event_name}.pdf`: A time series plot showing the amplitude of saccades (in pixels).
     * `blink_time_series_{subj_name}_{event_name}.pdf`: A binary time series plot indicating when blink events occurred (1 for blink, 0 for no blink).
-    * `path_gaze_enriched_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of gaze points when detected on a surface. The coordinates are normalized from 0 to 1.
-    * `path_gaze_not_enriched_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of raw gaze points in pixels. Coordinates might be normalized if video dimensions are available.
-    * `heatmap_fixation_{subj_name}_{event_name}.pdf`: A density heatmap (based on KDE) showing areas of high fixation concentration.
-    * `heatmap_gaze_{subj_name}_{event_name}.pdf`: A density heatmap (based on KDE) showing areas of high gaze concentration.
-
+   
 4.  **Analysis Video (`.mp4`)**
-    * `output_analysis_video.mp4`: An MP4 video that synchronizes the internal (eye) view, the external (scene) view, and a real-time plot of the pupil diameter. This is only generated if the "Generate Analysis Video" option is checked.
+    * `output_analysis_video.mp4`: An MP4 video that synchronizes the internal (eye) view, the external (scene) view, and a real-time plot of the pupil diameters (right, left, mean) and blinks. This is only generated if the "Generate Analysis Video" option is checked.
 
     *Note on Suffixes*: If "Dual Analysis Mode" is active, you will get separate plots for each mode: `_enriched.pdf` for surface-based data and `_not_enriched.pdf` for pixel-based data. If only one mode is run, the files will not have this suffix. Similar to the plots, the summary file will be suffixed with `_enriched.csv` or `_not_enriched.csv` when running in Dual Analysis Mode.
 ---
