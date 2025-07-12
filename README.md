@@ -148,6 +148,9 @@ Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Ademaj, M.; Migliore, S.; Curcio, G. SP
 
 Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Alemanno, M.; Krüger, M.; Curcio, G.; Migliore, S. AI-Powered Analysis of Eye Tracker Data in Basketball Game. Sensors 2025, 25, 3572. [https://doi.org/10.3390/s25113572](https://doi.org/10.3390/s25113572)
 
+* Is also request to cite Pupil Labs publication, as requested in their website <https://docs.pupil-labs.com/neon/data-collection/publicatheir-and-citation/>
+
+     * Baumann, C., & Dierkes, K. (2023). Neon accuracy test report. Pupil Labs, 10.
 ---
 
 *This tool is developed for the Cognitive and Behavioral Science Lab. For more information, visit [our website](https://labscoc.wordpress.com/).*
