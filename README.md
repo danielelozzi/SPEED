@@ -1,33 +1,41 @@
-# SPEED (labScoc Processing and Extraction of Eye tracking Data)
+# SPEED v3.1 - labScoc Processing and Extraction of Eye tracking Data
 
-*Eye-Tracking Data Analysis Software*
+*An Advanced Eye-Tracking Data Analysis Software*
 
-**NEW VERSION WITH COMPUTER-VISION FEATURES :*[SPEED-CV] labScoc Processing and Extraction of Eye tracking Data - Computer Vision*** [https://github.com/danielelozzi/SPEED-CV](https://github.com/danielelozzi/SPEED-CV).
+SPEED is a Python-based tool with a graphical user interface (GUI) for processing, analyzing, and visualizing eye-tracking data from cognitive and behavioral experiments. This version introduces a powerful folder-based workflow, deeper integration of YOLO object detection analysis, and new visualization options.
 
-SPEED is a Python-based tool with a graphical user interface (GUI) for processing and analyzing eye-tracking data from cognitive and behavioral experiments. It is designed to segment data based on predefined events, calculate key metrics, and generate visualizations of eye movements like gaze paths and fixations.
+## The Modular Workflow
 
-The tool can handle both raw (un-enriched) and surface-projected (enriched) eye-tracking data, making it flexible for various stages of the analysis pipeline.
+SPEED v3.1 operates on a two-step workflow designed to save time and computational resources.
 
-## Data acquisition 📋
+**Step 1: Run Core Analysis**
+This is the main data processing stage. You run this step **only once** per participant. The software will:
+1.  Load all necessary files from the specified input folders (RAW, Un-enriched, Enriched).
+2.  Segment the data based on the `events.csv` file.
+3.  Calculate all relevant statistics for each segment.
+4.  Optionally run YOLO object detection on the video frames, saving the results to a cache to speed up future runs.
+5.  Save the processed data (e.g., filtered dataframes for each event) and summary statistics into the output folder.
+
+This step creates a `processed_data` directory containing intermediate files. Once this is complete, you do not need to run it again for the same participant.
+
+**Step 2: Generate Outputs On-Demand**
+After the core analysis is complete, you can use the dedicated tabs in the GUI to generate as many plots and videos as you need, with any combination of settings, without re-processing the raw data.
+* **Generate Plots:** Select which categories of plots you want to create.
+* **Generate Videos:** Compose highly customized videos by selecting different overlays and processing options.
+* **View YOLO Results:** Load and view the quantitative results from the object detection analysis.
+
+---
+
+## Data Acquisition 📋
 
 Before using this software, you need to acquire and prepare the data following a specific procedure with Pupil Labs tools.
-* **Video Recording**: Use Pupil Labs Neon glasses to record the session
-* *optionally* **Surface Definition (AprilTag)**: Place AprilTags at the four corners of the PC screen. These markers allow the Pupil Labs software to track the surface and map the coordinates of the gaze on it. For more details, see the official documentation: [**Pupil Labs Surface Tracker**](https://docs.pupil-labs.com/neon/neon-player/surface-tracker/).
-**Upload to Pupil Cloud**: Once the recording is complete, upload the data to the Pupil Cloud platform.
-* *optionally* **Enrichment with Marker Mapper**: Inside Pupil Cloud, start the Marker Mapper enrichment. This process analyzes the video, detects AprilTags and generates the file `surface_positions.csv`, which contains the surface coordinates for each frame and downloads all the data. Marker Mapper Usage Guide: [**Pupil Cloud Marker Mapper**](https://docs.pupil-labs.com/neon/pupil-cloud/enrichments/marker-mapper/#setup).
 
-## Features ✨
+* **Video Recording**: Use Pupil Labs Neon glasses to record the session.
+* *(optional)* **Surface Definition (AprilTag)**: Place AprilTags at the four corners of a PC screen. These markers allow the Pupil Labs software to track the surface and map gaze coordinates onto it. For more details, see the official documentation: [**Pupil Labs Surface Tracker**](https://docs.pupil-labs.com/neon/neon-player/surface-tracker/).
+* **Upload to Pupil Cloud**: Once the recording is complete, upload the data to the Pupil Cloud platform.
+* *(optional)* **Enrichment with Marker Mapper**: Inside Pupil Cloud, start the "Marker Mapper" enrichment. This process analyzes the video, detects the AprilTags, generates the `surface_positions.csv` file (which contains the surface coordinates for each frame), and downloads all the data. Marker Mapper Usage Guide: [**Pupil Cloud Marker Mapper**](https://docs.pupil-labs.com/neon/pupil-cloud/enrichments/marker-mapper/#setup).
 
-* **Graphical User Interface (GUI)**: An intuitive `Tkinter`-based interface for easy file selection and configuration.
-* **Event-Based Segmentation**: Analyzes eye-tracking data in segments defined by timestamps in an `events.csv` file.
-* **Dual Analysis Mode**: Supports both "un-enriched" (pixel-based) and "enriched" (surface-normalized) data. If enriched data is provided, the tool can run a dual analysis to produce results for both modes.
-* **Path Plot Generation**: Automatically creates and saves PDF plots for fixation paths and raw gaze paths for each event segment.
-* **Summary Statistics**: Generates a final CSV file with aggregated metrics for each analysis segment.
-* **Automated File Management**: Creates a structured output folder for each participant, copying input files and saving results neatly.
-* **Enhanced Pupillometry Plotting**: Generates a detailed pupillometry time series plot with dynamic background coloring (green for gaze on surface, red for gaze off surface) and separate lines for left and right pupil diameters (if available), providing insights into attention and cognitive load.
-* **Saccade Analysis Plots**: Visualizes mean and peak saccade velocities over time, as well as saccade amplitude over time.
-* **Blink Time Series**: Provides a binary time series plot indicating the presence or absence of blinks.
-* **Density Heatmap Generation**: Creates heatmaps that visualize the areas of highest concentration for fixations and gaze points. This visualization uses a kernel density estimate (KDE) to graphically represent eye-tracking data.
+---
 
 ## Environment Setup ⚙️
 
@@ -40,117 +48,165 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
     ```
 
 2.  **Install the required libraries:**
-    Based on the scripts, the required libraries are `pandas`, `numpy`, `matplotlib`, `opencv-python`, and `scipy`. Create a `requirements.txt` file with the following content:
+    The required libraries depend on the analysis you want to run. Create a `requirements.txt` file with the content below. For the optional YOLO analysis, you will need `torch` and `ultralytics`.
     ```
     pandas
     numpy
     matplotlib
     opencv-python
     scipy
+    tqdm
+    # Optional for YOLO analysis
+    torch
+    ultralytics
     ```
     Then, install them using pip:
     ```bash
     pip install -r requirements.txt
     ```
-    *Note: `Tkinter` is part of the Python standard library and does not require a separate installation.*
+    * **Note on `Tkinter`**: This is part of the Python standard library and does not require a separate installation.
+    * **Note on `torch`**: Installing PyTorch can be complex, especially if you want to use a GPU (highly recommended for YOLO). Please refer to the official [PyTorch installation guide](https://pytorch.org/get-started/locally/) for instructions tailored to your system.
+    * **Note on YOLO**: To use YOLO, you must download the pre-trained neural network weights from the following link: [**yolov8n.pt Download**](https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt). Place this file in the same directory as the scripts.
+
+---
 
 ## How to Use the Application 🚀
 
-1.  **Launch the GUI**: Run the `SPEED_gui.py` script from your terminal.
+1.  **Launch the GUI**: Run the `GUI.py` script from your terminal.
     ```bash
-    python SPEED_gui.py
+    python GUI.py
     ```
 
-2.  **Fill in the Information**:
-    * **Participant Name**: Enter a unique identifier for the participant. This name will be used to create the main output folder.
-    * **Output Folder**: The application will automatically suggest an output path based on the participant's name (e.g., `./analysis_results_participant_name`). You can also use the "Browse..." button to select a different location.
-    * **Analysis Options**:
-        * `Analyze un-enriched data only`: Check this if you only want to process data using pixel coordinates from the raw eye-tracking files (`fixations.csv`, `gaze.csv`). This will disable the input fields for enriched data files.
-        * `Generate Analysis Video`: If checked, the tool will attempt to create a video overlay of the analysis (this is a slower process).
+2.  **Sections 1-3: Setup and Core Analysis**
+    * In the top sections of the GUI, fill in the **Participant Name** and select the **Output Folder**.
+    * Use the "Browse..." buttons to select the required **Input Folders**: **RAW**, **Un-enriched**, and optionally, **Enriched**.
+    * In the "Run Core Analysis" section, configure the analysis mode:
+        * `Analyze un-enriched data only`: Check this box to base the entire analysis on raw pixel data.
+        * `Run YOLO Object Detection`: Check this to perform object detection.
+    * Click the **"RUN CORE ANALYSIS"** button and wait for the confirmation message. This completes the main data processing.
 
-3.  **Select Input Files**:
-    * Click the "Browse..." button next to each file type to select the corresponding data file for your participant. See the table below for a description of each file.
+    ![GUI - Setup and Core Analysis](gui1.png)
 
-4.  **Start the Analysis**:
-    * Once all required fields are filled and files are selected, click the **"Start Analysis"** button.
-    * The status label at the bottom will show the progress of the analysis.
-    * Upon successful completion, a confirmation message will appear, and the results will be available in the specified output folder.
+3.  **Section 4: Generate Plots**
+    * Switch to the "4. Generate Plots" tab.
+    * Select the categories of plots you wish to generate (e.g., Heatmaps, Path Plots, Advanced Time Series).
+    * Click the **"GENERATE SELECTED PLOTS"** button.
 
-    ![alt text](gui_speed.png)
+    ![GUI - Plot Generation Tab](gui2.png)
 
-## Input Files 📂
+4.  **Section 5: Generate Videos**
+    * Switch to the "5. Generate Videos" tab.
+    * **Configure Video Composition**: Select the desired options for your video (e.g., crop to surface, overlay gaze point, include internal camera).
+    * **Set the Output Video Filename**.
+    * Click the **"GENERATE VIDEO"** button. You can repeat this step with different settings to create multiple videos from the same analysis.
 
-The application requires several specific CSV and MP4 files from your eye-tracking experiment. The `REQUIRED_FILES` are listed below.
+    ![GUI - Video Generation Tab](gui3.png)
+    
+5.  **Section 6: YOLO Results**
+    * Switch to the "6. YOLO Results" tab.
+    * Click **"Load/Refresh YOLO Results"**.
+    * The "Results per Class" and "Results per Instance" tables will be populated with the statistics calculated during the Core Analysis.
 
-| Standard Name | Display Label (in GUI) | Description | Required |
-| --- | --- | --- | --- |
-| `events.csv` | `events.csv` | Contains timestamps that define the start and end of experimental segments. | **Always** |
-| `gaze_enriched.csv` | `gaze CSV file (enriched)` | Gaze data with coordinates normalized to a detected surface. | Optional (if "un-enriched only" is checked) |
-| `fixations_enriched.csv` | `enriched fixations CSV file` | Fixation data with coordinates normalized to a detected surface. | Optional (if "un-enriched only" is checked) |
-| `gaze.csv` | `un-enriched gaze CSV file` | Raw gaze data with coordinates in pixels (`px`). | **Always** |
-| `fixations.csv` | `un-enriched fixations CSV file` | Raw fixation data with coordinates in pixels (`px`). | **Always** |
-| `3d_eye_states.csv` | `3D eye states CSV file (pupil)` | Pupil diameter and other 3D eye model data. | **Always** |
-| `blinks.csv` | `blinks CSV file` | Data on blink events. | **Always** |
-| `saccades.csv` | `saccades CSV file` | Data on saccadic movements. | **Always** |
-| `internal.mp4` | `internal camera video` | The video recording of the participant's eye. | **Always** |
-| `external.mp4` | `external camera video` | The video recording of the participant's scene/view. **Used to get video dimensions and for video generation.** | **Always** |
+    ![GUI - YOLO Results Tab](gui4.png)
 
-### Output Files 📈
-
-The analysis generates a main folder named `analysis_results_{participant_name}` with the following contents:
-
-1.  **`eyetracking_file/`**
-    * A subfolder containing copies of all the input files used for the analysis. This ensures reproducibility.
-
-2.  **Summary Results (`.csv`)**
-    * `summary_results_{subj_name}.csv`: A CSV file containing the main quantitative outcomes of the analysis. It includes one row per event segment and columns for various metrics like number of fixations, average fixation duration, pupil diameter statistics, and movement characteristics.
-
-3.  **Analysis Plots (`.pdf`)**
-
-    *These plots visualize different aspects of the eye-tracking data for each event segment. Depending on the analysis, filenames may contain _enriched or _not_enriched suffixes.*
-
-    * `hist_fixations_{subj_name}_{event_name}.pdf`: A histogram of fixation durations.
-    * `hist_blinks_{subj_name}_{event_name}.pdf`: A histogram of blink durations.
-    * `hist_saccades_{subj_name}_{event_name}.pdf`: A histogram of saccade durations.
-    * `path_fixation_enriched_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of fixations when detected on a surface. The coordinates are normalized from 0 to 1.
-    * `path_fixation_not_enriched_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of raw fixations in pixels.
-    * `path_gaze_enriched_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of gaze points when detected on a surface. The coordinates are normalized from 0 to 1.
-    * `path_gaze_not_enriched_{subj_name}_{event_name}.pdf`: A plot showing the sequence and path of raw gaze points in pixels.
-    * `heatmap_fixation_{subj_name}_{event_name}.pdf`: A density heatmap (based on KDE) showing areas of high fixation concentration.
-    * `heatmap_gaze_{subj_name}_{event_name}.pdf`: A density heatmap (based on KDE) showing areas of high gaze concentration.
-    * `periodogram_{subj_name}_{event_name}.pdf`: A Power Spectral Density plot of the pupil diameter signal, showing frequency components.
-    * `spectrogram_{subj_name}_{event_name}.pdf`: A spectrogram of the pupil diameter, showing how its frequency content changes over time.
-    * `pupil_diameter_gaze_surface_{subj_name}_{event_name}.pdf`: A time series plot of left and right pupil diameters. The background dynamically changes to green when gaze is detected on the surface and red when it is not.
-    * `pupil_diameter_mean_gaze_surface_{subj_name}_{event_name}.pdf`: A time series plot of the mean pupil diameter. Similar to the other pupillometry plot, the background is colored to indicate gaze position.
-    * `saccade_velocities_{subj_name}_{event_name}.pdf`: A time series plot showing the mean and peak velocity of saccades (in pixels/second).
-    * `saccade_amplitude_{subj_name}_{event_name}.pdf`: A time series plot showing the amplitude of saccades (in pixels).
-    * `blink_time_series_{subj_name}_{event_name}.pdf`: A binary time series plot indicating when blink events occurred (1 for blink, 0 for no blink).
-   
-4.  **Analysis Video (`.mp4`)**
-    * `output_analysis_video.mp4`: An MP4 video that synchronizes the internal (eye) view, the external (scene) view, and a real-time plot of the pupil diameters (right, left, mean) and blinks. This is only generated if the "Generate Analysis Video" option is checked.
-
-    *Note on Suffixes*: If "Dual Analysis Mode" is active, you will get separate plots for each mode: `_enriched.pdf` for surface-based data and `_not_enriched.pdf` for pixel-based data. If only one mode is run, the files will not have this suffix. Similar to the plots, the summary file will be suffixed with `_enriched.csv` or `_not_enriched.csv` when running in Dual Analysis Mode.
 ---
 
+## Input Folder Structure 📂
+
+The application now expects a specific folder structure as input. You must organize the files exported from Pupil Cloud into three separate folders.
+
+### 1. RAW Data Folder
+This folder should contain the raw media files.
+| Filename | Requirement |
+|---|---|
+| `Neon Sensor Module v1 ps1.mp4` | **Always** (will be renamed to `internal.mp4`) |
+
+### 2. Un-enriched Data Folder
+This folder contains the main gaze and event data in pixel coordinates, along with the scene video.
+| Filename | Requirement |
+|---|---|
+| `external.mp4` (or any single `.mp4`) | **Always** (must be only one video file) |
+| `events.csv` | **Always** |
+| `gaze.csv` | **Always** |
+| `fixations.csv` | **Always** |
+| `blinks.csv` | **Always** |
+| `saccades.csv` | **Always** |
+| `3d_eye_states.csv` | **Always** |
+| `world_timestamps.csv` | **Always** |
+
+### 3. Enriched Data Folder
+This folder contains data that has been "enriched" in Pupil Cloud, typically mapped to a defined surface.
+| Filename | Requirement |
+|---|---|
+| `gaze.csv` | Required if "un-enriched only" is **unchecked** (will be used as `gaze_enriched.csv`) |
+| `fixations.csv` | Required if "un-enriched only" is **unchecked** (will be used as `fixations_enriched.csv`) |
+| `surface_positions.csv` | Required for video perspective cropping/correction |
+
+---
+
+## Output Files 📈
+
+All outputs are saved within the specified `analysis_results_{participant_name}` folder.
+
+* **`eyetracking_file/`**: Contains copies of all the input files used for the analysis.
+* **`processed_data/`**: Contains intermediate data files (`.pkl`) for each event segment. This is what allows for on-demand output generation.
+* **`plots/`**: Contains all the generated PDF plots.
+* **`config.json`**: A file saving the settings used for the Core Analysis.
+* **`summary_results_{subj_name}.csv`**: A CSV file with the main quantitative outcomes of the analysis.
+* **`{video_name}.mp4`**: Each custom video you generate is saved in the main output folder with the name you provide.
+* **YOLO Outputs**:
+    * `yolo_detections_cache.csv`: A cache of the raw YOLO detections to speed up future runs.
+    * `statistiche_per_classe.csv`: Aggregated statistics for each object class (e.g., 'person', 'car'). Includes fixation counts and average pupil diameter.
+    * `statistiche_per_istanza.csv`: Statistics for each individual tracked object instance (e.g., 'person_1', 'person_2').
+    * `mappa_id_classe.csv`: A utility file that maps the internal tracking IDs to class and instance names.
+
+### Detailed Plot Outputs
+* **Histograms**:
+    * `hist_fix_unenriched_{event}.pdf`, `hist_fix_enriched_{event}.pdf`
+    * `hist_blinks_{event}.pdf`, `hist_saccades_{event}.pdf`
+* **Path Plots**:
+    * `path_fix_unenriched_{event}.pdf`, `path_gaze_unenriched_{event}.pdf`
+    * `path_fix_enriched_{event}.pdf`, `path_gaze_enriched_{event}.pdf`
+* **Heatmaps**:
+    * `heatmap_fix_unenriched_{event}.pdf`, `heatmap_gaze_unenriched_{event}.pdf`
+    * `heatmap_fix_enriched_{event}.pdf`, `heatmap_gaze_enriched_{event}.pdf`
+* **Pupillometry**:
+    * `pupillometry_{event}.pdf`: Time series plot of the pupil diameters. In enriched mode, the background is colored to indicate when gaze is on the surface (green) or off (red).
+    * `periodogram_total_{event}.pdf`, `spectrogram_total_{event}.pdf`
+    * `periodogram_onsurface_{event}.pdf`, `spectrogram_onsurface_{event}.pdf` (enriched mode only).
+* **Advanced Time Series (New!)**:
+    * `pupil_diameter_mean_{event}.pdf`: Time series of the mean pupil diameter (left and right).
+    * `saccade_velocities_{event}.pdf`: The mean and peak velocity of each saccade over time.
+    * `saccade_amplitude_{event}.pdf`: The amplitude of each saccade over time.
+    * `blink_time_series_{event}.pdf`: A visualization of blink events across the entire segment duration.
+
+---
+## 🧪 Synthetic Data Generator (`generate_synthetic_data.py`)
+
+Included in this project is a utility script to create a full set of dummy eye-tracking data. This is extremely useful for testing the SPEED software without needing Pupil Labs hardware or actual recordings.
+
+### Purpose
+The script generates all the necessary `.csv` and `.mp4` files that mimic a real recording session, including gaze movements, blinks, saccades, a moving surface, and the corresponding scene and eye videos.
+
+### How to Use
+1.  Run the script from your terminal:
+    ```bash
+    python generate_synthetic_data.py
+    ```
+2.  The script will create a new folder named `synthetic_data` in the current directory.
+3.  This folder will contain all the necessary files (`gaze.csv`, `fixations.csv`, `world.mp4`, etc.).
+4.  In the SPEED GUI, you can now use the `synthetic_data` folder as input (e.g., for both the "Un-enriched Data Folder" and "Enriched Data Folder" paths) to run a full analysis pipeline.
+
+---
 ## ✍️ Authors & Citation
 
-* Dr. Daniele Lozzi
-* Dr. Ilaria Di Pompeo
-* Martina Marcaccio
-* Matias Ademaj
-* Dr. Simone Migliore
-* Prof. Giuseppe Curcio
+* This tool is developed by the **Cognitive and Behavioral Science Lab (LabSCoC), University of L'Aquila** and **Dr. Daniele Lozzi**.
+* If you use this script in your research or work, please cite the following publications:
+    * Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Ademaj, M.; Migliore, S.; Curcio, G. SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. NeuroSci 2025, 6, 35. <https://doi.org/10.3390/neurosci6020035>
+    * Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Alemanno, M.; Krüger, M.; Curcio, G.; Migliore, S. AI-Powered Analysis of Eye Tracker Data in Basketball Game. Sensors 2025, 25, 3572. <https://doi.org/10.3390/s25113572>
 
+* It is also requested to cite Pupil Labs publication, as requested on their website <https://docs.pupil-labs.com/neon/data-collection/publicatheir-and-citation/>
+    * Baumann, C., & Dierkes, K. (2023). Neon accuracy test report. Pupil Labs, 10.
 
-*If you use this script in your research or work, please cite the following publications:*
-
-Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Ademaj, M.; Migliore, S.; Curcio, G. SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. NeuroSci 2025, 6, 35. [https://doi.org/10.3390/neurosci6020035](https://doi.org/10.3390/neurosci6020035)
-
-Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Alemanno, M.; Krüger, M.; Curcio, G.; Migliore, S. AI-Powered Analysis of Eye Tracker Data in Basketball Game. Sensors 2025, 25, 3572. [https://doi.org/10.3390/s25113572](https://doi.org/10.3390/s25113572)
-
-* Is also request to cite Pupil Labs publication, as requested in their website <https://docs.pupil-labs.com/neon/data-collection/publicatheir-and-citation/>
-
-     * Baumann, C., & Dierkes, K. (2023). Neon accuracy test report. Pupil Labs, 10.
----
-
-*This tool is developed for the Cognitive and Behavioral Science Lab. For more information, visit [our website](https://labscoc.wordpress.com/).*
+* If you also use the Computer Vision YOLO-based feature, please cite the following publication:
+    * Redmon, J., Divvala, S., Girshick, R., & Farhadi, A. (2016). You only look once: Unified, real-time object detection. In Proceedings of the IEEE conference on computer vision and pattern recognition (pp. 779-788). <https://doi.org/10.1109/CVPR.2016.91>
