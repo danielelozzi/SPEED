@@ -85,14 +85,14 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
         * `Run YOLO Object Detection`: Check this to perform object detection.
     * Click the **"RUN CORE ANALYSIS"** button and wait for the confirmation message. This completes the main data processing.
 
-    ![GUI - Setup and Core Analysis](gui1.png)
+    ![GUI - Setup and Core Analysis](images/gui1.png)
 
 3.  **Section 4: Generate Plots**
     * Switch to the "4. Generate Plots" tab.
     * Select the categories of plots you wish to generate (e.g., Heatmaps, Path Plots, Advanced Time Series).
     * Click the **"GENERATE SELECTED PLOTS"** button.
 
-    ![GUI - Plot Generation Tab](gui2.png)
+    ![GUI - Plot Generation Tab](images/gui2.png)
 
 4.  **Section 5: Generate Videos**
     * Switch to the "5. Generate Videos" tab.
@@ -100,14 +100,14 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
     * **Set the Output Video Filename**.
     * Click the **"GENERATE VIDEO"** button. You can repeat this step with different settings to create multiple videos from the same analysis.
 
-    ![GUI - Video Generation Tab](gui3.png)
+    ![GUI - Video Generation Tab](images/gui3.png)
     
 5.  **Section 6: YOLO Results**
     * Switch to the "6. YOLO Results" tab.
     * Click **"Load/Refresh YOLO Results"**.
     * The "Results per Class" and "Results per Instance" tables will be populated with the statistics calculated during the Core Analysis.
 
-    ![GUI - YOLO Results Tab](gui4.png)
+    ![GUI - YOLO Results Tab](images/gui4.png)
 
 ---
 
