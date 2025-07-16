@@ -16,7 +16,7 @@ PUPIL_PLOT_HISTORY = 200
 PUPIL_PLOT_WIDTH = 350 # Slightly increased for the legend
 PUPIL_PLOT_HEIGHT = 150
 PUPIL_BG_COLOR = (80, 80, 80)
-# MODIFIED: Colors for the different plot lines
+# Colors for the different plot lines
 PUPIL_COLORS = {
     "Left": (80, 80, 255),   # Red
     "Right": (80, 255, 80),  # Green
@@ -42,7 +42,7 @@ def _prepare_data(data_dir: Path, un_enriched_mode: bool, options: dict):
         tolerance=pd.Timedelta('50ms').value
     )
     
-    # MODIFIED: Load both pupil data and calculate the mean
+    # Load both pupil data and calculate the mean
     if options.get('overlay_pupil_plot'):
         try:
             pupil_df = pd.read_csv(data_dir / '3d_eye_states.csv').sort_values('timestamp [ns]')
@@ -93,7 +93,7 @@ def _prepare_data(data_dir: Path, un_enriched_mode: bool, options: dict):
 
 def _draw_pupil_plot(frame: np.ndarray, plot_data_dict: dict, min_val: float, max_val: float, width: int, height: int, position: tuple):
     """
-    MODIFIED: Draws a multi-line graph for pupil data with a legend.
+    Draws a multi-line graph for pupil data with a legend.
     """
     if not plot_data_dict or max_val == min_val:
         return frame
@@ -149,7 +149,7 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
         print(f"ERROR: Cannot open external video: {external_vid_path}")
         return
 
-    # MODIFIED: Open the internal camera video if the option is active
+    # Open the internal camera video if the option is active
     cap_int = None
     if options.get('include_internal_cam'):
         internal_vid_path = data_dir / 'internal.mp4'
@@ -174,7 +174,7 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
     writer = cv2.VideoWriter(str(video_out_path), fourcc, fps, (out_w, out_h))
     print(f"The output video will be saved to: {video_out_path}")
 
-    # MODIFIED: Setup for the three pupil plot lines
+    # Setup for the three pupil plot lines
     pupil_plot_data = {"Left": [], "Right": [], "Mean": []}
     pupil_min, pupil_max = 0, 1
     pupil_cols = {
@@ -207,7 +207,7 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
 
             # --- OVERLAYS ---
             
-            # MODIFIED: Logic for the internal camera (PiP) in the top-left corner
+            # Logic for the internal camera (PiP) in the top-left corner
             if options.get('include_internal_cam') and cap_int is not None:
                 ret_int, frame_int = cap_int.read()
                 if ret_int:
@@ -227,11 +227,11 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                 if 0 <= px < out_w and 0 <= py < out_h:
                     cv2.circle(frame, (px, py), GAZE_RADIUS, GAZE_COLOR, GAZE_THICKNESS, cv2.LINE_AA)
             
-            # BLINK text in the bottom-right (position unchanged)
+            # BLINK text in the bottom-right
             if frame_data.get('is_blinking', False):
                 cv2.putText(frame, "BLINK", (out_w - 150, out_h - 20), cv2.FONT_HERSHEY_TRIPLEX, 1.5, BLINK_TEXT_COLOR, 2)
             
-            # MODIFIED: Logic for the pupil plot in the top-right corner
+            # Logic for the pupil plot in the top-right corner
             if options.get('overlay_pupil_plot'):
                 for name, col in pupil_cols.items():
                     if col in frame_data:

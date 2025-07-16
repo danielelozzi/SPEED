@@ -92,14 +92,14 @@ class SpeedApp:
         plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='4. Generate Plots')
         video_tab = tk.Frame(notebook); notebook.add(video_tab, text='5. Generate Videos')
         
-        # --- NEW TAB for YOLO results ---
+        # --- TAB for YOLO results ---
         yolo_tab = tk.Frame(notebook); notebook.add(yolo_tab, text='6. YOLO Results')
 
         self.setup_plot_tab(plot_tab)
         self.setup_video_tab(video_tab)
         self.setup_yolo_tab(yolo_tab) # Call the new setup function
 
-        # --- ADDED: CREDITS SECTION ---
+        # --- CREDITS SECTION ---
         credits_frame = tk.LabelFrame(main_frame, text="Credits", padx=10, pady=10)
         credits_frame.pack(fill=tk.X, pady=(20, 10), padx=10)
 
@@ -109,7 +109,7 @@ class SpeedApp:
         tk.Label(credits_frame, text="Dr. Daniele Lozzi (https://github.com/danielelozzi)", justify=tk.LEFT).pack(anchor='w')
 
 
-    # --- EDIT: CROSS-PLATFORM SCROLLING FUNCTION ---
+    # --- CROSS-PLATFORM SCROLLING FUNCTION ---
     def _on_mousewheel(self, event):
         """Handles mouse wheel scrolling in a cross-platform way."""
         # Windows and macOS use event.delta
@@ -138,12 +138,10 @@ class SpeedApp:
         video_options_frame = tk.LabelFrame(parent_tab, text="Video Composition Options", padx=10, pady=10)
         video_options_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # --- MODIFIED OPTION LOGIC ---
         # "crop_to_surface" and "apply_perspective" have been merged into a single option.
         self.video_vars['crop_and_correct_perspective'] = tk.BooleanVar(value=False)
         tk.Checkbutton(video_options_frame, text="Crop & Correct Perspective to Surface", variable=self.video_vars['crop_and_correct_perspective']).pack(anchor='w')
         
-        # The other options remain unchanged
         video_opts = {
             "overlay_yolo": "Overlay YOLO object detections", "overlay_gaze": "Overlay gaze point",
             "overlay_pupil_plot": "Overlay blinks and pupillometry plot", "include_internal_cam": "Include internal camera view (PiP)",

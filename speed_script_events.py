@@ -282,7 +282,6 @@ def _plot_generic_timeseries(x_data, y_data_dict, title, xlabel, ylabel, output_
     if span_df is not None and not span_df.empty and 'gaze detected on surface' in span_df.columns:
         # Create a copy to avoid SettingWithCopyWarning
         span_df_copy = span_df.copy()
-        # --- CORRECTED LINE TO AVOID FUTUREWARNING ---
         span_df_copy['gaze detected on surface'] = span_df_copy['gaze detected on surface'].fillna(False)
         
         for status, color in [(True, 'lightgreen'), (False, 'lightcoral')]:
