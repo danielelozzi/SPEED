@@ -1,19 +1,8 @@
-Main library for object detection
 ultralytics
-
-Required for data handling and plotting by ultralytics and other scripts
 pandas
 seaborn
 matplotlib
-
-Required for video processing
 opencv-python
-
-Required for scientific computing (e.g., signal processing)
 scipy
-
-Required for progress bars
 tqdm
-
-Library to create the executable
 pyinstaller
