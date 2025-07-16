@@ -34,13 +34,21 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # Install requirements from file
           pip install -r requirements.txt
-          pip install pyinstaller
+          # Install pyinstaller and other common problematic dependencies for ultralytics
+          pip install pyinstaller pandas seaborn
 
       # 4. Run PyInstaller to create the executable
       - name: Build with PyInstaller
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name "SpeedAnalyzer" --add-data "yolo:yolo" GUI.py
+          pyinstaller --noconfirm --onefile --windowed --name "SpeedAnalyzer" \
+          --add-data "yolo:yolo" \
+          --hidden-import "pandas" \
+          --hidden-import "seaborn" \
+          --hidden-import "ultralytics.utils" \
+          --hidden-import "pkg_resources.extern" \
+          GUI.py
 
       # 5. Upload the result (the executable) as an "artifact"
       # This allows you to download the files at the end of the process
