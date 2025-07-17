@@ -1,18 +1,18 @@
-# SPEED v3.2 - labScoc Processing and Extraction of Eye tracking Data
+# SPEED v3.1 - labScoc Processing and Extraction of Eye tracking Data
 
 *An Advanced Eye-Tracking Data Analysis Software*
 
-SPEED is a Python-based tool with a graphical user interface (GUI) for processing, analyzing, and visualizing eye-tracking data from cognitive and behavioral experiments. This version introduces a powerful folder-based workflow, deeper integration of YOLO object detection analysis, and new visualization options, including **Gaze Fragmentation**.
+SPEED is a Python-based tool with a graphical user interface (GUI) for processing, analyzing, and visualizing eye-tracking data from cognitive and behavioral experiments. This version introduces a powerful folder-based workflow, deeper integration of YOLO object detection analysis, and new visualization options.
 
 ## The Modular Workflow
 
-SPEED v3.2 operates on a two-step workflow designed to save time and computational resources.
+SPEED v3.1 operates on a two-step workflow designed to save time and computational resources.
 
 **Step 1: Run Core Analysis**
 This is the main data processing stage. You run this step **only once** per participant. The software will:
 1.  Load all necessary files from the specified input folders (RAW, Un-enriched, Enriched).
 2.  Segment the data based on the `events.csv` file.
-3.  Calculate all relevant statistics for each segment, including **gaze fragmentation** (speed).
+3.  Calculate all relevant statistics for each segment.
 4.  Optionally run YOLO object detection on the video frames, saving the results to a cache to speed up future runs.
 5.  Save the processed data (e.g., filtered dataframes for each event) and summary statistics into the output folder.
 
@@ -20,8 +20,8 @@ This step creates a `processed_data` directory containing intermediate files. On
 
 **Step 2: Generate Outputs On-Demand**
 After the core analysis is complete, you can use the dedicated tabs in the GUI to generate as many plots and videos as you need, with any combination of settings, without re-processing the raw data.
-* **Generate Plots:** Select which categories of plots you want to create, including the new **Fragmentation Plot**.
-* **Generate Videos:** Compose highly customized videos by selecting different overlays and processing options, including the new **Fragmentation Plot Overlay**.
+* **Generate Plots:** Select which categories of plots you want to create.
+* **Generate Videos:** Compose highly customized videos by selecting different overlays and processing options.
 * **View YOLO Results:** Load and view the quantitative results from the object detection analysis.
 
 ---
@@ -89,19 +89,19 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
 
 3.  **Section 4: Generate Plots**
     * Switch to the "4. Generate Plots" tab.
-    * Select the categories of plots you wish to generate (e.g., Heatmaps, Path Plots, **Fragmentation Plot**).
+    * Select the categories of plots you wish to generate (e.g., Heatmaps, Path Plots, Advanced Time Series).
     * Click the **"GENERATE SELECTED PLOTS"** button.
 
     ![GUI - Plot Generation Tab](images/gui2.png)
 
 4.  **Section 5: Generate Videos**
     * Switch to the "5. Generate Videos" tab.
-    * **Configure Video Composition**: Select the desired options for your video (e.g., crop to surface, overlay gaze point, **overlay fragmentation plot**).
+    * **Configure Video Composition**: Select the desired options for your video (e.g., crop to surface, overlay gaze point, include internal camera).
     * **Set the Output Video Filename**.
     * Click the **"GENERATE VIDEO"** button. You can repeat this step with different settings to create multiple videos from the same analysis.
 
     ![GUI - Video Generation Tab](images/gui3.png)
-
+    
 5.  **Section 6: YOLO Results**
     * Switch to the "6. YOLO Results" tab.
     * Click **"Load/Refresh YOLO Results"**.
@@ -152,12 +152,12 @@ All outputs are saved within the specified `analysis_results_{participant_name}`
 * **`processed_data/`**: Contains intermediate data files (`.pkl`) for each event segment. This is what allows for on-demand output generation.
 * **`plots/`**: Contains all the generated PDF plots.
 * **`config.json`**: A file saving the settings used for the Core Analysis.
-* **`summary_results_{subj_name}.csv`**: A CSV file with the main quantitative outcomes of the analysis, including average **fragmentation**.
+* **`summary_results_{subj_name}.csv`**: A CSV file with the main quantitative outcomes of the analysis.
 * **`{video_name}.mp4`**: Each custom video you generate is saved in the main output folder with the name you provide.
 * **YOLO Outputs**:
     * `yolo_detections_cache.csv`: A cache of the raw YOLO detections to speed up future runs.
-    * `statistiche_per_classe.csv`: Aggregated statistics for each object class.
-    * `statistiche_per_istanza.csv`: Statistics for each individual tracked object instance.
+    * `statistiche_per_classe.csv`: Aggregated statistics for each object class (e.g., 'person', 'car'). Includes fixation counts and average pupil diameter.
+    * `statistiche_per_istanza.csv`: Statistics for each individual tracked object instance (e.g., 'person_1', 'person_2').
     * `mappa_id_classe.csv`: A utility file that maps the internal tracking IDs to class and instance names.
 
 ### Detailed Plot Outputs
@@ -171,16 +171,14 @@ All outputs are saved within the specified `analysis_results_{participant_name}`
     * `heatmap_fix_unenriched_{event}.pdf`, `heatmap_gaze_unenriched_{event}.pdf`
     * `heatmap_fix_enriched_{event}.pdf`, `heatmap_gaze_enriched_{event}.pdf`
 * **Pupillometry**:
-    * `pupillometry_{event}.pdf`: Time series plot of the pupil diameters.
+    * `pupillometry_{event}.pdf`: Time series plot of the pupil diameters. In enriched mode, the background is colored to indicate when gaze is on the surface (green) or off (red).
     * `periodogram_total_{event}.pdf`, `spectrogram_total_{event}.pdf`
-    * `periodogram_onsurface_{event}.pdf`, `spectrogram_onsurface_{event}.pdf`.
-* **Advanced Time Series**:
-    * `pupil_diameter_mean_{event}.pdf`: Time series of the mean pupil diameter.
+    * `periodogram_onsurface_{event}.pdf`, `spectrogram_onsurface_{event}.pdf` (enriched mode only).
+* **Advanced Time Series (New!)**:
+    * `pupil_diameter_mean_{event}.pdf`: Time series of the mean pupil diameter (left and right).
     * `saccade_velocities_{event}.pdf`: The mean and peak velocity of each saccade over time.
     * `saccade_amplitude_{event}.pdf`: The amplitude of each saccade over time.
-    * `blink_time_series_{event}.pdf`: A visualization of blink events.
-* **Gaze Fragmentation (New!)**:
-    * `fragmentation_{event}.pdf`: A time series plot showing the velocity of gaze points (in pixels per second), which serves as an indicator of movement smoothness or "fragmentation".
+    * `blink_time_series_{event}.pdf`: A visualization of blink events across the entire segment duration.
 
 ---
 ## 🧪 Synthetic Data Generator (`generate_synthetic_data.py`)

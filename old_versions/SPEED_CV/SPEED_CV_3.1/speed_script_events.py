@@ -88,7 +88,6 @@ def calculate_summary_features(data, subj_name, event_name, un_enriched_mode: bo
     """Calculates a dictionary of summary features for a segment."""
     pupil, blinks, saccades = data.get('pupil', pd.DataFrame()), data.get('blinks', pd.DataFrame()), data.get('saccades', pd.DataFrame())
     fixations_enr, fixations_not_enr = data.get('fixations_enr', pd.DataFrame()), data.get('fixations_not_enr', pd.DataFrame())
-    gaze_not_enr = data.get('gaze_not_enr', pd.DataFrame())
 
     results = {'participant': subj_name, 'event': event_name}
 
@@ -100,21 +99,21 @@ def calculate_summary_features(data, subj_name, event_name, un_enriched_mode: bo
         if not fixations_on_surface.empty:
             fixations_to_analyze = fixations_on_surface
             is_enriched_fixation = True
-
+    
     if not fixations_to_analyze.empty and 'duration [ms]' in fixations_to_analyze.columns:
         results.update({
             'n_fixation': fixations_to_analyze['fixation id'].nunique(),
             'fixation_avg_duration_ms': fixations_to_analyze['duration [ms]'].mean(),
             'fixation_std_duration_ms': fixations_to_analyze['duration [ms]'].std()
         })
-
+        
         x_coords, y_coords = pd.Series(dtype='float64'), pd.Series(dtype='float64')
         if is_enriched_fixation and 'fixation x [normalized]' in fixations_to_analyze.columns:
             x_coords, y_coords = fixations_to_analyze['fixation x [normalized]'], fixations_to_analyze['fixation y [normalized]']
         elif 'fixation x [px]' in fixations_to_analyze.columns and video_width and video_height:
             x_coords = fixations_to_analyze['fixation x [px]'] / video_width
             y_coords = fixations_to_analyze['fixation y [px]'] / video_height
-
+        
         if not x_coords.empty:
             results.update({
                 'fixation_avg_x': x_coords.mean(), 'fixation_std_x': x_coords.std(),
@@ -124,7 +123,7 @@ def calculate_summary_features(data, subj_name, event_name, un_enriched_mode: bo
     # --- Other Features ---
     if not blinks.empty and 'duration [ms]' in blinks.columns:
         results.update({'n_blink': len(blinks), 'blink_avg_duration_ms': blinks['duration [ms]'].mean()})
-
+    
     if not saccades.empty and 'duration [ms]' in saccades.columns:
         results.update({'n_saccade': len(saccades), 'saccade_avg_duration_ms': saccades['duration [ms]'].mean()})
 
@@ -132,11 +131,6 @@ def calculate_summary_features(data, subj_name, event_name, un_enriched_mode: bo
         pupil_diam = pupil['pupil diameter left [mm]'].dropna()
         if not pupil_diam.empty:
             results.update({'pupil_avg_mm': pupil_diam.mean(), 'pupil_std_mm': pupil_diam.std()})
-
-    # --- Fragmentation (Gaze Speed) Feature ---
-    if not gaze_not_enr.empty and 'gaze_speed_px_per_s' in gaze_not_enr.columns:
-        results['fragmentation_avg_px_per_s'] = gaze_not_enr['gaze_speed_px_per_s'].mean()
-        results['fragmentation_std_px_per_s'] = gaze_not_enr['gaze_speed_px_per_s'].std()
 
     return results
 
@@ -148,39 +142,28 @@ def run_analysis(subj_name: str, data_dir_str: str, output_dir_str: str, un_enri
     data_dir, output_dir = Path(data_dir_str), Path(output_dir_str)
     processed_data_dir = output_dir / 'processed_data'
     processed_data_dir.mkdir(parents=True, exist_ok=True)
-
+    
     video_width, video_height = get_video_dimensions(data_dir / 'external.mp4')
     all_data = load_all_data(data_dir, un_enriched_mode)
     events_df = all_data.get('events')
     if events_df is None or events_df.empty:
         raise ValueError("events.csv not found or is empty. Cannot proceed with analysis.")
-
-    # --- Fragmentation Calculation ---
-    gaze_not_enr = all_data.get('gaze_not_enr')
-    if gaze_not_enr is not None and not gaze_not_enr.empty:
-        gaze_not_enr['gaze_speed_px_per_s'] = euclidean_distance(
-            gaze_not_enr['gaze x [px]'].shift(),
-            gaze_not_enr['gaze y [px]'].shift(),
-            gaze_not_enr['gaze x [px]'],
-            gaze_not_enr['gaze y [px]']
-        ) / (gaze_not_enr['timestamp [ns]'].diff() / NS_TO_S)
-        all_data['gaze_not_enr'] = gaze_not_enr
-    # --------------------------------
-
+        
     all_results = []
     events_df.sort_values('timestamp [ns]', inplace=True)
-
+    
     print(f"Found {len(events_df)} events. Processing segments between them.")
     for i in range(len(events_df)):
         event_row = events_df.iloc[i]
         start_ts = event_row['timestamp [ns]']
-
+        
+        # Determine end timestamp
         if i + 1 < len(events_df):
             end_ts = events_df.iloc[i+1]['timestamp [ns]']
         else:
+            # For the last event, find the max timestamp across all relevant dataframes
             max_ts = start_ts
-            for df_name in ['pupil', 'gaze_not_enr', 'gaze_enr']:
-                df = all_data.get(df_name)
+            for df in [all_data.get('pupil'), all_data.get('gaze_not_enr'), all_data.get('gaze_enr')]:
                 if df is not None and not df.empty:
                     ts_col = get_timestamp_col(df)
                     if ts_col:
@@ -189,14 +172,14 @@ def run_analysis(subj_name: str, data_dir_str: str, output_dir_str: str, un_enri
 
         event_name = event_row.get('name', f"segment_{i}")
         rec_id = event_row.get('recording id')
-
+        
         print(f"--- Analyzing segment for event: '{event_name}' ---")
         segment_data = filter_data_by_segment(all_data, start_ts, end_ts, rec_id)
-
+        
         if all(df.empty for name, df in segment_data.items() if name != 'events'):
             print(f"  -> Skipping segment '{event_name}' due to no data in the time range.")
             continue
-
+        
         event_results = calculate_summary_features(segment_data, subj_name, event_name, un_enriched_mode, video_width, video_height)
         all_results.append(event_results)
 
@@ -242,7 +225,7 @@ def _plot_heatmap(df, x_col, y_col, title, output_path, is_normalized, w=None, h
     if df.empty or x_col not in df.columns or y_col not in df.columns: return
     x = df[x_col].dropna(); y = df[y_col].dropna()
     if len(x) < 3: return
-
+    
     try:
         k = gaussian_kde(np.vstack([x, y]))
         x_range = (x.min(), x.max()) if not is_normalized else (0,1)
@@ -250,7 +233,7 @@ def _plot_heatmap(df, x_col, y_col, title, output_path, is_normalized, w=None, h
 
         xi, yi = np.mgrid[x_range[0]:x_range[1]:100j, y_range[0]:y_range[1]:100j]
         zi = k(np.vstack([xi.flatten(), yi.flatten()]))
-
+        
         plt.figure(figsize=(10, 8))
         plt.pcolormesh(xi, yi, zi.reshape(xi.shape), shading='auto', cmap='Reds')
         plt.title(title, fontsize=15)
@@ -273,9 +256,9 @@ def _plot_spectral_analysis(pupil_series, title_prefix, output_dir):
     if len(ts) <= SAMPLING_FREQ:
         print(f"Skipping spectral analysis for '{title_prefix}': not enough data points.")
         return
-
+    
     ts_numpy = ts.to_numpy()
-
+    
     freqs, Pxx = welch(ts_numpy, fs=SAMPLING_FREQ, nperseg=min(len(ts_numpy), 256))
     plt.figure(figsize=(10, 5))
     plt.semilogy(freqs, Pxx)
@@ -297,10 +280,12 @@ def _plot_generic_timeseries(x_data, y_data_dict, title, xlabel, ylabel, output_
         ax.plot(x_data, y_data, label=label, alpha=0.8)
 
     if span_df is not None and not span_df.empty and 'gaze detected on surface' in span_df.columns:
+        # Create a copy to avoid SettingWithCopyWarning
         span_df_copy = span_df.copy()
         span_df_copy['gaze detected on surface'] = span_df_copy['gaze detected on surface'].fillna(False)
-
+        
         for status, color in [(True, 'lightgreen'), (False, 'lightcoral')]:
+            # Calculate state changes
             span_df_copy['block'] = (span_df_copy['gaze detected on surface'] != span_df_copy['gaze detected on surface'].shift()).cumsum()
             spans = span_df_copy[span_df_copy['gaze detected on surface'] == status]
             for _, g in spans.groupby('block'):
@@ -317,7 +302,7 @@ def _plot_binary_timeseries(df, start_col, duration_col, total_duration, title, 
         start_time = row[start_col]
         duration = row[duration_col]
         ax.add_patch(mpatches.Rectangle((start_time, 0), duration, 1, facecolor='red', alpha=0.5))
-
+    
     ax.set_xlim(0, total_duration)
     ax.set_ylim(0, 1)
     ax.set_title(title, fontsize=15)
@@ -339,11 +324,11 @@ def generate_plots_on_demand(output_dir_str: str, subj_name: str, plot_selection
         raise FileNotFoundError("Processed data directory not found. Please run the Core Analysis first.")
 
     video_width, video_height = get_video_dimensions(output_dir / 'eyetracking_file' / 'external.mp4')
-
+    
     for pkl_file in sorted(processed_data_dir.glob("*.pkl")):
         event_name = "_".join(pkl_file.stem.split('_')[2:])
         print(f"--- Generating plots for event: '{event_name}' ---")
-
+        
         with open(pkl_file, 'rb') as f:
             segment_data = pickle.load(f)
 
@@ -354,18 +339,20 @@ def generate_plots_on_demand(output_dir_str: str, subj_name: str, plot_selection
         blinks = segment_data.get('blinks', pd.DataFrame())
         saccades = segment_data.get('saccades', pd.DataFrame())
         pupil = segment_data.get('pupil', pd.DataFrame())
-
+        
         t_min, total_duration = 0, 1
-        base_df_for_time = pupil if not pupil.empty else gaze_not_enr
-        if not base_df_for_time.empty:
-            t_min = base_df_for_time['timestamp [ns]'].min()
-            base_df_for_time['time_sec'] = (base_df_for_time['timestamp [ns]'] - t_min) / NS_TO_S
-            total_duration = base_df_for_time['time_sec'].max()
+        if not pupil.empty:
+            t_min = pupil['timestamp [ns]'].min()
+            pupil['time_sec'] = (pupil['timestamp [ns]'] - t_min) / NS_TO_S
+            total_duration = pupil['time_sec'].max()
+        elif not gaze_not_enr.empty:
+            t_min = gaze_not_enr['timestamp [ns]'].min()
+            total_duration = (gaze_not_enr['timestamp [ns]'].max() - t_min) / NS_TO_S
 
         span_df = None
         if not un_enriched_mode and not pupil.empty and not gaze_enr.empty and 'gaze detected on surface' in gaze_enr.columns:
             span_df = pd.merge_asof(pupil.sort_values('timestamp [ns]'), gaze_enr[['timestamp [ns]', 'gaze detected on surface']].sort_values('timestamp [ns]'), on='timestamp [ns]', direction='nearest')
-
+            
         if plot_selections.get("histograms"):
             if 'duration [ms]' in fixations_not_enr.columns: _plot_histogram(fixations_not_enr['duration [ms]'], f"Fixation Duration (Un-enriched) - {event_name}", "Duration [ms]", plots_dir / f"hist_fix_unenriched_{event_name}.pdf")
             if not un_enriched_mode and 'duration [ms]' in fixations_enr.columns: _plot_histogram(fixations_enr['duration [ms]'], f"Fixation Duration (Enriched) - {event_name}", "Duration [ms]", plots_dir / f"hist_fix_enriched_{event_name}.pdf")
@@ -393,27 +380,14 @@ def generate_plots_on_demand(output_dir_str: str, subj_name: str, plot_selection
             if 'pupil diameter left [mm]' in pupil.columns: y_data['Left Pupil'] = pupil['pupil diameter left [mm]']
             if 'pupil diameter right [mm]' in pupil.columns: y_data['Right Pupil'] = pupil['pupil diameter right [mm]']
             _plot_generic_timeseries(pupil['time_sec'], y_data, f"Pupil Diameter Time Series - {event_name}", "Time (s)", "Pupil Diameter [mm]", plots_dir / f"pupillometry_{event_name}.pdf", span_df)
-
+            
             if 'pupil diameter left [mm]' in pupil.columns:
                 _plot_spectral_analysis(pupil['pupil diameter left [mm]'], f"total_{event_name}", plots_dir)
             if span_df is not None and not span_df.empty:
                 pupil_on_surface = span_df[span_df['gaze detected on surface'] == True]
                 if 'pupil diameter left [mm]' in pupil_on_surface.columns:
                     _plot_spectral_analysis(pupil_on_surface['pupil diameter left [mm]'], f"onsurface_{event_name}", plots_dir)
-
-        # --- MODIFIED: Added Fragmentation Plot ---
-        if plot_selections.get("fragmentation") and not gaze_not_enr.empty:
-            gaze_not_enr['time_sec'] = (gaze_not_enr['timestamp [ns]'] - t_min) / NS_TO_S
-            _plot_generic_timeseries(
-                gaze_not_enr['time_sec'],
-                {'Fragmentation': gaze_not_enr['gaze_speed_px_per_s']},
-                f"Gaze Fragmentation (Speed) - {event_name}",
-                "Time (s)",
-                "Speed (pixels/sec)",
-                plots_dir / f"fragmentation_{event_name}.pdf"
-            )
-        # ----------------------------------------
-
+        
         if plot_selections.get("advanced_timeseries"):
             if not pupil.empty and 'pupil diameter left [mm]' in pupil.columns and 'pupil diameter right [mm]' in pupil.columns:
                 pupil['pupil_mean_mm'] = pupil[['pupil diameter left [mm]', 'pupil diameter right [mm]']].mean(axis=1)
@@ -421,19 +395,32 @@ def generate_plots_on_demand(output_dir_str: str, subj_name: str, plot_selection
 
             if not saccades.empty:
                 saccades['time_sec'] = (saccades['start timestamp [ns]'] - t_min) / NS_TO_S
+                
+                # --- LOGIC ADAPTED FOR SACCADES ---
                 vel_y_data, vel_unit = {}, None
                 if 'mean velocity [deg/s]' in saccades.columns:
-                    vel_y_data['Mean Velocity'] = saccades['mean velocity [deg/s]']; vel_y_data['Peak Velocity'] = saccades['peak velocity [deg/s]']; vel_unit = "deg/s"
+                    vel_y_data['Mean Velocity'] = saccades['mean velocity [deg/s]']
+                    vel_y_data['Peak Velocity'] = saccades['peak velocity [deg/s]']
+                    vel_unit = "deg/s"
                 elif 'mean velocity [px/s]' in saccades.columns:
-                    vel_y_data['Mean Velocity'] = saccades['mean velocity [px/s]']; vel_y_data['Peak Velocity'] = saccades['peak velocity [px/s]']; vel_unit = "px/s"
-                if vel_y_data: _plot_generic_timeseries(saccades['time_sec'], vel_y_data, f"Saccade Velocity - {event_name}", "Time (s)", f"Velocity [{vel_unit}]", plots_dir / f"saccade_velocities_{event_name}.pdf")
+                    vel_y_data['Mean Velocity'] = saccades['mean velocity [px/s]']
+                    vel_y_data['Peak Velocity'] = saccades['peak velocity [px/s]']
+                    vel_unit = "px/s"
+                
+                if vel_y_data:
+                    _plot_generic_timeseries(saccades['time_sec'], vel_y_data, f"Saccade Velocity - {event_name}", "Time (s)", f"Velocity [{vel_unit}]", plots_dir / f"saccade_velocities_{event_name}.pdf")
 
                 amp_y_data, amp_unit = {}, None
                 if 'amplitude [deg]' in saccades.columns:
-                    amp_y_data['Amplitude'] = saccades['amplitude [deg]']; amp_unit = "deg"
+                    amp_y_data['Amplitude'] = saccades['amplitude [deg]']
+                    amp_unit = "deg"
                 elif 'amplitude [px]' in saccades.columns:
-                    amp_y_data['Amplitude'] = saccades['amplitude [px]']; amp_unit = "px"
-                if amp_y_data: _plot_generic_timeseries(saccades['time_sec'], amp_y_data, f"Saccade Amplitude - {event_name}", "Time (s)", f"Amplitude [{amp_unit}]", plots_dir / f"saccade_amplitude_{event_name}.pdf")
+                    amp_y_data['Amplitude'] = saccades['amplitude [px]']
+                    amp_unit = "px"
+                    
+                if amp_y_data:
+                     _plot_generic_timeseries(saccades['time_sec'], amp_y_data, f"Saccade Amplitude - {event_name}", "Time (s)", f"Amplitude [{amp_unit}]", plots_dir / f"saccade_amplitude_{event_name}.pdf")
+                # --- END OF ADAPTED LOGIC ---
 
             if not blinks.empty and 'start timestamp [ns]' in blinks.columns:
                 blinks['time_sec'] = (blinks['start timestamp [ns]'] - t_min) / NS_TO_S

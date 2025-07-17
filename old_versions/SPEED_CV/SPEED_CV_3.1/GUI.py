@@ -16,9 +16,9 @@ except ImportError as e:
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v3.2 - Folder-Based Input")
+        self.root.title("SPEED v3.1 - Folder-Based Input")
         self.root.geometry("800x850") # Slightly increased size
-
+        
         # Variables for folder paths
         self.raw_dir_var = tk.StringVar()
         self.unenriched_dir_var = tk.StringVar()
@@ -33,14 +33,16 @@ class SpeedApp:
         self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        # --- EDIT: CROSS-PLATFORM SCROLLING BINDING ---
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel) # For Linux
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel) # For Linux
 
         self.scrollbar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
-
-        main_frame = self.scrollable_frame
+        
+        main_frame = self.scrollable_frame 
 
         # --- Setup Section ---
         setup_frame = tk.LabelFrame(main_frame, text="1. Project Setup", padx=10, pady=10)
@@ -59,12 +61,12 @@ class SpeedApp:
         # --- Input Folders Section ---
         folders_frame = tk.LabelFrame(main_frame, text="2. Input Folders", padx=10, pady=10)
         folders_frame.pack(fill=tk.X, pady=5, padx=10)
-
+        
         raw_frame = tk.Frame(folders_frame); raw_frame.pack(fill=tk.X, pady=2)
         tk.Label(raw_frame, text="RAW Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
         self.raw_dir_entry = tk.Entry(raw_frame, textvariable=self.raw_dir_var); self.raw_dir_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(raw_frame, text="Browse...", command=lambda: self.select_folder(self.raw_dir_var, "Select RAW Data Folder")).pack(side=tk.RIGHT)
-
+        
         unenriched_frame = tk.Frame(folders_frame); unenriched_frame.pack(fill=tk.X, pady=2)
         tk.Label(unenriched_frame, text="Un-enriched Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
         self.unenriched_dir_entry = tk.Entry(unenriched_frame, textvariable=self.unenriched_dir_var); self.unenriched_dir_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
@@ -89,25 +91,35 @@ class SpeedApp:
         notebook.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
         plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='4. Generate Plots')
         video_tab = tk.Frame(notebook); notebook.add(video_tab, text='5. Generate Videos')
+        
+        # --- TAB for YOLO results ---
         yolo_tab = tk.Frame(notebook); notebook.add(yolo_tab, text='6. YOLO Results')
 
         self.setup_plot_tab(plot_tab)
         self.setup_video_tab(video_tab)
-        self.setup_yolo_tab(yolo_tab)
+        self.setup_yolo_tab(yolo_tab) # Call the new setup function
 
         # --- CREDITS SECTION ---
         credits_frame = tk.LabelFrame(main_frame, text="Credits", padx=10, pady=10)
         credits_frame.pack(fill=tk.X, pady=(20, 10), padx=10)
+
         tk.Label(credits_frame, text="Cognitive and Behavioral Sciences Laboratory (labSCoC), University of L'Aquila", justify=tk.LEFT).pack(anchor='w')
         tk.Label(credits_frame, text="https://labscoc.wordpress.com/", justify=tk.LEFT).pack(anchor='w')
         tk.Label(credits_frame, text="").pack(anchor='w') # Spacer
         tk.Label(credits_frame, text="Dr. Daniele Lozzi (https://github.com/danielelozzi)", justify=tk.LEFT).pack(anchor='w')
 
+
+    # --- CROSS-PLATFORM SCROLLING FUNCTION ---
     def _on_mousewheel(self, event):
         """Handles mouse wheel scrolling in a cross-platform way."""
-        if hasattr(event, 'delta') and event.delta != 0: self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        elif event.num == 4: self.canvas.yview_scroll(-1, "units")
-        elif event.num == 5: self.canvas.yview_scroll(1, "units")
+        # Windows and macOS use event.delta
+        if hasattr(event, 'delta') and event.delta != 0:
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        # Linux uses event.num
+        elif event.num == 4: # Scroll up
+            self.canvas.yview_scroll(-1, "units")
+        elif event.num == 5: # Scroll down
+            self.canvas.yview_scroll(1, "units")
 
     def setup_plot_tab(self, parent_tab):
         plot_options_frame = tk.LabelFrame(parent_tab, text="Plot Options", padx=10, pady=10)
@@ -115,8 +127,7 @@ class SpeedApp:
         plot_types = {
             "path_plots": "Path Plots (Fixation and Gaze)", "heatmaps": "Density Heatmaps (Fixation and Gaze)",
             "histograms": "Duration Histograms (Fixations, Blinks, Saccades)", "pupillometry": "Pupillometry (Time Series and Spectral Analysis)",
-            "advanced_timeseries": "Advanced Time Series (Saccades, Blinks)",
-            "fragmentation": "Gaze Fragmentation (Speed) Plot" # NUOVA OPZIONE
+            "advanced_timeseries": "Advanced Time Series (Saccades, Blinks)" # Added for new plots
         }
         for key, text in plot_types.items():
             self.plot_vars[key] = tk.BooleanVar(value=True)
@@ -126,29 +137,29 @@ class SpeedApp:
     def setup_video_tab(self, parent_tab):
         video_options_frame = tk.LabelFrame(parent_tab, text="Video Composition Options", padx=10, pady=10)
         video_options_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
+        
+        # "crop_to_surface" and "apply_perspective" have been merged into a single option.
         self.video_vars['crop_and_correct_perspective'] = tk.BooleanVar(value=False)
         tk.Checkbutton(video_options_frame, text="Crop & Correct Perspective to Surface", variable=self.video_vars['crop_and_correct_perspective']).pack(anchor='w')
-
+        
         video_opts = {
             "overlay_yolo": "Overlay YOLO object detections", "overlay_gaze": "Overlay gaze point",
-            "overlay_pupil_plot": "Overlay blinks and pupillometry plot",
-            "overlay_fragmentation_plot": "Overlay gaze fragmentation plot", # NUOVA OPZIONE
-            "include_internal_cam": "Include internal camera view (PiP)",
+            "overlay_pupil_plot": "Overlay blinks and pupillometry plot", "include_internal_cam": "Include internal camera view (PiP)",
         }
         for key, text in video_opts.items():
             self.video_vars[key] = tk.BooleanVar(value=False)
             tk.Checkbutton(video_options_frame, text=text, variable=self.video_vars[key]).pack(anchor='w')
-
+        
         tk.Label(video_options_frame, text="\nOutput Video Filename:").pack(anchor='w')
         self.video_filename_var = tk.StringVar(value="video_output_1.mp4")
         tk.Entry(video_options_frame, textvariable=self.video_filename_var).pack(fill=tk.X, pady=5)
         tk.Button(parent_tab, text="GENERATE VIDEO", command=self.run_video_generation, font=('Helvetica', 10, 'bold'), bg='#ef9a9a').pack(pady=10)
-
+    
     def setup_yolo_tab(self, parent_tab):
         """Sets up the tab to display YOLO analysis results."""
         tk.Button(parent_tab, text="Load/Refresh YOLO Results", command=self.load_yolo_results, font=('Helvetica', 10, 'bold'), bg='#ffcc80').pack(pady=10)
 
+        # Frame for the "per class" table
         class_frame = tk.LabelFrame(parent_tab, text="Results per Class", padx=10, pady=10)
         class_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         self.class_treeview = ttk.Treeview(class_frame, show='headings')
@@ -157,6 +168,7 @@ class SpeedApp:
         self.class_treeview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         class_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
+        # Frame for the "per instance" table
         instance_frame = tk.LabelFrame(parent_tab, text="Results per Instance", padx=10, pady=10)
         instance_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         self.instance_treeview = ttk.Treeview(instance_frame, show='headings')
@@ -167,11 +179,16 @@ class SpeedApp:
 
     def _populate_treeview(self, treeview, dataframe):
         """Clears and populates a Treeview widget with a pandas DataFrame."""
+        # Clear the view
         treeview.delete(*treeview.get_children())
+        
+        # Set columns
         treeview["columns"] = list(dataframe.columns)
         for col in dataframe.columns:
             treeview.heading(col, text=col)
             treeview.column(col, width=120, anchor='center')
+        
+        # Add data
         for index, row in dataframe.iterrows():
             treeview.insert("", "end", values=list(row))
 
@@ -180,13 +197,23 @@ class SpeedApp:
         common_paths = self._get_common_paths()
         if not common_paths: return
         output_dir_path, _ = common_paths
+
         class_csv = output_dir_path / 'stats_per_class.csv'
         instance_csv = output_dir_path / 'stats_per_instance.csv'
+
         try:
-            if class_csv.exists(): self._populate_treeview(self.class_treeview, pd.read_csv(class_csv))
-            else: messagebox.showinfo("Info", f"File not found: {class_csv.name}\nRun YOLO analysis first.")
-            if instance_csv.exists(): self._populate_treeview(self.instance_treeview, pd.read_csv(instance_csv))
-            else: messagebox.showinfo("Info", f"File not found: {instance_csv.name}\nRun YOLO analysis first.")
+            if class_csv.exists():
+                df_class = pd.read_csv(class_csv)
+                self._populate_treeview(self.class_treeview, df_class)
+            else:
+                messagebox.showinfo("Info", f"File not found: {class_csv.name}\nRun YOLO analysis first.")
+            
+            if instance_csv.exists():
+                df_instance = pd.read_csv(instance_csv)
+                self._populate_treeview(self.instance_treeview, df_instance)
+            else:
+                messagebox.showinfo("Info", f"File not found: {instance_csv.name}\nRun YOLO analysis first.")
+
         except Exception as e:
             messagebox.showerror("Read Error", f"Could not read the YOLO result CSV files: {e}")
 
@@ -202,7 +229,8 @@ class SpeedApp:
 
     def select_folder(self, var, title):
         dir_path = filedialog.askdirectory(title=title)
-        if dir_path: var.set(dir_path)
+        if dir_path:
+            var.set(dir_path)
 
     def _get_common_paths(self):
         output_dir = self.output_dir_entry.get().strip()
@@ -216,15 +244,30 @@ class SpeedApp:
         common_paths = self._get_common_paths()
         if not common_paths: return
         output_dir_path, subj_name = common_paths
-        raw_dir = self.raw_dir_var.get().strip(); unenriched_dir = self.unenriched_dir_var.get().strip(); enriched_dir = self.enriched_dir_var.get().strip()
+
+        raw_dir = self.raw_dir_var.get().strip()
+        unenriched_dir = self.unenriched_dir_var.get().strip()
+        enriched_dir = self.enriched_dir_var.get().strip()
+
         if not (raw_dir and unenriched_dir):
             messagebox.showerror("Error", "The RAW and Un-enriched folders are mandatory.")
             return
+        
         try:
             messagebox.showinfo("In Progress", "Starting core analysis. This might take some time...")
-            main_analyzer.run_core_analysis(subj_name=subj_name, output_dir_str=str(output_dir_path), raw_dir_str=raw_dir, unenriched_dir_str=unenriched_dir, enriched_dir_str=enriched_dir, un_enriched_mode=self.unenriched_var.get(), run_yolo=self.yolo_var.get())
+            # Call the updated function in main_analyzer
+            main_analyzer.run_core_analysis(
+                subj_name=subj_name, 
+                output_dir_str=str(output_dir_path),
+                raw_dir_str=raw_dir,
+                unenriched_dir_str=unenriched_dir,
+                enriched_dir_str=enriched_dir,
+                un_enriched_mode=self.unenriched_var.get(),
+                run_yolo=self.yolo_var.get()
+            )
             success_msg = "Core analysis completed."
-            if self.yolo_var.get(): success_msg += "\nYou can now load the YOLO results in the 'YOLO Results' tab."
+            if self.yolo_var.get():
+                success_msg += "\nYou can now load the YOLO results in the 'YOLO Results' tab."
             messagebox.showinfo("Success", success_msg)
         except Exception as e:
             messagebox.showerror("Analysis Error", f"An error occurred: {e}\n\n{traceback.format_exc()}")
@@ -233,6 +276,7 @@ class SpeedApp:
         common_paths = self._get_common_paths()
         if not common_paths: return
         output_dir_path, subj_name = common_paths
+        
         plot_selections = {key: var.get() for key, var in self.plot_vars.items()}
         try:
             messagebox.showinfo("In Progress", "Generating selected plots...")
@@ -245,6 +289,7 @@ class SpeedApp:
         common_paths = self._get_common_paths()
         if not common_paths: return
         output_dir_path, subj_name = common_paths
+
         video_options = {key: var.get() for key, var in self.video_vars.items()}
         video_options['output_filename'] = self.video_filename_var.get().strip()
         if not video_options['output_filename']:
