@@ -212,3 +212,7 @@ The script generates all the necessary `.csv` and `.mp4` files that mimic a real
 
 * If you also use the Computer Vision YOLO-based feature, please cite the following publication:
     * Redmon, J., Divvala, S., Girshick, R., & Farhadi, A. (2016). You only look once: Unified, real-time object detection. In Proceedings of the IEEE conference on computer vision and pattern recognition (pp. 779-788). <https://doi.org/10.1109/CVPR.2016.91>
+ 
+## 💻 Artificial Intelligence disclosure
+
+This code is partially written using Gemini AI Code Assistant 
