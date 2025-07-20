@@ -215,4 +215,4 @@ The script generates all the necessary `.csv` and `.mp4` files that mimic a real
  
 ## 💻 Artificial Intelligence disclosure
 
-This code is partially written using Gemini AI Code Assistant 
+This code is partially written using Google Gemini 
