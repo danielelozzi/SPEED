@@ -15,7 +15,12 @@ GAZE_RADIUS = 15
 GAZE_THICKNESS = 2
 PIP_SCALE = 0.25
 
-# Pupil Plot Constants
+# --- YOLO Drawing Constants ---
+YOLO_BOX_COLOR = (0, 255, 255) # Cyan in BGR
+YOLO_TEXT_COLOR = (0, 255, 255)
+YOLO_THICKNESS = 2
+
+# --- Pupil Plot Constants ---
 PUPIL_PLOT_HISTORY = 200
 PUPIL_PLOT_WIDTH = 350
 PUPIL_PLOT_HEIGHT = 150
@@ -167,7 +172,7 @@ def _draw_pupil_plot(frame: np.ndarray, plot_data_dict: dict, min_val: float, ma
 
 
 def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, options: dict, un_enriched_mode: bool):
-    """Main function for creating the video with the new overlay layout."""
+    """Main function for creating the video with selected overlays."""
     video_out_path = output_dir / options.get('output_filename', f'video_output_{subj_name}.mp4')
     
     print("Loading and synchronizing data...")
@@ -206,6 +211,24 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
     writer = cv2.VideoWriter(str(video_out_path), cv2.VideoWriter_fourcc(*'mp4v'), fps, (out_w, out_h))
     print(f"The output video will be saved to: {video_out_path}")
 
+    # Attempt to load YOLO detection data if the option is enabled.
+    yolo_detections = pd.DataFrame()
+    yolo_class_map = {}
+    if options.get('overlay_yolo'):
+        print("YOLO overlay enabled. Attempting to load detection data...")
+        yolo_cache_path = output_dir / 'yolo_detections_cache.csv'
+        id_map_path = output_dir / 'class_id_map.csv'
+        try:
+            yolo_detections = pd.read_csv(yolo_cache_path)
+            id_map = pd.read_csv(id_map_path)
+            # Create a dictionary to map track_id to class_name for easy lookup.
+            yolo_class_map = pd.Series(id_map.class_name.values, index=id_map.track_id).to_dict()
+            print("Successfully loaded YOLO detection data and class map.")
+        except FileNotFoundError:
+            print(f"WARNING: YOLO overlay is ON, but a required file was not found: {yolo_cache_path} or {id_map_path}")
+            print("         Please run 'Core Analysis' with the YOLO option enabled first. Disabling YOLO overlay for this run.")
+            options['overlay_yolo'] = False # Disable the option if files are not found.
+    
     # Setup for pupil plot
     pupil_plot_data = {"Left": [], "Right": [], "Mean": []}
     pupil_min, pupil_max = 0, 1
@@ -254,6 +277,37 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                     pip_h = int(out_h * PIP_SCALE)
                     pip_w = int(frame_int.shape[1] * (pip_h / frame_int.shape[0]))
                     frame[10:10+pip_h, 10:10+pip_w] = cv2.resize(frame_int, (pip_w, pip_h))
+
+            # Draw YOLO object detection overlays
+            if options.get('overlay_yolo') and not yolo_detections.empty:
+                # Filter detections for the current frame
+                detections_for_frame = yolo_detections[yolo_detections['frame_idx'] == frame_idx]
+
+                for _, det in detections_for_frame.iterrows():
+                    # Extract bounding box coordinates
+                    x1, y1, x2, y2 = int(det['x1']), int(det['y1']), int(det['x2']), int(det['y2'])
+                    
+                    # If perspective correction is active, transform box coordinates as well
+                    if M is not None:
+                        pts = np.float32([[x1, y1], [x2, y2]]).reshape(-1, 1, 2)
+                        transformed_pts = cv2.perspectiveTransform(pts, M)
+                        if transformed_pts is not None:
+                            x1_t, y1_t = int(transformed_pts[0][0][0]), int(transformed_pts[0][0][1])
+                            x2_t, y2_t = int(transformed_pts[1][0][0]), int(transformed_pts[1][0][1])
+                            cv2.rectangle(frame, (x1_t, y1_t), (x2_t, y2_t), YOLO_BOX_COLOR, YOLO_THICKNESS)
+                            
+                            # Add label with class name and track ID
+                            track_id = int(det['track_id'])
+                            class_name = yolo_class_map.get(track_id, f"ID:{track_id}")
+                            cv2.putText(frame, class_name, (x1_t, y1_t - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, YOLO_TEXT_COLOR, 2)
+                    else:
+                        # Otherwise, draw using original coordinates
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), YOLO_BOX_COLOR, YOLO_THICKNESS)
+                        
+                        # Add label with class name and track ID
+                        track_id = int(det['track_id'])
+                        class_name = yolo_class_map.get(track_id, f"ID:{track_id}")
+                        cv2.putText(frame, class_name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, YOLO_TEXT_COLOR, 2)
 
             if options.get('overlay_gaze') and pd.notna(frame_data.get('gaze x [px]')):
                 gaze_x, gaze_y = frame_data['gaze x [px]'], frame_data['gaze y [px]']
