@@ -12,7 +12,7 @@ SPEED v3.2 operates on a two-step workflow designed to save time and computation
 This is the main data processing stage. You run this step **only once** per participant. The software will:
 1.  Load all necessary files from the specified input folders (RAW, Un-enriched, Enriched).
 2.  Segment the data based on the `events.csv` file.
-3.  Calculate all relevant statistics for each segment, including **gaze fragmentation** (speed).
+3.  Calculate all relevant statistics for each segment.
 4.  Optionally run YOLO object detection on the video frames, saving the results to a cache to speed up future runs.
 5.  Save the processed data (e.g., filtered dataframes for each event) and summary statistics into the output folder.
 
