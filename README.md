@@ -52,15 +52,6 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
     conda create --name speed
     conda activate speed
     conda install pip
-    pip install -r requirements.txt
-    ```
-
-    ```bash
-    cd <drag and drop speed folder>
-    ```
-
-    ```bash
-    python GUI.py
     ```
 
 2.  **Install the required libraries:**
@@ -76,7 +67,8 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
     torch
     ultralytics
     ```
-    Then, install them using pip:
+    OR, install them using pip:
+
     ```bash
     pip install -r requirements.txt
     ```
@@ -90,6 +82,7 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
 
 1.  **Launch the GUI**: Run the `GUI.py` script from your terminal.
     ```bash
+    cd <drag and drop speed folder>
     python GUI.py
     ```
 
