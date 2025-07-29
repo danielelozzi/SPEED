@@ -41,10 +41,26 @@ Before using this software, you need to acquire and prepare the data following a
 
 To run the SPEED analysis tool, you'll need Python 3 and several scientific computing libraries. It's highly recommended to use a virtual environment to manage dependencies.
 
+0.  **Install Anaconda**
+    [Anaconda link](https://www.anaconda.com/docs/getting-started/anaconda/install)
+
 1.  **Create a virtual environment:**
+    
+    open Anaconda Prompt
+
     ```bash
-    python -m venv speed-env
-    source speed-env/bin/activate  # On Windows, use `speed-env\Scripts\activate`
+    conda create --name speed
+    conda activate speed
+    conda install pip
+    pip install -r requirements.txt
+    ```
+
+    ```bash
+    cd <drag and drop speed folder>
+    ```
+
+    ```bash
+    python GUI.py
     ```
 
 2.  **Install the required libraries:**
@@ -141,7 +157,6 @@ This folder contains data that has been "enriched" in Pupil Cloud, typically map
 | `gaze.csv` | Required if "un-enriched only" is **unchecked** (will be used as `gaze_enriched.csv`) |
 | `fixations.csv` | Required if "un-enriched only" is **unchecked** (will be used as `fixations_enriched.csv`) |
 | `surface_positions.csv` | Required for video perspective cropping/correction |
-
 ---
 
 ## Output Files 📈
