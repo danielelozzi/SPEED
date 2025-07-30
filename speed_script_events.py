@@ -155,6 +155,13 @@ def run_analysis(subj_name: str, data_dir_str: str, output_dir_str: str, un_enri
     if events_df is None or events_df.empty:
         raise ValueError("events.csv not found or is empty. Cannot proceed with analysis.")
 
+    # Clean event names: replace '\' and '/' with '_'
+    if 'name' in events_df.columns:
+        original_events_df_path = data_dir / 'events.csv'
+        events_df['name'] = events_df['name'].astype(str).str.replace(r'[\\/]', '_', regex=True)
+        events_df.to_csv(original_events_df_path, index=False)
+        print(f"Cleaned and updated events.csv at: {original_events_df_path}")
+
     # --- Fragmentation Calculation ---
     gaze_not_enr = all_data.get('gaze_not_enr')
     if gaze_not_enr is not None and not gaze_not_enr.empty:
@@ -222,7 +229,13 @@ def _plot_histogram(data_series, title, xlabel, output_path):
     plt.figure(figsize=(10, 6))
     plt.hist(data_series.dropna(), bins=25, color='royalblue', edgecolor='black', alpha=0.7)
     plt.title(title, fontsize=15); plt.xlabel(xlabel, fontsize=12); plt.ylabel('Frequency', fontsize=12)
-    plt.grid(axis='y', linestyle='--', alpha=0.7); plt.tight_layout(); plt.savefig(output_path); plt.close()
+    plt.grid(axis='y', linestyle='--', alpha=0.7); plt.tight_layout()
+    try:
+        plt.savefig(output_path)
+    except Exception as e:
+        print(f"WARNING: Failed to save plot '{title}' to {output_path}. Error: {e}")
+    finally:
+        plt.close()
 
 def _plot_path(df, x_col, y_col, title, output_path, is_normalized, color, w=None, h=None):
     """Helper function to create and save a path plot."""
@@ -235,7 +248,13 @@ def _plot_path(df, x_col, y_col, title, output_path, is_normalized, color, w=Non
     else:
         plt.xlabel('Pixel X'); plt.ylabel('Pixel Y'); plt.gca().invert_yaxis()
         if w and h: plt.xlim(0, w); plt.ylim(h, 0)
-    plt.grid(True); plt.tight_layout(); plt.savefig(output_path); plt.close()
+    plt.grid(True); plt.tight_layout()
+    try:
+        plt.savefig(output_path)
+    except Exception as e:
+        print(f"WARNING: Failed to save plot '{title}' to {output_path}. Error: {e}")
+    finally:
+        plt.close()
 
 def _plot_heatmap(df, x_col, y_col, title, output_path, is_normalized, w=None, h=None):
     """Helper function to create and save a density heatmap."""
@@ -261,11 +280,18 @@ def _plot_heatmap(df, x_col, y_col, title, output_path, is_normalized, w=None, h
             if w and h: plt.xlim(0, w); plt.ylim(h, 0)
 
         plt.colorbar(label="Density")
-        plt.grid(True); plt.tight_layout(); plt.savefig(output_path); plt.close()
+        plt.grid(True); plt.tight_layout()
+        try:
+            plt.savefig(output_path)
+        except Exception as e:
+            print(f"WARNING: Failed to save plot '{title}' to {output_path}. Error: {e}")
+        finally:
+            plt.close()
     except np.linalg.LinAlgError:
         print(f"WARNING: Could not generate heatmap for '{title}' (singular matrix).")
     except Exception as e:
         print(f"WARNING: Unexpected error during heatmap generation for '{title}': {e}")
+        plt.close() # Ensure figure is closed even on unexpected errors
 
 def _plot_spectral_analysis(pupil_series, title_prefix, output_dir):
     """Generates and saves periodogram and spectrogram for a pupil diameter series."""
@@ -276,19 +302,33 @@ def _plot_spectral_analysis(pupil_series, title_prefix, output_dir):
 
     ts_numpy = ts.to_numpy()
 
+    # Periodogram
     freqs, Pxx = welch(ts_numpy, fs=SAMPLING_FREQ, nperseg=min(len(ts_numpy), 256))
     plt.figure(figsize=(10, 5))
     plt.semilogy(freqs, Pxx)
     plt.title(f'Periodogram - {title_prefix}'); plt.xlabel('Frequency [Hz]'); plt.ylabel('Power Spectral Density')
-    plt.grid(True); plt.savefig(output_dir / f'periodogram_{title_prefix}.pdf'); plt.close()
+    plt.grid(True)
+    try:
+        plt.savefig(output_dir / f'periodogram_{title_prefix}.pdf')
+    except Exception as e:
+        print(f"WARNING: Failed to save Periodogram for '{title_prefix}'. Error: {e}")
+    finally:
+        plt.close()
 
+    # Spectrogram
     f, t, Sxx = spectrogram(ts_numpy, fs=SAMPLING_FREQ, nperseg=min(len(ts_numpy), 256))
     plt.figure(figsize=(10, 5))
     if Sxx.size > 0:
       plt.pcolormesh(t, f, 10 * np.log10(np.maximum(Sxx, 1e-10)), shading='gouraud')
       plt.colorbar(label='Power [dB]')
     plt.title(f'Spectrogram - {title_prefix}'); plt.ylabel('Frequency [Hz]'); plt.xlabel('Time [s]')
-    plt.savefig(output_dir / f'spectrogram_{title_prefix}.pdf'); plt.close()
+    try:
+        plt.savefig(output_dir / f'spectrogram_{title_prefix}.pdf')
+    except Exception as e:
+        print(f"WARNING: Failed to save Spectrogram for '{title_prefix}'. Error: {e}")
+    finally:
+        plt.close()
+
 
 def _plot_generic_timeseries(x_data, y_data_dict, title, xlabel, ylabel, output_path, span_df=None):
     """Helper function to plot one or more time series on the same axes."""
@@ -308,7 +348,13 @@ def _plot_generic_timeseries(x_data, y_data_dict, title, xlabel, ylabel, output_
                     ax.axvspan(g['time_sec'].iloc[0], g['time_sec'].iloc[-1], facecolor=color, alpha=0.3, zorder=-1, lw=0)
 
     ax.set_title(title, fontsize=15); ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.legend(); ax.grid(True)
-    fig.tight_layout(); plt.savefig(output_path); plt.close(fig)
+    fig.tight_layout()
+    try:
+        plt.savefig(output_path)
+    except Exception as e:
+        print(f"WARNING: Failed to save plot '{title}' to {output_path}. Error: {e}")
+    finally:
+        plt.close(fig)
 
 def _plot_binary_timeseries(df, start_col, duration_col, total_duration, title, ylabel, output_path):
     """Helper function to plot binary events like blinks over time."""
@@ -324,7 +370,13 @@ def _plot_binary_timeseries(df, start_col, duration_col, total_duration, title, 
     ax.set_xlabel("Time (s)")
     ax.set_ylabel(ylabel)
     ax.get_yaxis().set_ticks([]) # Remove Y-axis ticks
-    plt.tight_layout(); plt.savefig(output_path); plt.close(fig)
+    plt.tight_layout()
+    try:
+        plt.savefig(output_path)
+    except Exception as e:
+        print(f"WARNING: Failed to save plot '{title}' to {output_path}. Error: {e}")
+    finally:
+        plt.close(fig)
 
 def generate_plots_on_demand(output_dir_str: str, subj_name: str, plot_selections: dict, un_enriched_mode: bool):
     """
