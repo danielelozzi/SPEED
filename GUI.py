@@ -16,7 +16,7 @@ except ImportError as e:
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v3.2 - Folder-Based Input & Event Selection")
+        self.root.title("SPEED v3.3 - Folder-Based Input")
         self.root.geometry("800x950") # Increased size for event list
 
         # Variables for folder paths
