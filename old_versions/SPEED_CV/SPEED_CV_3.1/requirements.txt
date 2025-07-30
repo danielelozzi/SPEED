@@ -1,8 +1,0 @@
-ultralytics
-pandas
-seaborn
-matplotlib
-opencv-python
-scipy
-tqdm
-pyinstaller
