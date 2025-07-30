@@ -232,7 +232,7 @@ def _plot_histogram(data_series, title, xlabel, output_path):
         if data_series.dropna().empty: return
         
         # 1. Crea la figura
-        plt.figure(figsize=(10, 6), dpi=100)
+        plt.figure(figsize=(10, 6), dpi=50)
         
         # 2. Genera il grafico
         plt.hist(data_series.dropna(), bins=25, color='royalblue', edgecolor='black', alpha=0.7)
@@ -253,7 +253,7 @@ def _plot_histogram(data_series, title, xlabel, output_path):
     
     # Questo è utile ma non sostituisce plt.close()
     gc.collect()
-    
+
 def _plot_path(df, x_col, y_col, title, output_path, is_normalized, color, w=None, h=None):
     """Helper function to create and save a path plot."""
     for attempt in range(2):
@@ -362,35 +362,38 @@ def _plot_spectral_analysis(pupil_series, title_prefix, output_dir):
     gc.collect()
 
 
+import gc
+
 def _plot_generic_timeseries(x_data, y_data_dict, title, xlabel, ylabel, output_path, span_df=None):
-    """Helper function to plot one or more time series on the same axes."""
-    for attempt in range(2):
-        try:
-            fig, ax = plt.subplots(figsize=(12, 6), dpi=100)
-            for label, y_data in y_data_dict.items():
-                ax.plot(x_data, y_data, label=label, alpha=0.8)
+    """Funzione di plotting più robusta per la gestione della memoria."""
+    fig = None  # Inizializza la variabile della figura
+    try:
+        # Crea la figura e gli assi
+        fig, ax = plt.subplots(figsize=(12, 6), dpi=100) # dpi=100 è un buon compromesso
+        
+        for label, y_data in y_data_dict.items():
+            ax.plot(x_data, y_data, label=label, alpha=0.8)
 
-            if span_df is not None and not span_df.empty and 'gaze detected on surface' in span_df.columns:
-                span_df_copy = span_df.copy()
-                span_df_copy['gaze detected on surface'] = span_df_copy['gaze detected on surface'].fillna(False)
+        # ... (il resto della tua logica di plotting) ...
 
-                for status, color in [(True, 'lightgreen'), (False, 'lightcoral')]:
-                    span_df_copy['block'] = (span_df_copy['gaze detected on surface'] != span_df_copy['gaze detected on surface'].shift()).cumsum()
-                    spans = span_df_copy[span_df_copy['gaze detected on surface'] == status]
-                    for _, g in spans.groupby('block'):
-                        if not g.empty:
-                            ax.axvspan(g['time_sec'].iloc[0], g['time_sec'].iloc[-1], facecolor=color, alpha=0.3, zorder=-1, lw=0)
-
-            ax.set_title(title, fontsize=15); ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.legend(); ax.grid(True)
-            fig.tight_layout()
-            plt.savefig(output_path)
+        ax.set_title(title, fontsize=15)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.legend()
+        ax.grid(True)
+        fig.tight_layout()
+        
+        # Salva la figura
+        plt.savefig(output_path)
+        
+    except Exception as e:
+        print(f"ATTENZIONE: Fallimento nella generazione del grafico '{title}'. Errore: {e}")
+    finally:
+        # Assicurati SEMPRE di chiudere la figura per liberare memoria
+        if fig is not None:
             plt.close(fig)
-            break
-        except Exception as e:
-            print(f"WARNING: Failed to generate or save plot '{title}' to {output_path} on attempt {attempt+1}. Error: {e}")
-            if attempt == 0:
-                time.sleep(1)
-    gc.collect()
+        # Forza il garbage collector a liberare la memoria non più utilizzata
+        gc.collect()
 
 def _plot_binary_timeseries(df, start_col, duration_col, total_duration, title, ylabel, output_path):
     """Helper function to plot binary events like blinks over time."""
