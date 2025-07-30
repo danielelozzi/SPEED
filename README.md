@@ -90,11 +90,15 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
 2.  **Sections 1-3: Setup and Core Analysis**
     * **Step 1**: In the top sections of the GUI, fill in the **Participant Name** and select the **Output Folder**.
     * **Step 2**: Use the "Browse..." buttons to select the required **Input Folders**: **RAW** and **Un-enriched**. The **Enriched** folder is optional.
+
+    ![GUI - Setup](images/gui1.png)
+
     * **Step 2.5**: After selecting the "Un-enriched Data Folder", the **"Event Selection"** box will automatically populate with all events found in `events.csv`. Uncheck any events you wish to exclude from the analysis.
+
+    ![GUI - Event Selection](images/gui_events.png)
+
     * **Step 3**: In the "Run Core Analysis" section, configure the analysis mode (e.g., `un-enriched only`, `Run YOLO`).
     * Click the **"RUN CORE ANALYSIS"** button and wait for the confirmation message. This completes the main data processing for the selected events.
-
-    ![GUI - Setup, Event Selection, and Core Analysis](images/gui1.png)
 
 3.  **Section 4: Generate Plots**
     * Switch to the "4. Generate Plots" tab.
