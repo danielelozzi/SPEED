@@ -399,101 +399,105 @@ def generate_plots_on_demand(output_dir_str: str, subj_name: str, plot_selection
     for pkl_file in sorted(processed_data_dir.glob("*.pkl")):
         event_name = "_".join(pkl_file.stem.split('_')[2:])
         print(f"--- Generating plots for event: '{event_name}' ---")
+        try: # Added try-except block for the entire event's plot generation
+            with open(pkl_file, 'rb') as f:
+                segment_data = pickle.load(f)
 
-        with open(pkl_file, 'rb') as f:
-            segment_data = pickle.load(f)
+            fixations_enr = segment_data.get('fixations_enr', pd.DataFrame())
+            fixations_not_enr = segment_data.get('fixations_not_enr', pd.DataFrame())
+            gaze_enr = segment_data.get('gaze_enr', pd.DataFrame())
+            gaze_not_enr = segment_data.get('gaze_not_enr', pd.DataFrame())
+            blinks = segment_data.get('blinks', pd.DataFrame())
+            saccades = segment_data.get('saccades', pd.DataFrame())
+            pupil = segment_data.get('pupil', pd.DataFrame())
 
-        fixations_enr = segment_data.get('fixations_enr', pd.DataFrame())
-        fixations_not_enr = segment_data.get('fixations_not_enr', pd.DataFrame())
-        gaze_enr = segment_data.get('gaze_enr', pd.DataFrame())
-        gaze_not_enr = segment_data.get('gaze_not_enr', pd.DataFrame())
-        blinks = segment_data.get('blinks', pd.DataFrame())
-        saccades = segment_data.get('saccades', pd.DataFrame())
-        pupil = segment_data.get('pupil', pd.DataFrame())
+            t_min, total_duration = 0, 1
+            base_df_for_time = pupil if not pupil.empty else gaze_not_enr
+            if not base_df_for_time.empty:
+                t_min = base_df_for_time['timestamp [ns]'].min()
+                base_df_for_time['time_sec'] = (base_df_for_time['timestamp [ns]'] - t_min) / NS_TO_S
+                total_duration = base_df_for_time['time_sec'].max()
 
-        t_min, total_duration = 0, 1
-        base_df_for_time = pupil if not pupil.empty else gaze_not_enr
-        if not base_df_for_time.empty:
-            t_min = base_df_for_time['timestamp [ns]'].min()
-            base_df_for_time['time_sec'] = (base_df_for_time['timestamp [ns]'] - t_min) / NS_TO_S
-            total_duration = base_df_for_time['time_sec'].max()
+            span_df = None
+            if not un_enriched_mode and not pupil.empty and not gaze_enr.empty and 'gaze detected on surface' in gaze_enr.columns:
+                span_df = pd.merge_asof(pupil.sort_values('timestamp [ns]'), gaze_enr[['timestamp [ns]', 'gaze detected on surface']].sort_values('timestamp [ns]'), on='timestamp [ns]', direction='nearest')
 
-        span_df = None
-        if not un_enriched_mode and not pupil.empty and not gaze_enr.empty and 'gaze detected on surface' in gaze_enr.columns:
-            span_df = pd.merge_asof(pupil.sort_values('timestamp [ns]'), gaze_enr[['timestamp [ns]', 'gaze detected on surface']].sort_values('timestamp [ns]'), on='timestamp [ns]', direction='nearest')
+            if plot_selections.get("histograms"):
+                if 'duration [ms]' in fixations_not_enr.columns: _plot_histogram(fixations_not_enr['duration [ms]'], f"Fixation Duration (Un-enriched) - {event_name}", "Duration [ms]", plots_dir / f"hist_fix_unenriched_{event_name}.pdf")
+                if not un_enriched_mode and 'duration [ms]' in fixations_enr.columns: _plot_histogram(fixations_enr['duration [ms]'], f"Fixation Duration (Enriched) - {event_name}", "Duration [ms]", plots_dir / f"hist_fix_enriched_{event_name}.pdf")
+                if 'duration [ms]' in blinks.columns: _plot_histogram(blinks['duration [ms]'], f"Blink Duration - {event_name}", "Duration [ms]", plots_dir / f"hist_blinks_{event_name}.pdf")
+                if 'duration [ms]' in saccades.columns: _plot_histogram(saccades['duration [ms]'], f"Saccade Duration - {event_name}", "Duration [ms]", plots_dir / f"hist_saccades_{event_name}.pdf")
 
-        if plot_selections.get("histograms"):
-            if 'duration [ms]' in fixations_not_enr.columns: _plot_histogram(fixations_not_enr['duration [ms]'], f"Fixation Duration (Un-enriched) - {event_name}", "Duration [ms]", plots_dir / f"hist_fix_unenriched_{event_name}.pdf")
-            if not un_enriched_mode and 'duration [ms]' in fixations_enr.columns: _plot_histogram(fixations_enr['duration [ms]'], f"Fixation Duration (Enriched) - {event_name}", "Duration [ms]", plots_dir / f"hist_fix_enriched_{event_name}.pdf")
-            if 'duration [ms]' in blinks.columns: _plot_histogram(blinks['duration [ms]'], f"Blink Duration - {event_name}", "Duration [ms]", plots_dir / f"hist_blinks_{event_name}.pdf")
-            if 'duration [ms]' in saccades.columns: _plot_histogram(saccades['duration [ms]'], f"Saccade Duration - {event_name}", "Duration [ms]", plots_dir / f"hist_saccades_{event_name}.pdf")
+            if plot_selections.get("path_plots"):
+                _plot_path(fixations_not_enr, 'fixation x [px]', 'fixation y [px]', f"Fixation Path (Un-enriched) - {event_name}", plots_dir / f"path_fix_unenriched_{event_name}.pdf", False, 'purple', video_width, video_height)
+                _plot_path(gaze_not_enr, 'gaze x [px]', 'gaze y [px]', f"Gaze Path (Un-enriched) - {event_name}", plots_dir / f"path_gaze_unenriched_{event_name}.pdf", False, 'blue', video_width, video_height)
+                if not un_enriched_mode and not fixations_enr.empty:
+                    _plot_path(fixations_enr, 'fixation x [normalized]', 'fixation y [normalized]', f"Fixation Path (Enriched) - {event_name}", plots_dir / f"path_fix_enriched_{event_name}.pdf", True, 'green')
+                if not un_enriched_mode and not gaze_enr.empty:
+                    _plot_path(gaze_enr, 'gaze position on surface x [normalized]', 'gaze position on surface y [normalized]', f"Gaze Path (Enriched) - {event_name}", plots_dir / f"path_gaze_enriched_{event_name}.pdf", True, 'red')
 
-        if plot_selections.get("path_plots"):
-            _plot_path(fixations_not_enr, 'fixation x [px]', 'fixation y [px]', f"Fixation Path (Un-enriched) - {event_name}", plots_dir / f"path_fix_unenriched_{event_name}.pdf", False, 'purple', video_width, video_height)
-            _plot_path(gaze_not_enr, 'gaze x [px]', 'gaze y [px]', f"Gaze Path (Un-enriched) - {event_name}", plots_dir / f"path_gaze_unenriched_{event_name}.pdf", False, 'blue', video_width, video_height)
-            if not un_enriched_mode and not fixations_enr.empty:
-                _plot_path(fixations_enr, 'fixation x [normalized]', 'fixation y [normalized]', f"Fixation Path (Enriched) - {event_name}", plots_dir / f"path_fix_enriched_{event_name}.pdf", True, 'green')
-            if not un_enriched_mode and not gaze_enr.empty:
-                _plot_path(gaze_enr, 'gaze position on surface x [normalized]', 'gaze position on surface y [normalized]', f"Gaze Path (Enriched) - {event_name}", plots_dir / f"path_gaze_enriched_{event_name}.pdf", True, 'red')
+            if plot_selections.get("heatmaps"):
+                _plot_heatmap(fixations_not_enr, 'fixation x [px]', 'fixation y [px]', f"Fixation Heatmap (Un-enriched) - {event_name}", plots_dir / f"heatmap_fix_unenriched_{event_name}.pdf", False, video_width, video_height)
+                _plot_heatmap(gaze_not_enr, 'gaze x [px]', 'gaze y [px]', f"Gaze Heatmap (Un-enriched) - {event_name}", plots_dir / f"heatmap_gaze_unenriched_{event_name}.pdf", False, video_width, video_height)
+                if not un_enriched_mode and not fixations_enr.empty:
+                    _plot_heatmap(fixations_enr, 'fixation x [normalized]', 'fixation y [normalized]', f"Fixation Heatmap (Enriched) - {event_name}", plots_dir / f"heatmap_fix_enriched_{event_name}.pdf", True)
+                if not un_enriched_mode and not gaze_enr.empty:
+                    _plot_heatmap(gaze_enr, 'gaze position on surface x [normalized]', 'gaze position on surface y [normalized]', f"Gaze Heatmap (Enriched) - {event_name}", plots_dir / f"heatmap_gaze_enriched_{event_name}.pdf", True)
 
-        if plot_selections.get("heatmaps"):
-            _plot_heatmap(fixations_not_enr, 'fixation x [px]', 'fixation y [px]', f"Fixation Heatmap (Un-enriched) - {event_name}", plots_dir / f"heatmap_fix_unenriched_{event_name}.pdf", False, video_width, video_height)
-            _plot_heatmap(gaze_not_enr, 'gaze x [px]', 'gaze y [px]', f"Gaze Heatmap (Un-enriched) - {event_name}", plots_dir / f"heatmap_gaze_unenriched_{event_name}.pdf", False, video_width, video_height)
-            if not un_enriched_mode and not fixations_enr.empty:
-                _plot_heatmap(fixations_enr, 'fixation x [normalized]', 'fixation y [normalized]', f"Fixation Heatmap (Enriched) - {event_name}", plots_dir / f"heatmap_fix_enriched_{event_name}.pdf", True)
-            if not un_enriched_mode and not gaze_enr.empty:
-                _plot_heatmap(gaze_enr, 'gaze position on surface x [normalized]', 'gaze position on surface y [normalized]', f"Gaze Heatmap (Enriched) - {event_name}", plots_dir / f"heatmap_gaze_enriched_{event_name}.pdf", True)
+            if plot_selections.get("pupillometry") and not pupil.empty:
+                y_data = {}
+                if 'pupil diameter left [mm]' in pupil.columns: y_data['Left Pupil'] = pupil['pupil diameter left [mm]']
+                if 'pupil diameter right [mm]' in pupil.columns: y_data['Right Pupil'] = pupil['pupil diameter right [mm]']
+                _plot_generic_timeseries(pupil['time_sec'], y_data, f"Pupil Diameter Time Series - {event_name}", "Time (s)", "Pupil Diameter [mm]", plots_dir / f"pupillometry_{event_name}.pdf", span_df)
 
-        if plot_selections.get("pupillometry") and not pupil.empty:
-            y_data = {}
-            if 'pupil diameter left [mm]' in pupil.columns: y_data['Left Pupil'] = pupil['pupil diameter left [mm]']
-            if 'pupil diameter right [mm]' in pupil.columns: y_data['Right Pupil'] = pupil['pupil diameter right [mm]']
-            _plot_generic_timeseries(pupil['time_sec'], y_data, f"Pupil Diameter Time Series - {event_name}", "Time (s)", "Pupil Diameter [mm]", plots_dir / f"pupillometry_{event_name}.pdf", span_df)
+                if 'pupil diameter left [mm]' in pupil.columns:
+                    _plot_spectral_analysis(pupil['pupil diameter left [mm]'], f"total_{event_name}", plots_dir)
+                if span_df is not None and not span_df.empty:
+                    pupil_on_surface = span_df[span_df['gaze detected on surface'] == True]
+                    if 'pupil diameter left [mm]' in pupil_on_surface.columns:
+                        _plot_spectral_analysis(pupil_on_surface['pupil diameter left [mm]'], f"onsurface_{event_name}", plots_dir)
 
-            if 'pupil diameter left [mm]' in pupil.columns:
-                _plot_spectral_analysis(pupil['pupil diameter left [mm]'], f"total_{event_name}", plots_dir)
-            if span_df is not None and not span_df.empty:
-                pupil_on_surface = span_df[span_df['gaze detected on surface'] == True]
-                if 'pupil diameter left [mm]' in pupil_on_surface.columns:
-                    _plot_spectral_analysis(pupil_on_surface['pupil diameter left [mm]'], f"onsurface_{event_name}", plots_dir)
+            # --- MODIFIED: Added Fragmentation Plot ---
+            if plot_selections.get("fragmentation") and not gaze_not_enr.empty:
+                gaze_not_enr['time_sec'] = (gaze_not_enr['timestamp [ns]'] - t_min) / NS_TO_S
+                _plot_generic_timeseries(
+                    gaze_not_enr['time_sec'],
+                    {'Fragmentation': gaze_not_enr['gaze_speed_px_per_s']},
+                    f"Gaze Fragmentation (Speed) - {event_name}",
+                    "Time (s)",
+                    "Speed (pixels/sec)",
+                    plots_dir / f"fragmentation_{event_name}.pdf"
+                )
+            # ----------------------------------------
 
-        # --- MODIFIED: Added Fragmentation Plot ---
-        if plot_selections.get("fragmentation") and not gaze_not_enr.empty:
-            gaze_not_enr['time_sec'] = (gaze_not_enr['timestamp [ns]'] - t_min) / NS_TO_S
-            _plot_generic_timeseries(
-                gaze_not_enr['time_sec'],
-                {'Fragmentation': gaze_not_enr['gaze_speed_px_per_s']},
-                f"Gaze Fragmentation (Speed) - {event_name}",
-                "Time (s)",
-                "Speed (pixels/sec)",
-                plots_dir / f"fragmentation_{event_name}.pdf"
-            )
-        # ----------------------------------------
+            if plot_selections.get("advanced_timeseries"):
+                if not pupil.empty and 'pupil diameter left [mm]' in pupil.columns and 'pupil diameter right [mm]' in pupil.columns:
+                    pupil['pupil_mean_mm'] = pupil[['pupil diameter left [mm]', 'pupil diameter right [mm]']].mean(axis=1)
+                    _plot_generic_timeseries(pupil['time_sec'], {'Mean Pupil Diameter': pupil['pupil_mean_mm']}, f"Mean Pupil Diameter - {event_name}", "Time (s)", "Pupil Diameter [mm]", plots_dir / f"pupil_diameter_mean_{event_name}.pdf", span_df)
 
-        if plot_selections.get("advanced_timeseries"):
-            if not pupil.empty and 'pupil diameter left [mm]' in pupil.columns and 'pupil diameter right [mm]' in pupil.columns:
-                pupil['pupil_mean_mm'] = pupil[['pupil diameter left [mm]', 'pupil diameter right [mm]']].mean(axis=1)
-                _plot_generic_timeseries(pupil['time_sec'], {'Mean Pupil Diameter': pupil['pupil_mean_mm']}, f"Mean Pupil Diameter - {event_name}", "Time (s)", "Pupil Diameter [mm]", plots_dir / f"pupil_diameter_mean_{event_name}.pdf", span_df)
+                if not saccades.empty:
+                    saccades['time_sec'] = (saccades['start timestamp [ns]'] - t_min) / NS_TO_S
+                    vel_y_data, vel_unit = {}, None
+                    if 'mean velocity [deg/s]' in saccades.columns:
+                        vel_y_data['Mean Velocity'] = saccades['mean velocity [deg/s]']; vel_y_data['Peak Velocity'] = saccades['peak velocity [deg/s]']; vel_unit = "deg/s"
+                    elif 'mean velocity [px/s]' in saccades.columns:
+                        vel_y_data['Mean Velocity'] = saccades['mean velocity [px/s]']; vel_y_data['Peak Velocity'] = saccades['peak velocity [px/s]']; vel_unit = "px/s"
+                    if vel_y_data: _plot_generic_timeseries(saccades['time_sec'], vel_y_data, f"Saccade Velocity - {event_name}", "Time (s)", f"Velocity [{vel_unit}]", plots_dir / f"saccade_velocities_{event_name}.pdf")
 
-            if not saccades.empty:
-                saccades['time_sec'] = (saccades['start timestamp [ns]'] - t_min) / NS_TO_S
-                vel_y_data, vel_unit = {}, None
-                if 'mean velocity [deg/s]' in saccades.columns:
-                    vel_y_data['Mean Velocity'] = saccades['mean velocity [deg/s]']; vel_y_data['Peak Velocity'] = saccades['peak velocity [deg/s]']; vel_unit = "deg/s"
-                elif 'mean velocity [px/s]' in saccades.columns:
-                    vel_y_data['Mean Velocity'] = saccades['mean velocity [px/s]']; vel_y_data['Peak Velocity'] = saccades['peak velocity [px/s]']; vel_unit = "px/s"
-                if vel_y_data: _plot_generic_timeseries(saccades['time_sec'], vel_y_data, f"Saccade Velocity - {event_name}", "Time (s)", f"Velocity [{vel_unit}]", plots_dir / f"saccade_velocities_{event_name}.pdf")
+                    amp_y_data, amp_unit = {}, None
+                    if 'amplitude [deg]' in saccades.columns:
+                        amp_y_data['Amplitude'] = saccades['amplitude [deg]']; amp_unit = "deg"
+                    elif 'amplitude [px]' in saccades.columns:
+                        amp_y_data['Amplitude'] = saccades['amplitude [px]']; amp_unit = "px"
+                    if amp_y_data: _plot_generic_timeseries(saccades['time_sec'], amp_y_data, f"Saccade Amplitude - {event_name}", "Time (s)", f"Amplitude [{amp_unit}]", plots_dir / f"saccade_amplitude_{event_name}.pdf")
 
-                amp_y_data, amp_unit = {}, None
-                if 'amplitude [deg]' in saccades.columns:
-                    amp_y_data['Amplitude'] = saccades['amplitude [deg]']; amp_unit = "deg"
-                elif 'amplitude [px]' in saccades.columns:
-                    amp_y_data['Amplitude'] = saccades['amplitude [px]']; amp_unit = "px"
-                if amp_y_data: _plot_generic_timeseries(saccades['time_sec'], amp_y_data, f"Saccade Amplitude - {event_name}", "Time (s)", f"Amplitude [{amp_unit}]", plots_dir / f"saccade_amplitude_{event_name}.pdf")
-
-            if not blinks.empty and 'start timestamp [ns]' in blinks.columns:
-                blinks['time_sec'] = (blinks['start timestamp [ns]'] - t_min) / NS_TO_S
-                blinks['duration_sec'] = blinks['duration [ms]'] / 1000
-                _plot_binary_timeseries(blinks, 'time_sec', 'duration_sec', total_duration, f"Blink Events - {event_name}", "Blink", plots_dir / f"blink_time_series_{event_name}.pdf")
+                if not blinks.empty and 'start timestamp [ns]' in blinks.columns:
+                    blinks['time_sec'] = (blinks['start timestamp [ns]'] - t_min) / NS_TO_S
+                    blinks['duration_sec'] = blinks['duration [ms]'] / 1000
+                    _plot_binary_timeseries(blinks, 'time_sec', 'duration_sec', total_duration, f"Blink Events - {event_name}", "Blink", plots_dir / f"blink_time_series_{event_name}.pdf")
+        except Exception as e:
+            print(f"ERROR: Failed to generate plots for event '{event_name}'. Error: {e}")
+            traceback.print_exc() # Print full traceback for debugging
+            # Continue to the next event even if this one fails
 
     print("--- Plot generation finished. ---")
