@@ -4,11 +4,11 @@ from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 import traceback
 import json
+import pandas as pd
 
 # Import the main orchestrator functions
 try:
     import main_analyzer_advanced as main_analyzer
-    import pandas as pd # Added to read YOLO result CSVs
 except ImportError as e:
     messagebox.showerror("Critical Error", f"Missing library: {e}. Make sure you have installed all requirements (e.g., pandas).")
     exit()
@@ -16,8 +16,8 @@ except ImportError as e:
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v3.2 - Folder-Based Input")
-        self.root.geometry("800x850") # Slightly increased size
+        self.root.title("SPEED v3.2 - Folder-Based Input & Event Selection")
+        self.root.geometry("800x950") # Increased size for event list
 
         # Variables for folder paths
         self.raw_dir_var = tk.StringVar()
@@ -26,6 +26,7 @@ class SpeedApp:
 
         self.plot_vars = {}
         self.video_vars = {}
+        self.event_vars = {} # To hold event checkbox variables
 
         self.canvas = tk.Canvas(root)
         self.scrollbar = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
@@ -75,6 +76,12 @@ class SpeedApp:
         self.enriched_dir_entry = tk.Entry(enriched_frame, textvariable=self.enriched_dir_var); self.enriched_dir_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(enriched_frame, text="Browse...", command=lambda: self.select_folder(self.enriched_dir_var, "Select Enriched Data Folder")).pack(side=tk.RIGHT)
 
+        # --- Event Selection Section (NEW) ---
+        self.event_selection_frame = tk.LabelFrame(main_frame, text="2.5. Event Selection", padx=10, pady=10)
+        self.event_selection_frame.pack(fill=tk.X, pady=5, padx=10)
+        tk.Label(self.event_selection_frame, text="Select un-enriched folder to load events.").pack(pady=5)
+
+
         # --- Core Analysis Section ---
         analysis_frame = tk.LabelFrame(main_frame, text="3. Run Core Analysis", padx=10, pady=10)
         analysis_frame.pack(fill=tk.X, pady=5, padx=10)
@@ -116,7 +123,7 @@ class SpeedApp:
             "path_plots": "Path Plots (Fixation and Gaze)", "heatmaps": "Density Heatmaps (Fixation and Gaze)",
             "histograms": "Duration Histograms (Fixations, Blinks, Saccades)", "pupillometry": "Pupillometry (Time Series and Spectral Analysis)",
             "advanced_timeseries": "Advanced Time Series (Saccades, Blinks)",
-            "fragmentation": "Gaze Fragmentation (Speed) Plot" # NUOVA OPZIONE
+            "fragmentation": "Gaze Fragmentation (Speed) Plot"
         }
         for key, text in plot_types.items():
             self.plot_vars[key] = tk.BooleanVar(value=True)
@@ -133,7 +140,8 @@ class SpeedApp:
         video_opts = {
             "overlay_yolo": "Overlay YOLO object detections", "overlay_gaze": "Overlay gaze point",
             "overlay_pupil_plot": "Overlay blinks and pupillometry plot",
-            "overlay_fragmentation_plot": "Overlay gaze fragmentation plot", # NUOVA OPZIONE
+            "overlay_fragmentation_plot": "Overlay gaze fragmentation plot",
+            "overlay_event_text": "Overlay event name text", # NUOVA OPZIONE
             "include_internal_cam": "Include internal camera view (PiP)",
         }
         for key, text in video_opts.items():
@@ -202,7 +210,57 @@ class SpeedApp:
 
     def select_folder(self, var, title):
         dir_path = filedialog.askdirectory(title=title)
-        if dir_path: var.set(dir_path)
+        if dir_path:
+            var.set(dir_path)
+            # If this is the un-enriched folder, trigger event loading
+            if title == "Select Un-enriched Data Folder":
+                self.load_and_display_events()
+
+    def load_and_display_events(self):
+        """Reads events.csv from the un-enriched folder and displays them as checkboxes."""
+        # Clear previous widgets
+        for widget in self.event_selection_frame.winfo_children():
+            widget.destroy()
+        self.event_vars = {}
+
+        unenriched_path = self.unenriched_dir_var.get()
+        if not unenriched_path:
+            tk.Label(self.event_selection_frame, text="Select un-enriched folder to load events.").pack(pady=5)
+            return
+
+        events_file = Path(unenriched_path) / 'events.csv'
+        if not events_file.exists():
+            tk.Label(self.event_selection_frame, text="events.csv not found in the selected folder.").pack(pady=5)
+            return
+
+        try:
+            events_df = pd.read_csv(events_file)
+            if 'name' not in events_df.columns or events_df['name'].empty:
+                tk.Label(self.event_selection_frame, text="No events found in events.csv.").pack(pady=5)
+                return
+
+            # Create a scrollable area for checkboxes
+            event_canvas = tk.Canvas(self.event_selection_frame, borderwidth=0, height=100)
+            event_frame = tk.Frame(event_canvas)
+            event_scrollbar = tk.Scrollbar(self.event_selection_frame, orient="vertical", command=event_canvas.yview)
+            event_canvas.configure(yscrollcommand=event_scrollbar.set)
+
+            event_scrollbar.pack(side="right", fill="y")
+            event_canvas.pack(side="left", fill="both", expand=True)
+            event_canvas.create_window((4, 4), window=event_frame, anchor="nw")
+
+            event_frame.bind("<Configure>", lambda e: event_canvas.configure(scrollregion=event_canvas.bbox("all")))
+
+            # Populate with event checkboxes
+            event_names = events_df['name'].unique()
+            for event_name in event_names:
+                var = tk.BooleanVar(value=True)
+                self.event_vars[event_name] = var
+                tk.Checkbutton(event_frame, text=event_name, variable=var).pack(anchor='w', padx=5)
+
+        except Exception as e:
+            tk.Label(self.event_selection_frame, text=f"Error reading events.csv: {e}").pack(pady=5)
+
 
     def _get_common_paths(self):
         output_dir = self.output_dir_entry.get().strip()
@@ -220,9 +278,24 @@ class SpeedApp:
         if not (raw_dir and unenriched_dir):
             messagebox.showerror("Error", "The RAW and Un-enriched folders are mandatory.")
             return
+
+        # Get selected events
+        selected_events = [name for name, var in self.event_vars.items() if var.get()]
+        if not self.event_vars or not selected_events:
+            messagebox.showwarning("Warning", "No events loaded or selected. The analysis might not produce any results.")
+
         try:
             messagebox.showinfo("In Progress", "Starting core analysis. This might take some time...")
-            main_analyzer.run_core_analysis(subj_name=subj_name, output_dir_str=str(output_dir_path), raw_dir_str=raw_dir, unenriched_dir_str=unenriched_dir, enriched_dir_str=enriched_dir, un_enriched_mode=self.unenriched_var.get(), run_yolo=self.yolo_var.get())
+            main_analyzer.run_core_analysis(
+                subj_name=subj_name,
+                output_dir_str=str(output_dir_path),
+                raw_dir_str=raw_dir,
+                unenriched_dir_str=unenriched_dir,
+                enriched_dir_str=enriched_dir,
+                un_enriched_mode=self.unenriched_var.get(),
+                run_yolo=self.yolo_var.get(),
+                selected_events=selected_events # Pass the list of selected events
+            )
             success_msg = "Core analysis completed."
             if self.yolo_var.get(): success_msg += "\nYou can now load the YOLO results in the 'YOLO Results' tab."
             messagebox.showinfo("Success", success_msg)

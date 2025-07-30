@@ -76,7 +76,8 @@ def run_core_analysis(
     unenriched_dir_str: str, 
     enriched_dir_str: str, 
     un_enriched_mode: bool, 
-    run_yolo: bool
+    run_yolo: bool,
+    selected_events: list # NUOVO PARAMETRO
 ):
     """
     Executes the complete analysis, including YOLO analysis if requested.
@@ -95,7 +96,8 @@ def run_core_analysis(
 
         config = {
             "source_folders": { "raw": raw_dir_str, "unenriched": unenriched_dir_str, "enriched": enriched_dir_str },
-            "unenriched_mode": un_enriched_mode, "yolo_mode": run_yolo
+            "unenriched_mode": un_enriched_mode, "yolo_mode": run_yolo,
+            "selected_events": selected_events # Salva anche gli eventi selezionati
         }
         with open(output_dir / 'config.json', 'w') as f:
             json.dump(config, f, indent=4)
@@ -105,7 +107,8 @@ def run_core_analysis(
             subj_name=subj_name,
             data_dir_str=str(working_data_dir),
             output_dir_str=str(output_dir),
-            un_enriched_mode=un_enriched_mode
+            un_enriched_mode=un_enriched_mode,
+            selected_events=selected_events # PASSA GLI EVENTI
         )
         print(">>> Standard data analysis finished.")
 

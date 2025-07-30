@@ -35,6 +35,10 @@ FRAG_PLOT_HEIGHT = 150
 FRAG_BG_COLOR = (80, 80, 80)
 FRAG_LINE_COLOR = (255, 200, 100) # Light Blue
 
+# --- Event Text Constants (NEW) ---
+EVENT_TEXT_COLOR = (255, 255, 255) # White
+EVENT_BG_COLOR = (0, 0, 0) # Black
+
 def _prepare_data(data_dir: Path, un_enriched_mode: bool, options: dict):
     """
     Loads and synchronizes all necessary DataFrames for video generation.
@@ -211,6 +215,22 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
     writer = cv2.VideoWriter(str(video_out_path), cv2.VideoWriter_fourcc(*'mp4v'), fps, (out_w, out_h))
     print(f"The output video will be saved to: {video_out_path}")
 
+    # --- Setup for Event Text Overlay (NEW) ---
+    events_df = pd.DataFrame()
+    if options.get('overlay_event_text'):
+        try:
+            events_df = pd.read_csv(data_dir / 'events.csv')
+            events_df.sort_values('timestamp [ns]', inplace=True)
+            # Clean names just in case
+            events_df['name'] = events_df['name'].astype(str).str.replace(r'[\\/]', '_', regex=True)
+        except FileNotFoundError:
+            print("WARNING: 'events.csv' not found. Event text overlay disabled.")
+            options['overlay_event_text'] = False
+    
+    current_event_name = ""
+    event_idx = 0
+    # ---
+
     # Attempt to load YOLO detection data if the option is enabled.
     yolo_detections = pd.DataFrame()
     yolo_class_map = {}
@@ -221,44 +241,34 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
         try:
             yolo_detections = pd.read_csv(yolo_cache_path)
             id_map = pd.read_csv(id_map_path)
-            # Create a dictionary to map track_id to class_name for easy lookup.
             yolo_class_map = pd.Series(id_map.class_name.values, index=id_map.track_id).to_dict()
             print("Successfully loaded YOLO detection data and class map.")
         except FileNotFoundError:
             print(f"WARNING: YOLO overlay is ON, but a required file was not found: {yolo_cache_path} or {id_map_path}")
-            print("         Please run 'Core Analysis' with the YOLO option enabled first. Disabling YOLO overlay for this run.")
-            options['overlay_yolo'] = False # Disable the option if files are not found.
+            options['overlay_yolo'] = False
     
     # Setup for pupil plot
     pupil_plot_data = {"Left": [], "Right": [], "Mean": []}
     pupil_min, pupil_max = 0, 1
-    pupil_cols = {
-        "Left": "pupil diameter left [mm]",
-        "Right": "pupil diameter right [mm]",
-        "Mean": "pupil_diameter_mean"
-    }
+    pupil_cols = { "Left": "pupil diameter left [mm]", "Right": "pupil diameter right [mm]", "Mean": "pupil_diameter_mean" }
     if options.get('overlay_pupil_plot'):
         all_pupil_data = pd.concat([sync_data[col] for col in pupil_cols.values() if col in sync_data.columns]).dropna()
-        if not all_pupil_data.empty:
-            pupil_min = all_pupil_data.min()
-            pupil_max = all_pupil_data.max()
+        if not all_pupil_data.empty: pupil_min, pupil_max = all_pupil_data.min(), all_pupil_data.max()
 
     # Setup for fragmentation plot
     frag_plot_data = []
     frag_min, frag_max = 0, 1
     if options.get('overlay_fragmentation_plot') and 'gaze_speed_px_per_s' in sync_data.columns:
         all_frag_data = sync_data['gaze_speed_px_per_s'].dropna()
-        if not all_frag_data.empty:
-            frag_min = 0 # Start y-axis at 0 for speed
-            frag_max = all_frag_data.quantile(0.99) # Use 99th percentile to avoid extreme outliers
+        if not all_frag_data.empty: frag_min, frag_max = 0, all_frag_data.quantile(0.99)
 
     try:
         for frame_idx in tqdm(range(min(total_frames, len(sync_data))), desc="Generating Video"):
             ret_ext, frame = cap_ext.read()
-            if not ret_ext:
-                break
+            if not ret_ext: break
             
             frame_data = sync_data.iloc[frame_idx]
+            current_ts = frame_data['timestamp [ns]']
             
             M = None
             if options.get('crop_and_correct_perspective') and pd.notna(frame_data.get('tl x [px]')):
@@ -270,7 +280,14 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                 frame = cv2.resize(frame, (out_w, out_h))
 
             # --- OVERLAYS ---
-            
+
+            # Check for current event (NEW)
+            if options.get('overlay_event_text') and event_idx < len(events_df):
+                next_event = events_df.iloc[event_idx]
+                if current_ts >= next_event['timestamp [ns]']:
+                    current_event_name = next_event['name']
+                    event_idx += 1
+
             if options.get('include_internal_cam') and cap_int is not None:
                 ret_int, frame_int = cap_int.read()
                 if ret_int:
@@ -280,34 +297,20 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
 
             # Draw YOLO object detection overlays
             if options.get('overlay_yolo') and not yolo_detections.empty:
-                # Filter detections for the current frame
                 detections_for_frame = yolo_detections[yolo_detections['frame_idx'] == frame_idx]
-
                 for _, det in detections_for_frame.iterrows():
-                    # Extract bounding box coordinates
                     x1, y1, x2, y2 = int(det['x1']), int(det['y1']), int(det['x2']), int(det['y2'])
-                    
-                    # If perspective correction is active, transform box coordinates as well
                     if M is not None:
                         pts = np.float32([[x1, y1], [x2, y2]]).reshape(-1, 1, 2)
                         transformed_pts = cv2.perspectiveTransform(pts, M)
                         if transformed_pts is not None:
-                            x1_t, y1_t = int(transformed_pts[0][0][0]), int(transformed_pts[0][0][1])
-                            x2_t, y2_t = int(transformed_pts[1][0][0]), int(transformed_pts[1][0][1])
-                            cv2.rectangle(frame, (x1_t, y1_t), (x2_t, y2_t), YOLO_BOX_COLOR, YOLO_THICKNESS)
-                            
-                            # Add label with class name and track ID
-                            track_id = int(det['track_id'])
-                            class_name = yolo_class_map.get(track_id, f"ID:{track_id}")
-                            cv2.putText(frame, class_name, (x1_t, y1_t - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, YOLO_TEXT_COLOR, 2)
-                    else:
-                        # Otherwise, draw using original coordinates
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), YOLO_BOX_COLOR, YOLO_THICKNESS)
-                        
-                        # Add label with class name and track ID
-                        track_id = int(det['track_id'])
-                        class_name = yolo_class_map.get(track_id, f"ID:{track_id}")
-                        cv2.putText(frame, class_name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, YOLO_TEXT_COLOR, 2)
+                            x1, y1 = int(transformed_pts[0][0][0]), int(transformed_pts[0][0][1])
+                            x2, y2 = int(transformed_pts[1][0][0]), int(transformed_pts[1][0][1])
+                    
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), YOLO_BOX_COLOR, YOLO_THICKNESS)
+                    track_id = int(det['track_id'])
+                    class_name = yolo_class_map.get(track_id, f"ID:{track_id}")
+                    cv2.putText(frame, class_name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, YOLO_TEXT_COLOR, 2)
 
             if options.get('overlay_gaze') and pd.notna(frame_data.get('gaze x [px]')):
                 gaze_x, gaze_y = frame_data['gaze x [px]'], frame_data['gaze y [px]']
@@ -324,20 +327,34 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
             
             if options.get('overlay_pupil_plot'):
                 for name, col in pupil_cols.items():
-                    if col in frame_data:
-                        pupil_plot_data[name].append(frame_data[col])
-                        if len(pupil_plot_data[name]) > PUPIL_PLOT_HISTORY:
-                            pupil_plot_data[name].pop(0)
+                    if col in frame_data: pupil_plot_data[name].append(frame_data[col])
+                    if len(pupil_plot_data[name]) > PUPIL_PLOT_HISTORY: pupil_plot_data[name].pop(0)
                 frame = _draw_pupil_plot(frame, pupil_plot_data, pupil_min, pupil_max, PUPIL_PLOT_WIDTH, PUPIL_PLOT_HEIGHT, (out_w - PUPIL_PLOT_WIDTH - 10, 10))
 
             if options.get('overlay_fragmentation_plot'):
-                if 'gaze_speed_px_per_s' in frame_data:
-                    frag_plot_data.append(frame_data['gaze_speed_px_per_s'])
-                    if len(frag_plot_data) > FRAG_PLOT_HISTORY:
-                        frag_plot_data.pop(0)
-                # Position below the pupil plot (if it exists) or at the top right
+                if 'gaze_speed_px_per_s' in frame_data: frag_plot_data.append(frame_data['gaze_speed_px_per_s'])
+                if len(frag_plot_data) > FRAG_PLOT_HISTORY: frag_plot_data.pop(0)
                 y_pos = (PUPIL_PLOT_HEIGHT + 20) if options.get('overlay_pupil_plot') else 10
                 frame = _draw_generic_plot(frame, frag_plot_data, frag_min, frag_max, FRAG_PLOT_WIDTH, FRAG_PLOT_HEIGHT, (out_w - FRAG_PLOT_WIDTH - 10, y_pos), "Fragmentation", FRAG_LINE_COLOR, FRAG_BG_COLOR)
+            
+            # Draw Event Text Overlay (NEW)
+            if options.get('overlay_event_text') and current_event_name:
+                font_scale = 1.0
+                font_thickness = 2
+                (text_width, text_height), baseline = cv2.getTextSize(current_event_name, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+                text_x = (out_w - text_width) // 2
+                text_y = 40
+                
+                # Draw a semi-transparent background rectangle
+                rect_start = (text_x - 10, text_y - text_height - 5)
+                rect_end = (text_x + text_width + 10, text_y + baseline)
+                sub_img = frame[rect_start[1]:rect_end[1], rect_start[0]:rect_end[0]]
+                black_rect = np.zeros(sub_img.shape, dtype=np.uint8)
+                res = cv2.addWeighted(sub_img, 0.5, black_rect, 0.5, 1.0)
+                frame[rect_start[1]:rect_end[1], rect_start[0]:rect_end[0]] = res
+
+                cv2.putText(frame, current_event_name, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, EVENT_TEXT_COLOR, font_thickness, cv2.LINE_AA)
+
 
             writer.write(frame)
 
