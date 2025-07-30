@@ -225,24 +225,35 @@ def run_analysis(subj_name: str, data_dir_str: str, output_dir_str: str, un_enri
 # ON-DEMAND PLOT GENERATION FUNCTIONS
 # ==============================================================================
 
+# Esempio di una funzione di plotting corretta
 def _plot_histogram(data_series, title, xlabel, output_path):
     """Helper function to create and save a standardized histogram."""
-    for attempt in range(2):
-        try:
-            if data_series.dropna().empty: return
-            plt.figure(figsize=(10, 6), dpi=100)
-            plt.hist(data_series.dropna(), bins=25, color='royalblue', edgecolor='black', alpha=0.7)
-            plt.title(title, fontsize=15); plt.xlabel(xlabel, fontsize=12); plt.ylabel('Frequency', fontsize=12)
-            plt.grid(axis='y', linestyle='--', alpha=0.7); plt.tight_layout()
-            plt.savefig(output_path)
-            plt.close()
-            break # Success
-        except Exception as e:
-            print(f"WARNING: Failed to generate or save plot '{title}' to {output_path} on attempt {attempt+1}. Error: {e}")
-            if attempt == 0:
-                time.sleep(1) # Wait before retrying
+    try:
+        if data_series.dropna().empty: return
+        
+        # 1. Crea la figura
+        plt.figure(figsize=(10, 6), dpi=100)
+        
+        # 2. Genera il grafico
+        plt.hist(data_series.dropna(), bins=25, color='royalblue', edgecolor='black', alpha=0.7)
+        plt.title(title, fontsize=15)
+        plt.xlabel(xlabel, fontsize=12)
+        plt.ylabel('Frequency', fontsize=12)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        
+        # 3. Salva il grafico su file
+        plt.savefig(output_path)
+        
+        # 4. Chiudi la figura per liberare memoria (PASSAGGIO CRUCIALE)
+        plt.close() 
+        
+    except Exception as e:
+        print(f"WARNING: Failed to generate or save plot '{title}'...")
+    
+    # Questo è utile ma non sostituisce plt.close()
     gc.collect()
-
+    
 def _plot_path(df, x_col, y_col, title, output_path, is_normalized, color, w=None, h=None):
     """Helper function to create and save a path plot."""
     for attempt in range(2):
