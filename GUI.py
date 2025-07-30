@@ -13,11 +13,66 @@ except ImportError as e:
     messagebox.showerror("Critical Error", f"Missing library: {e}. Make sure you have installed all requirements (e.g., pandas).")
     exit()
 
+
+class EventSelectionWindow:
+    """A separate window for selecting events to analyze."""
+    def __init__(self, parent, title, event_names, event_vars):
+        self.top = tk.Toplevel(parent)
+        self.top.title(title)
+        self.top.geometry("600x700")
+        self.event_vars = event_vars
+
+        # Make the window modal
+        self.top.transient(parent)
+        self.top.grab_set()
+
+        # --- WIDGETS ---
+        main_frame = tk.Frame(self.top, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(main_frame, text="Select the events you want to include in the analysis:", font=('Helvetica', 10, 'bold')).pack(pady=(0, 10), anchor='w')
+
+        # --- Scrollable Checkbox Area ---
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Populate with checkboxes
+        for name, var in self.event_vars.items():
+            tk.Checkbutton(scrollable_frame, text=name, variable=var).pack(anchor='w', padx=5)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # --- Button Area ---
+        button_frame = tk.Frame(self.top, pady=10)
+        button_frame.pack(fill=tk.X)
+
+        tk.Button(button_frame, text="Select All", command=self.select_all).pack(side=tk.LEFT, padx=10)
+        tk.Button(button_frame, text="Deselect All", command=self.deselect_all).pack(side=tk.LEFT, padx=10)
+        tk.Button(button_frame, text="Confirm Selection", command=self.confirm, font=('Helvetica', 10, 'bold')).pack(side=tk.RIGHT, padx=10)
+
+    def select_all(self):
+        for var in self.event_vars.values():
+            var.set(True)
+
+    def deselect_all(self):
+        for var in self.event_vars.values():
+            var.set(False)
+
+    def confirm(self):
+        self.top.destroy()
+
+
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v3.3 - Folder-Based Input")
-        self.root.geometry("800x950") # Increased size for event list
+        self.root.title("SPEED v3.3")
+        self.root.geometry("800x850") # Adjusted size
 
         # Variables for folder paths
         self.raw_dir_var = tk.StringVar()
@@ -28,6 +83,7 @@ class SpeedApp:
         self.video_vars = {}
         self.event_vars = {} # To hold event checkbox variables
 
+        # --- Main Scrollable Canvas Setup ---
         self.canvas = tk.Canvas(root)
         self.scrollbar = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = ttk.Frame(self.canvas)
@@ -35,12 +91,9 @@ class SpeedApp:
         self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
-
-        self.scrollbar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
-
+        self.scrollbar.pack(side="right", fill="y")
+        
         main_frame = self.scrollable_frame
 
         # --- Setup Section ---
@@ -76,10 +129,11 @@ class SpeedApp:
         self.enriched_dir_entry = tk.Entry(enriched_frame, textvariable=self.enriched_dir_var); self.enriched_dir_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(enriched_frame, text="Browse...", command=lambda: self.select_folder(self.enriched_dir_var, "Select Enriched Data Folder")).pack(side=tk.RIGHT)
 
-        # --- Event Selection Section (NEW) ---
+        # --- Event Selection Display (MODIFIED) ---
         self.event_selection_frame = tk.LabelFrame(main_frame, text="2.5. Event Selection", padx=10, pady=10)
         self.event_selection_frame.pack(fill=tk.X, pady=5, padx=10)
-        tk.Label(self.event_selection_frame, text="Select un-enriched folder to load events.").pack(pady=5)
+        self.event_summary_label = tk.Label(self.event_selection_frame, text="Select un-enriched folder to load and choose events.")
+        self.event_summary_label.pack(pady=5)
 
 
         # --- Core Analysis Section ---
@@ -101,29 +155,21 @@ class SpeedApp:
         self.setup_plot_tab(plot_tab)
         self.setup_video_tab(video_tab)
         self.setup_yolo_tab(yolo_tab)
-
-        # --- CREDITS SECTION ---
+        
+        # --- Credits ---
         credits_frame = tk.LabelFrame(main_frame, text="Credits", padx=10, pady=10)
         credits_frame.pack(fill=tk.X, pady=(20, 10), padx=10)
         tk.Label(credits_frame, text="Cognitive and Behavioral Sciences Laboratory (labSCoC), University of L'Aquila", justify=tk.LEFT).pack(anchor='w')
-        tk.Label(credits_frame, text="https://labscoc.wordpress.com/", justify=tk.LEFT).pack(anchor='w')
-        tk.Label(credits_frame, text="").pack(anchor='w') # Spacer
-        tk.Label(credits_frame, text="Dr. Daniele Lozzi (https://github.com/danielelozzi)", justify=tk.LEFT).pack(anchor='w')
 
     def _on_mousewheel(self, event):
-        """Handles mouse wheel scrolling in a cross-platform way."""
-        if hasattr(event, 'delta') and event.delta != 0: self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        elif event.num == 4: self.canvas.yview_scroll(-1, "units")
-        elif event.num == 5: self.canvas.yview_scroll(1, "units")
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def setup_plot_tab(self, parent_tab):
         plot_options_frame = tk.LabelFrame(parent_tab, text="Plot Options", padx=10, pady=10)
         plot_options_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         plot_types = {
-            "path_plots": "Path Plots (Fixation and Gaze)", "heatmaps": "Density Heatmaps (Fixation and Gaze)",
-            "histograms": "Duration Histograms (Fixations, Blinks, Saccades)", "pupillometry": "Pupillometry (Time Series and Spectral Analysis)",
-            "advanced_timeseries": "Advanced Time Series (Saccades, Blinks)",
-            "fragmentation": "Gaze Fragmentation (Speed) Plot"
+            "path_plots": "Path Plots", "heatmaps": "Density Heatmaps", "histograms": "Duration Histograms",
+            "pupillometry": "Pupillometry", "advanced_timeseries": "Advanced Time Series", "fragmentation": "Gaze Fragmentation Plot"
         }
         for key, text in plot_types.items():
             self.plot_vars[key] = tk.BooleanVar(value=True)
@@ -133,71 +179,111 @@ class SpeedApp:
     def setup_video_tab(self, parent_tab):
         video_options_frame = tk.LabelFrame(parent_tab, text="Video Composition Options", padx=10, pady=10)
         video_options_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        self.video_vars['crop_and_correct_perspective'] = tk.BooleanVar(value=False)
-        tk.Checkbutton(video_options_frame, text="Crop & Correct Perspective to Surface", variable=self.video_vars['crop_and_correct_perspective']).pack(anchor='w')
-
         video_opts = {
-            "overlay_yolo": "Overlay YOLO object detections", "overlay_gaze": "Overlay gaze point",
-            "overlay_pupil_plot": "Overlay blinks and pupillometry plot",
-            "overlay_fragmentation_plot": "Overlay gaze fragmentation plot",
-            "overlay_event_text": "Overlay event name text", # NUOVA OPZIONE
+            "crop_and_correct_perspective": "Crop & Correct Perspective to Surface", "overlay_yolo": "Overlay YOLO object detections",
+            "overlay_gaze": "Overlay gaze point", "overlay_pupil_plot": "Overlay pupillometry plot",
+            "overlay_fragmentation_plot": "Overlay gaze fragmentation plot", "overlay_event_text": "Overlay event name text",
             "include_internal_cam": "Include internal camera view (PiP)",
         }
         for key, text in video_opts.items():
             self.video_vars[key] = tk.BooleanVar(value=False)
             tk.Checkbutton(video_options_frame, text=text, variable=self.video_vars[key]).pack(anchor='w')
-
         tk.Label(video_options_frame, text="\nOutput Video Filename:").pack(anchor='w')
         self.video_filename_var = tk.StringVar(value="video_output_1.mp4")
         tk.Entry(video_options_frame, textvariable=self.video_filename_var).pack(fill=tk.X, pady=5)
         tk.Button(parent_tab, text="GENERATE VIDEO", command=self.run_video_generation, font=('Helvetica', 10, 'bold'), bg='#ef9a9a').pack(pady=10)
 
     def setup_yolo_tab(self, parent_tab):
-        """Sets up the tab to display YOLO analysis results."""
         tk.Button(parent_tab, text="Load/Refresh YOLO Results", command=self.load_yolo_results, font=('Helvetica', 10, 'bold'), bg='#ffcc80').pack(pady=10)
-
         class_frame = tk.LabelFrame(parent_tab, text="Results per Class", padx=10, pady=10)
         class_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         self.class_treeview = ttk.Treeview(class_frame, show='headings')
-        class_scroll = ttk.Scrollbar(class_frame, orient="vertical", command=self.class_treeview.yview)
-        self.class_treeview.configure(yscrollcommand=class_scroll.set)
         self.class_treeview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        class_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
         instance_frame = tk.LabelFrame(parent_tab, text="Results per Instance", padx=10, pady=10)
         instance_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         self.instance_treeview = ttk.Treeview(instance_frame, show='headings')
-        instance_scroll = ttk.Scrollbar(instance_frame, orient="vertical", command=self.instance_treeview.yview)
-        self.instance_treeview.configure(yscrollcommand=instance_scroll.set)
         self.instance_treeview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        instance_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-    def _populate_treeview(self, treeview, dataframe):
-        """Clears and populates a Treeview widget with a pandas DataFrame."""
-        treeview.delete(*treeview.get_children())
-        treeview["columns"] = list(dataframe.columns)
-        for col in dataframe.columns:
-            treeview.heading(col, text=col)
-            treeview.column(col, width=120, anchor='center')
-        for index, row in dataframe.iterrows():
-            treeview.insert("", "end", values=list(row))
+    def select_folder(self, var, title):
+        dir_path = filedialog.askdirectory(title=title)
+        if dir_path:
+            var.set(dir_path)
+            if title == "Select Un-enriched Data Folder":
+                self.load_and_display_events()
 
-    def load_yolo_results(self):
-        """Loads YOLO result CSV files and populates the tables."""
-        common_paths = self._get_common_paths()
-        if not common_paths: return
-        output_dir_path, _ = common_paths
-        class_csv = output_dir_path / 'stats_per_class.csv'
-        instance_csv = output_dir_path / 'stats_per_instance.csv'
+    def load_and_display_events(self):
+        """Opens a new window to select events from events.csv."""
+        self.event_summary_label.config(text="Loading events...")
+        unenriched_path = self.unenriched_dir_var.get()
+        if not unenriched_path:
+            self.event_summary_label.config(text="Select un-enriched folder to load and choose events.")
+            return
+
+        events_file = Path(unenriched_path) / 'events.csv'
+        if not events_file.exists():
+            messagebox.showerror("Error", "events.csv not found in the selected folder.")
+            self.event_summary_label.config(text="events.csv not found.")
+            return
+
         try:
-            if class_csv.exists(): self._populate_treeview(self.class_treeview, pd.read_csv(class_csv))
-            else: messagebox.showinfo("Info", f"File not found: {class_csv.name}\nRun YOLO analysis first.")
-            if instance_csv.exists(): self._populate_treeview(self.instance_treeview, pd.read_csv(instance_csv))
-            else: messagebox.showinfo("Info", f"File not found: {instance_csv.name}\nRun YOLO analysis first.")
-        except Exception as e:
-            messagebox.showerror("Read Error", f"Could not read the YOLO result CSV files: {e}")
+            events_df = pd.read_csv(events_file)
+            event_names = events_df['name'].unique().tolist()
+            if not event_names:
+                messagebox.showinfo("Info", "No events found in events.csv.")
+                self.event_summary_label.config(text="No events found.")
+                return
 
+            self.event_vars.clear()
+            for name in event_names:
+                self.event_vars[name] = tk.BooleanVar(value=True)
+
+            # Open the selection window and wait for it to close
+            selection_window = EventSelectionWindow(self.root, "Select Events", event_names, self.event_vars)
+            self.root.wait_window(selection_window.top)
+
+            # After window is closed, update the summary label
+            self.update_event_summary_display()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not read or process events.csv:\n{e}")
+            self.event_summary_label.config(text="Error reading events file.")
+
+    def update_event_summary_display(self):
+        """Updates the label in the main window to show how many events are selected."""
+        total_events = len(self.event_vars)
+        selected_count = sum(var.get() for var in self.event_vars.values())
+        if total_events > 0:
+            self.event_summary_label.config(text=f"{selected_count} of {total_events} events selected for analysis.")
+        else:
+            self.event_summary_label.config(text="No events loaded.")
+            
+    def run_core_analysis(self):
+        # This function now reads the choices from self.event_vars, which were
+        # set in the separate EventSelectionWindow. The logic here remains the same.
+        output_dir = self.output_dir_entry.get().strip()
+        subj_name = self.participant_name_var.get().strip()
+        if not (output_dir and subj_name and self.raw_dir_var.get() and self.unenriched_dir_var.get()):
+            messagebox.showerror("Error", "Participant Name, Output Folder, RAW, and Un-enriched folders are mandatory.")
+            return
+
+        selected_events = [name for name, var in self.event_vars.items() if var.get()]
+        if not self.event_vars or not selected_events:
+            if not messagebox.askyesno("Confirmation", "No events are selected for analysis. Continue anyway?"):
+                return
+
+        try:
+            messagebox.showinfo("In Progress", "Starting core analysis. This might take some time...")
+            main_analyzer.run_core_analysis(
+                subj_name=subj_name, output_dir_str=output_dir, raw_dir_str=self.raw_dir_var.get(),
+                unenriched_dir_str=self.unenriched_dir_var.get(), enriched_dir_str=self.enriched_dir_var.get(),
+                un_enriched_mode=self.unenriched_var.get(), run_yolo=self.yolo_var.get(),
+                selected_events=selected_events
+            )
+            messagebox.showinfo("Success", f"Core analysis completed.\nResults saved in: {output_dir}")
+        except Exception as e:
+            messagebox.showerror("Analysis Error", f"An error occurred: {e}\n\n{traceback.format_exc()}")
+            
+    # --- Other methods (update_output_dir_default, select_output_dir, etc.) remain unchanged ---
     def update_output_dir_default(self, *args):
         subj_name = self.participant_name_var.get().strip()
         if subj_name:
@@ -207,61 +293,7 @@ class SpeedApp:
     def select_output_dir(self):
         directory_path = filedialog.askdirectory(title="Select Output Folder")
         if directory_path: self.output_dir_entry.delete(0, tk.END); self.output_dir_entry.insert(0, directory_path)
-
-    def select_folder(self, var, title):
-        dir_path = filedialog.askdirectory(title=title)
-        if dir_path:
-            var.set(dir_path)
-            # If this is the un-enriched folder, trigger event loading
-            if title == "Select Un-enriched Data Folder":
-                self.load_and_display_events()
-
-    def load_and_display_events(self):
-        """Reads events.csv from the un-enriched folder and displays them as checkboxes."""
-        # Clear previous widgets
-        for widget in self.event_selection_frame.winfo_children():
-            widget.destroy()
-        self.event_vars = {}
-
-        unenriched_path = self.unenriched_dir_var.get()
-        if not unenriched_path:
-            tk.Label(self.event_selection_frame, text="Select un-enriched folder to load events.").pack(pady=5)
-            return
-
-        events_file = Path(unenriched_path) / 'events.csv'
-        if not events_file.exists():
-            tk.Label(self.event_selection_frame, text="events.csv not found in the selected folder.").pack(pady=5)
-            return
-
-        try:
-            events_df = pd.read_csv(events_file)
-            if 'name' not in events_df.columns or events_df['name'].empty:
-                tk.Label(self.event_selection_frame, text="No events found in events.csv.").pack(pady=5)
-                return
-
-            # Create a scrollable area for checkboxes
-            event_canvas = tk.Canvas(self.event_selection_frame, borderwidth=0, height=100)
-            event_frame = tk.Frame(event_canvas)
-            event_scrollbar = tk.Scrollbar(self.event_selection_frame, orient="vertical", command=event_canvas.yview)
-            event_canvas.configure(yscrollcommand=event_scrollbar.set)
-
-            event_scrollbar.pack(side="right", fill="y")
-            event_canvas.pack(side="left", fill="both", expand=True)
-            event_canvas.create_window((4, 4), window=event_frame, anchor="nw")
-
-            event_frame.bind("<Configure>", lambda e: event_canvas.configure(scrollregion=event_canvas.bbox("all")))
-
-            # Populate with event checkboxes
-            event_names = events_df['name'].unique()
-            for event_name in event_names:
-                var = tk.BooleanVar(value=True)
-                self.event_vars[event_name] = var
-                tk.Checkbutton(event_frame, text=event_name, variable=var).pack(anchor='w', padx=5)
-
-        except Exception as e:
-            tk.Label(self.event_selection_frame, text=f"Error reading events.csv: {e}").pack(pady=5)
-
-
+            
     def _get_common_paths(self):
         output_dir = self.output_dir_entry.get().strip()
         subj_name = self.participant_name_var.get().strip()
@@ -269,38 +301,6 @@ class SpeedApp:
             messagebox.showerror("Error", "Please enter the participant name and the output folder.")
             return None
         return Path(output_dir), subj_name
-
-    def run_core_analysis(self):
-        common_paths = self._get_common_paths()
-        if not common_paths: return
-        output_dir_path, subj_name = common_paths
-        raw_dir = self.raw_dir_var.get().strip(); unenriched_dir = self.unenriched_dir_var.get().strip(); enriched_dir = self.enriched_dir_var.get().strip()
-        if not (raw_dir and unenriched_dir):
-            messagebox.showerror("Error", "The RAW and Un-enriched folders are mandatory.")
-            return
-
-        # Get selected events
-        selected_events = [name for name, var in self.event_vars.items() if var.get()]
-        if not self.event_vars or not selected_events:
-            messagebox.showwarning("Warning", "No events loaded or selected. The analysis might not produce any results.")
-
-        try:
-            messagebox.showinfo("In Progress", "Starting core analysis. This might take some time...")
-            main_analyzer.run_core_analysis(
-                subj_name=subj_name,
-                output_dir_str=str(output_dir_path),
-                raw_dir_str=raw_dir,
-                unenriched_dir_str=unenriched_dir,
-                enriched_dir_str=enriched_dir,
-                un_enriched_mode=self.unenriched_var.get(),
-                run_yolo=self.yolo_var.get(),
-                selected_events=selected_events # Pass the list of selected events
-            )
-            success_msg = "Core analysis completed."
-            if self.yolo_var.get(): success_msg += "\nYou can now load the YOLO results in the 'YOLO Results' tab."
-            messagebox.showinfo("Success", success_msg)
-        except Exception as e:
-            messagebox.showerror("Analysis Error", f"An error occurred: {e}\n\n{traceback.format_exc()}")
 
     def run_plot_generation(self):
         common_paths = self._get_common_paths()
@@ -329,6 +329,27 @@ class SpeedApp:
             messagebox.showinfo("Success", f"Video saved to {output_dir_path / video_options['output_filename']}")
         except Exception as e:
             messagebox.showerror("Video Error", f"An error occurred: {e}\n\n{traceback.format_exc()}")
+
+    def load_yolo_results(self):
+        common_paths = self._get_common_paths()
+        if not common_paths: return
+        output_dir_path, _ = common_paths
+        class_csv = output_dir_path / 'stats_per_class.csv'
+        instance_csv = output_dir_path / 'stats_per_instance.csv'
+        try:
+            if class_csv.exists(): self._populate_treeview(self.class_treeview, pd.read_csv(class_csv))
+            if instance_csv.exists(): self._populate_treeview(self.instance_treeview, pd.read_csv(instance_csv))
+        except Exception as e:
+            messagebox.showerror("Read Error", f"Could not read the YOLO result CSV files: {e}")
+
+    def _populate_treeview(self, treeview, dataframe):
+        treeview.delete(*treeview.get_children())
+        treeview["columns"] = list(dataframe.columns)
+        for col in dataframe.columns:
+            treeview.heading(col, text=col)
+            treeview.column(col, width=120, anchor='center')
+        for index, row in dataframe.iterrows():
+            treeview.insert("", "end", values=list(row))
 
 if __name__ == '__main__':
     root = tk.Tk()
