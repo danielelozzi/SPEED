@@ -9,6 +9,8 @@ import traceback
 import pickle
 from scipy.signal import welch, spectrogram
 from scipy.stats import gaussian_kde
+import gc
+import time
 
 # --- Constants ---
 SAMPLING_FREQ = 200  # Hz
@@ -225,162 +227,185 @@ def run_analysis(subj_name: str, data_dir_str: str, output_dir_str: str, un_enri
 
 def _plot_histogram(data_series, title, xlabel, output_path):
     """Helper function to create and save a standardized histogram."""
-    try:
-        if data_series.dropna().empty: return
-        plt.figure(figsize=(10, 6))
-        plt.hist(data_series.dropna(), bins=25, color='royalblue', edgecolor='black', alpha=0.7)
-        plt.title(title, fontsize=15); plt.xlabel(xlabel, fontsize=12); plt.ylabel('Frequency', fontsize=12)
-        plt.grid(axis='y', linestyle='--', alpha=0.7); plt.tight_layout()
-        plt.savefig(output_path)
-    except Exception as e:
-        print(f"WARNING: Failed to generate or save plot '{title}' to {output_path}. Error: {e}")
-        traceback.print_exc() # Print full traceback for debugging
-    finally:
-        plt.close()
+    for attempt in range(2):
+        try:
+            if data_series.dropna().empty: return
+            plt.figure(figsize=(10, 6), dpi=100)
+            plt.hist(data_series.dropna(), bins=25, color='royalblue', edgecolor='black', alpha=0.7)
+            plt.title(title, fontsize=15); plt.xlabel(xlabel, fontsize=12); plt.ylabel('Frequency', fontsize=12)
+            plt.grid(axis='y', linestyle='--', alpha=0.7); plt.tight_layout()
+            plt.savefig(output_path)
+            plt.close()
+            break # Success
+        except Exception as e:
+            print(f"WARNING: Failed to generate or save plot '{title}' to {output_path} on attempt {attempt+1}. Error: {e}")
+            if attempt == 0:
+                time.sleep(1) # Wait before retrying
+    gc.collect()
 
 def _plot_path(df, x_col, y_col, title, output_path, is_normalized, color, w=None, h=None):
     """Helper function to create and save a path plot."""
-    try:
-        if df.empty or x_col not in df.columns or y_col not in df.columns or df[x_col].isnull().all(): return
-        plt.figure(figsize=(10, 8))
-        plt.plot(df[x_col], df[y_col], marker='o', linestyle='-', color=color, markersize=4, alpha=0.6)
-        plt.title(title, fontsize=15)
-        if is_normalized:
-            plt.xlabel('Normalized X'); plt.ylabel('Normalized Y'); plt.xlim(0, 1); plt.ylim(1, 0) # Flipped Y for screen coordinates
-        else:
-            plt.xlabel('Pixel X'); plt.ylabel('Pixel Y'); plt.gca().invert_yaxis()
-            if w and h: plt.xlim(0, w); plt.ylim(h, 0)
-        plt.grid(True); plt.tight_layout()
-        plt.savefig(output_path)
-    except Exception as e:
-        print(f"WARNING: Failed to generate or save plot '{title}' to {output_path}. Error: {e}")
-        traceback.print_exc() # Print full traceback for debugging
-    finally:
-        plt.close()
+    for attempt in range(2):
+        try:
+            if df.empty or x_col not in df.columns or y_col not in df.columns or df[x_col].isnull().all(): return
+            plt.figure(figsize=(10, 8), dpi=100)
+            plt.plot(df[x_col], df[y_col], marker='o', linestyle='-', color=color, markersize=4, alpha=0.6)
+            plt.title(title, fontsize=15)
+            if is_normalized:
+                plt.xlabel('Normalized X'); plt.ylabel('Normalized Y'); plt.xlim(0, 1); plt.ylim(1, 0) # Flipped Y for screen coordinates
+            else:
+                plt.xlabel('Pixel X'); plt.ylabel('Pixel Y'); plt.gca().invert_yaxis()
+                if w and h: plt.xlim(0, w); plt.ylim(h, 0)
+            plt.grid(True); plt.tight_layout()
+            plt.savefig(output_path)
+            plt.close()
+            break # Success
+        except Exception as e:
+            print(f"WARNING: Failed to generate or save plot '{title}' to {output_path} on attempt {attempt+1}. Error: {e}")
+            if attempt == 0:
+                time.sleep(1)
+    gc.collect()
 
 def _plot_heatmap(df, x_col, y_col, title, output_path, is_normalized, w=None, h=None):
     """Helper function to create and save a density heatmap."""
-    try:
-        if df.empty or x_col not in df.columns or y_col not in df.columns: return
-        x = df[x_col].dropna(); y = df[y_col].dropna()
-        if len(x) < 3: return
+    for attempt in range(2):
+        try:
+            if df.empty or x_col not in df.columns or y_col not in df.columns: return
+            x = df[x_col].dropna(); y = df[y_col].dropna()
+            if len(x) < 3: return
 
-        k = gaussian_kde(np.vstack([x, y]))
-        x_range = (x.min(), x.max()) if not is_normalized else (0,1)
-        y_range = (y.min(), y.max()) if not is_normalized else (0,1)
+            k = gaussian_kde(np.vstack([x, y]))
+            x_range = (x.min(), x.max()) if not is_normalized else (0,1)
+            y_range = (y.min(), y.max()) if not is_normalized else (0,1)
 
-        xi, yi = np.mgrid[x_range[0]:x_range[1]:100j, y_range[0]:y_range[1]:100j]
-        zi = k(np.vstack([xi.flatten(), yi.flatten()]))
+            xi, yi = np.mgrid[x_range[0]:x_range[1]:100j, y_range[0]:y_range[1]:100j]
+            zi = k(np.vstack([xi.flatten(), yi.flatten()]))
 
-        plt.figure(figsize=(10, 8))
-        plt.pcolormesh(xi, yi, zi.reshape(xi.shape), shading='auto', cmap='Reds')
-        plt.title(title, fontsize=15)
-        if is_normalized:
-            plt.xlabel('Normalized X'); plt.ylabel('Normalized Y'); plt.xlim(0, 1); plt.ylim(1, 0)
-        else:
-            plt.xlabel('Pixel X'); plt.ylabel('Pixel Y'); plt.gca().invert_yaxis()
-            if w and h: plt.xlim(0, w); plt.ylim(h, 0)
+            plt.figure(figsize=(10, 8), dpi=100)
+            plt.pcolormesh(xi, yi, zi.reshape(xi.shape), shading='auto', cmap='Reds')
+            plt.title(title, fontsize=15)
+            if is_normalized:
+                plt.xlabel('Normalized X'); plt.ylabel('Normalized Y'); plt.xlim(0, 1); plt.ylim(1, 0)
+            else:
+                plt.xlabel('Pixel X'); plt.ylabel('Pixel Y'); plt.gca().invert_yaxis()
+                if w and h: plt.xlim(0, w); plt.ylim(h, 0)
 
-        plt.colorbar(label="Density")
-        plt.grid(True); plt.tight_layout()
-        plt.savefig(output_path)
-    except np.linalg.LinAlgError:
-        print(f"WARNING: Could not generate heatmap for '{title}' (singular matrix).")
-        traceback.print_exc() # Print full traceback for debugging
-    except Exception as e:
-        print(f"WARNING: Unexpected error during heatmap generation for '{title}': {e}")
-        traceback.print_exc() # Print full traceback for debugging
-    finally:
-        plt.close() # Ensure figure is closed even on unexpected errors
+            plt.colorbar(label="Density")
+            plt.grid(True); plt.tight_layout()
+            plt.savefig(output_path)
+            break
+        except np.linalg.LinAlgError:
+            print(f"WARNING: Could not generate heatmap for '{title}' (singular matrix) on attempt {attempt+1}.")
+            if attempt == 0:
+                time.sleep(1)
+        except Exception as e:
+            print(f"WARNING: Unexpected error during heatmap generation for '{title}' on attempt {attempt+1}: {e}")
+            if attempt == 0:
+                time.sleep(1)
+        finally:
+            plt.close()
+    gc.collect()
 
 def _plot_spectral_analysis(pupil_series, title_prefix, output_dir):
     """Generates and saves periodogram and spectrogram for a pupil diameter series."""
-    try:
-        ts = pupil_series.dropna()
-        if len(ts) <= SAMPLING_FREQ:
-            print(f"Skipping spectral analysis for '{title_prefix}': not enough data points.")
-            return
+    ts = pupil_series.dropna()
+    if len(ts) <= SAMPLING_FREQ:
+        print(f"Skipping spectral analysis for '{title_prefix}': not enough data points.")
+        return
 
-        ts_numpy = ts.to_numpy()
+    ts_numpy = ts.to_numpy()
 
-        # Periodogram
-        freqs, Pxx = welch(ts_numpy, fs=SAMPLING_FREQ, nperseg=min(len(ts_numpy), 256))
-        plt.figure(figsize=(10, 5))
-        plt.semilogy(freqs, Pxx)
-        plt.title(f'Periodogram - {title_prefix}'); plt.xlabel('Frequency [Hz]'); plt.ylabel('Power Spectral Density')
-        plt.grid(True)
-        plt.savefig(output_dir / f'periodogram_{title_prefix}.pdf')
-    except Exception as e:
-        print(f"WARNING: Failed to generate or save Periodogram for '{title_prefix}'. Error: {e}")
-        traceback.print_exc() # Print full traceback for debugging
-    finally:
-        plt.close()
+    # Periodogram
+    for attempt in range(2):
+        try:
+            freqs, Pxx = welch(ts_numpy, fs=SAMPLING_FREQ, nperseg=min(len(ts_numpy), 256))
+            plt.figure(figsize=(10, 5), dpi=100)
+            plt.semilogy(freqs, Pxx)
+            plt.title(f'Periodogram - {title_prefix}'); plt.xlabel('Frequency [Hz]'); plt.ylabel('Power Spectral Density')
+            plt.grid(True)
+            plt.savefig(output_dir / f'periodogram_{title_prefix}.pdf')
+            plt.close()
+            break
+        except Exception as e:
+            print(f"WARNING: Failed to generate Periodogram for '{title_prefix}' on attempt {attempt+1}. Error: {e}")
+            if attempt == 0:
+                time.sleep(1)
+    gc.collect()
 
-    try:
-        # Spectrogram
-        f, t, Sxx = spectrogram(ts_numpy, fs=SAMPLING_FREQ, nperseg=min(len(ts_numpy), 256))
-        plt.figure(figsize=(10, 5))
-        if Sxx.size > 0:
-          plt.pcolormesh(t, f, 10 * np.log10(np.maximum(Sxx, 1e-10)), shading='gouraud')
-          plt.colorbar(label='Power [dB]')
-        plt.title(f'Spectrogram - {title_prefix}'); plt.ylabel('Frequency [Hz]'); plt.xlabel('Time [s]')
-        plt.savefig(output_dir / f'spectrogram_{title_prefix}.pdf')
-    except Exception as e:
-        print(f"WARNING: Failed to generate or save Spectrogram for '{title_prefix}'. Error: {e}")
-        traceback.print_exc() # Print full traceback for debugging
-    finally:
-        plt.close()
+    # Spectrogram
+    for attempt in range(2):
+        try:
+            f, t, Sxx = spectrogram(ts_numpy, fs=SAMPLING_FREQ, nperseg=min(len(ts_numpy), 256))
+            plt.figure(figsize=(10, 5), dpi=100)
+            if Sxx.size > 0:
+              plt.pcolormesh(t, f, 10 * np.log10(np.maximum(Sxx, 1e-10)), shading='gouraud')
+              plt.colorbar(label='Power [dB]')
+            plt.title(f'Spectrogram - {title_prefix}'); plt.ylabel('Frequency [Hz]'); plt.xlabel('Time [s]')
+            plt.savefig(output_dir / f'spectrogram_{title_prefix}.pdf')
+            plt.close()
+            break
+        except Exception as e:
+            print(f"WARNING: Failed to generate Spectrogram for '{title_prefix}' on attempt {attempt+1}. Error: {e}")
+            if attempt == 0:
+                time.sleep(1)
+    gc.collect()
 
 
 def _plot_generic_timeseries(x_data, y_data_dict, title, xlabel, ylabel, output_path, span_df=None):
     """Helper function to plot one or more time series on the same axes."""
-    try:
-        fig, ax = plt.subplots(figsize=(12, 6))
-        for label, y_data in y_data_dict.items():
-            ax.plot(x_data, y_data, label=label, alpha=0.8)
+    for attempt in range(2):
+        try:
+            fig, ax = plt.subplots(figsize=(12, 6), dpi=100)
+            for label, y_data in y_data_dict.items():
+                ax.plot(x_data, y_data, label=label, alpha=0.8)
 
-        if span_df is not None and not span_df.empty and 'gaze detected on surface' in span_df.columns:
-            span_df_copy = span_df.copy()
-            span_df_copy['gaze detected on surface'] = span_df_copy['gaze detected on surface'].fillna(False)
+            if span_df is not None and not span_df.empty and 'gaze detected on surface' in span_df.columns:
+                span_df_copy = span_df.copy()
+                span_df_copy['gaze detected on surface'] = span_df_copy['gaze detected on surface'].fillna(False)
 
-            for status, color in [(True, 'lightgreen'), (False, 'lightcoral')]:
-                span_df_copy['block'] = (span_df_copy['gaze detected on surface'] != span_df_copy['gaze detected on surface'].shift()).cumsum()
-                spans = span_df_copy[span_df_copy['gaze detected on surface'] == status]
-                for _, g in spans.groupby('block'):
-                    if not g.empty:
-                        ax.axvspan(g['time_sec'].iloc[0], g['time_sec'].iloc[-1], facecolor=color, alpha=0.3, zorder=-1, lw=0)
+                for status, color in [(True, 'lightgreen'), (False, 'lightcoral')]:
+                    span_df_copy['block'] = (span_df_copy['gaze detected on surface'] != span_df_copy['gaze detected on surface'].shift()).cumsum()
+                    spans = span_df_copy[span_df_copy['gaze detected on surface'] == status]
+                    for _, g in spans.groupby('block'):
+                        if not g.empty:
+                            ax.axvspan(g['time_sec'].iloc[0], g['time_sec'].iloc[-1], facecolor=color, alpha=0.3, zorder=-1, lw=0)
 
-        ax.set_title(title, fontsize=15); ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.legend(); ax.grid(True)
-        fig.tight_layout()
-        plt.savefig(output_path)
-    except Exception as e:
-        print(f"WARNING: Failed to generate or save plot '{title}' to {output_path}. Error: {e}")
-        traceback.print_exc() # Print full traceback for debugging
-    finally:
-        plt.close(fig)
+            ax.set_title(title, fontsize=15); ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.legend(); ax.grid(True)
+            fig.tight_layout()
+            plt.savefig(output_path)
+            plt.close(fig)
+            break
+        except Exception as e:
+            print(f"WARNING: Failed to generate or save plot '{title}' to {output_path} on attempt {attempt+1}. Error: {e}")
+            if attempt == 0:
+                time.sleep(1)
+    gc.collect()
 
 def _plot_binary_timeseries(df, start_col, duration_col, total_duration, title, ylabel, output_path):
     """Helper function to plot binary events like blinks over time."""
-    try:
-        fig, ax = plt.subplots(figsize=(12, 3))
-        for _, row in df.iterrows():
-            start_time = row[start_col]
-            duration = row[duration_col]
-            ax.add_patch(mpatches.Rectangle((start_time, 0), duration, 1, facecolor='red', alpha=0.5))
+    for attempt in range(2):
+        try:
+            fig, ax = plt.subplots(figsize=(12, 3), dpi=100)
+            for _, row in df.iterrows():
+                start_time = row[start_col]
+                duration = row[duration_col]
+                ax.add_patch(mpatches.Rectangle((start_time, 0), duration, 1, facecolor='red', alpha=0.5))
 
-        ax.set_xlim(0, total_duration)
-        ax.set_ylim(0, 1)
-        ax.set_title(title, fontsize=15)
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel(ylabel)
-        ax.get_yaxis().set_ticks([]) # Remove Y-axis ticks
-        plt.tight_layout()
-        plt.savefig(output_path)
-    except Exception as e:
-        print(f"WARNING: Failed to generate or save plot '{title}' to {output_path}. Error: {e}")
-        traceback.print_exc() # Print full traceback for debugging
-    finally:
-        plt.close(fig)
+            ax.set_xlim(0, total_duration)
+            ax.set_ylim(0, 1)
+            ax.set_title(title, fontsize=15)
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel(ylabel)
+            ax.get_yaxis().set_ticks([]) # Remove Y-axis ticks
+            plt.tight_layout()
+            plt.savefig(output_path)
+            plt.close(fig)
+            break
+        except Exception as e:
+            print(f"WARNING: Failed to generate or save plot '{title}' to {output_path} on attempt {attempt+1}. Error: {e}")
+            if attempt == 0:
+                time.sleep(1)
+    gc.collect()
 
 def generate_plots_on_demand(output_dir_str: str, subj_name: str, plot_selections: dict, un_enriched_mode: bool):
     """
@@ -399,7 +424,7 @@ def generate_plots_on_demand(output_dir_str: str, subj_name: str, plot_selection
     for pkl_file in sorted(processed_data_dir.glob("*.pkl")):
         event_name = "_".join(pkl_file.stem.split('_')[2:])
         print(f"--- Generating plots for event: '{event_name}' ---")
-        try: # Added try-except block for the entire event's plot generation
+        try:
             with open(pkl_file, 'rb') as f:
                 segment_data = pickle.load(f)
 
@@ -457,7 +482,6 @@ def generate_plots_on_demand(output_dir_str: str, subj_name: str, plot_selection
                     if 'pupil diameter left [mm]' in pupil_on_surface.columns:
                         _plot_spectral_analysis(pupil_on_surface['pupil diameter left [mm]'], f"onsurface_{event_name}", plots_dir)
 
-            # --- MODIFIED: Added Fragmentation Plot ---
             if plot_selections.get("fragmentation") and not gaze_not_enr.empty:
                 gaze_not_enr['time_sec'] = (gaze_not_enr['timestamp [ns]'] - t_min) / NS_TO_S
                 _plot_generic_timeseries(
@@ -468,7 +492,6 @@ def generate_plots_on_demand(output_dir_str: str, subj_name: str, plot_selection
                     "Speed (pixels/sec)",
                     plots_dir / f"fragmentation_{event_name}.pdf"
                 )
-            # ----------------------------------------
 
             if plot_selections.get("advanced_timeseries"):
                 if not pupil.empty and 'pupil diameter left [mm]' in pupil.columns and 'pupil diameter right [mm]' in pupil.columns:
@@ -497,7 +520,6 @@ def generate_plots_on_demand(output_dir_str: str, subj_name: str, plot_selection
                     _plot_binary_timeseries(blinks, 'time_sec', 'duration_sec', total_duration, f"Blink Events - {event_name}", "Blink", plots_dir / f"blink_time_series_{event_name}.pdf")
         except Exception as e:
             print(f"ERROR: Failed to generate plots for event '{event_name}'. Error: {e}")
-            traceback.print_exc() # Print full traceback for debugging
-            # Continue to the next event even if this one fails
+            traceback.print_exc()
 
     print("--- Plot generation finished. ---")
