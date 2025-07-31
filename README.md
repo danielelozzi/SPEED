@@ -3,6 +3,7 @@
 *An Advanced Eye-Tracking Data Analysis Software*
 
 SPEED is a Python-based tool with a graphical user interface (GUI) for processing, analyzing, and visualizing eye-tracking data from cognitive and behavioral experiments. 
+This version also support GPU.
 
 ## The Modular Workflow
 
