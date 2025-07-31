@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 import logging
 import random
+from tqdm import tqdm
 
 # --- 1. CONFIGURAZIONE DEL LOGGING ---
 log_dir = Path('./logs')
@@ -35,6 +36,7 @@ WIDTH, HEIGHT = 1280, 720
 NUM_EVENTS = 8
 PUPIL_BASE = 4.0  # mm
 PUPIL_AMPLITUDE = 0.8 # mm
+NS_TO_S = 1e9
 
 # --- 3. CREAZIONE DELLA STRUTTURA DELLE CARTELLE ---
 logging.info(f"Creating directory structure inside {OUTPUT_DIR}")
@@ -48,78 +50,67 @@ enriched_dir.mkdir(parents=True, exist_ok=True)
 
 # --- 4. FUNZIONI PER LA GENERAZIONE DEI VIDEO ---
 def generate_videos():
-    """Genera i file external.mp4 e internal.mp4"""
-    
-    # --- External Video (Scena) ---
-    logging.info("Generating external.mp4...")
+    """
+    Genera i file external.mp4 e internal.mp4 e restituisce le traiettorie degli oggetti.
+    """
     ext_video_path = unenriched_dir / "external.mp4"
+    int_video_path = raw_dir / "Neon Sensor Module v1 ps1.mp4"
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     writer_ext = cv2.VideoWriter(str(ext_video_path), fourcc, FPS, (WIDTH, HEIGHT))
+    writer_int = cv2.VideoWriter(str(int_video_path), fourcc, FPS, (200, 200))
     
-    # Dati per la superficie e gli oggetti in movimento
-    surface_w, surface_h = 400, 300
     surface_corners = []
-    
-    for i in tqdm(range(NUM_FRAMES), desc="External Video"):
-        frame = np.full((HEIGHT, WIDTH, 3), (20, 20, 20), dtype=np.uint8)
-        
-        # Disegna la superficie mobile (rettangolo)
+    # **NUOVO**: Dizionario per memorizzare le traiettorie degli oggetti YOLO
+    object_paths = {1: [], 2: []} # track_id 1 e 2
+
+    logging.info("Generating external.mp4 and internal.mp4...")
+    for i in tqdm(range(NUM_FRAMES), desc="Generating Videos"):
+        # Frame esterno (scena)
+        frame_ext = np.full((HEIGHT, WIDTH, 3), (20, 20, 20), dtype=np.uint8)
         angle = i / NUM_FRAMES * 2 * np.pi
         center_x = WIDTH / 2 + np.sin(angle) * 150
         center_y = HEIGHT / 2 + np.cos(angle * 0.7) * 100
+        surface_w, surface_h = 400, 300
         tl = (int(center_x - surface_w/2), int(center_y - surface_h/2))
         br = (int(center_x + surface_w/2), int(center_y + surface_h/2))
-        cv2.rectangle(frame, tl, br, (150, 150, 150), -1)
-        # Salva le coordinate degli angoli per surface_positions.csv
+        cv2.rectangle(frame_ext, tl, br, (150, 150, 150), -1)
         surface_corners.append({
-            'tl x [px]': tl[0], 'tl y [px]': tl[1],
-            'tr x [px]': br[0], 'tr y [px]': tl[1],
-            'br x [px]': br[0], 'br y [px]': br[1],
-            'bl x [px]': tl[0], 'bl y [px]': br[1],
+            'tl x [px]': tl[0], 'tl y [px]': tl[1], 'tr x [px]': br[0], 'tr y [px]': tl[1],
+            'br x [px]': br[0], 'br y [px]': br[1], 'bl x [px]': tl[0], 'bl y [px]': br[1],
         })
 
-        # Disegna oggetti mobili (cerchi) per YOLO
-        obj1_x = int(WIDTH * 0.2 + np.sin(i / 30) * 50)
-        obj1_y = int(HEIGHT * 0.3)
-        cv2.circle(frame, (obj1_x, obj1_y), 30, (0, 0, 255), -1) # Oggetto rosso
+        # Disegna e traccia oggetti per YOLO
+        obj1_pos = (int(WIDTH * 0.2 + np.sin(i / 30) * 50), int(HEIGHT * 0.3))
+        obj2_pos = (int(WIDTH * 0.8 - np.cos(i / 45) * 60), int(HEIGHT * 0.7))
+        cv2.circle(frame_ext, obj1_pos, 30, (0, 0, 255), -1) # Oggetto rosso
+        cv2.circle(frame_ext, obj2_pos, 25, (0, 255, 0), -1) # Oggetto verde
+        object_paths[1].append({'center_x': obj1_pos[0], 'center_y': obj1_pos[1], 'radius': 30})
+        object_paths[2].append({'center_x': obj2_pos[0], 'center_y': obj2_pos[1], 'radius': 25})
+        writer_ext.write(frame_ext)
 
-        obj2_x = int(WIDTH * 0.8 - np.cos(i / 45) * 60)
-        obj2_y = int(HEIGHT * 0.7)
-        cv2.circle(frame, (obj2_x, obj2_y), 25, (0, 255, 0), -1) # Oggetto verde
-
-        writer_ext.write(frame)
-    writer_ext.release()
-    logging.info("external.mp4 generation complete.")
-
-    # --- Internal Video (Occhio) ---
-    logging.info("Generating internal.mp4...")
-    int_video_path = raw_dir / "Neon Sensor Module v1 ps1.mp4"
-    writer_int = cv2.VideoWriter(str(int_video_path), fourcc, FPS, (200, 200))
-    for _ in tqdm(range(NUM_FRAMES), desc="Internal Video"):
+        # Frame interno (occhio)
         frame_int = np.zeros((200, 200, 3), dtype=np.uint8)
-        pupil_radius = int(15 + np.sin(_ / 10) * 5)
+        pupil_radius = int(15 + np.sin(i / 10) * 5)
         cv2.circle(frame_int, (100, 100), pupil_radius, (255, 255, 255), -1)
         writer_int.write(frame_int)
+
+    writer_ext.release()
     writer_int.release()
-    logging.info("internal.mp4 generation complete.")
-    
-    return pd.DataFrame(surface_corners)
+    logging.info("Video generation complete.")
+    return pd.DataFrame(surface_corners), object_paths
 
 # --- 5. GENERAZIONE DI TUTTI I DATI CSV ---
 def generate_csv_data(surface_corners_df):
     """Genera tutti i file CSV richiesti dall'applicazione."""
     logging.info("Generating base timestamp data...")
     start_ts = int(time.time() * 1e9)
-    timestamps = start_ts + np.arange(NUM_FRAMES) * (1e9 / FPS)
-    timestamps = timestamps.astype('int64')
+    timestamps = (start_ts + np.arange(NUM_FRAMES) * (NS_TO_S / FPS)).astype('int64')
 
-    # World Timestamps
-    world_ts_df = pd.DataFrame({'timestamp [ns]': timestamps})
+    world_ts_df = pd.DataFrame({'timestamp [ns]': timestamps, 'frame': range(NUM_FRAMES)})
     world_ts_df.to_csv(unenriched_dir / 'world_timestamps.csv', index=False)
 
-    # Events
     logging.info("Generating events.csv...")
-    event_indices = sorted(random.sample(range(NUM_FRAMES), NUM_EVENTS))
+    event_indices = sorted(random.sample(range(100, NUM_FRAMES - 100), NUM_EVENTS))
     events_df = pd.DataFrame({
         'timestamp [ns]': timestamps[event_indices],
         'name': [f'Event_{chr(65+i)}' for i in range(NUM_EVENTS)],
@@ -127,12 +118,11 @@ def generate_csv_data(surface_corners_df):
     })
     events_df.to_csv(unenriched_dir / 'events.csv', index=False)
 
-    # Generazione dati comportamentali (Gaze, Fixations, Blinks, Saccades)
-    logging.info("Generating behavioral data (gaze, fixations, etc.)...")
+    logging.info("Generating behavioral data (gaze, fixations, saccades, blinks)...")
     gaze_data, pupil_data, blinks_data, saccades_data, fixations_data = [], [], [], [], []
     fix_id, sac_id, blink_id = 0, 0, 0
     
-    current_gaze_x, current_gaze_y = WIDTH / 2, HEIGHT / 2
+    gaze_x, gaze_y = WIDTH / 2, HEIGHT / 2
     state = "FIXATING"
     state_frames_left = random.randint(30, 120)
     fix_start_ts = timestamps[0]
@@ -140,80 +130,56 @@ def generate_csv_data(surface_corners_df):
     for i in tqdm(range(NUM_FRAMES), desc="Behavioral Data"):
         ts = timestamps[i]
         
-        # Transizioni di stato
         state_frames_left -= 1
         if state_frames_left <= 0:
             if state == "FIXATING":
-                # Fine fissazione, inizio saccade
-                fixations_data.append({
-                    'fixation id': fix_id,
-                    'start timestamp [ns]': fix_start_ts,
-                    'duration [ms]': (ts - fix_start_ts) / 1e6,
-                    'fixation x [px]': current_gaze_x,
-                    'fixation y [px]': current_gaze_y
-                })
+                fixations_data.append({'fixation id': fix_id, 'start timestamp [ns]': fix_start_ts, 'duration [ms]': (ts - fix_start_ts) / 1e6, 'fixation x [px]': gaze_x, 'fixation y [px]': gaze_y})
                 fix_id += 1
-                
-                state = "SACCADING"
-                state_frames_left = random.randint(5, 15)
-                target_gaze_x = random.randint(50, WIDTH - 50)
-                target_gaze_y = random.randint(50, HEIGHT - 50)
-                saccade_start_ts = ts
-                saccades_data.append({'saccade id': sac_id, 'start timestamp [ns]': ts}) # Dati incompleti per ora
+                state = "SACCADING"; state_frames_left = random.randint(5, 15); saccade_start_ts = ts
+                start_x, start_y = gaze_x, gaze_y
+                target_x, target_y = random.randint(50, WIDTH - 50), random.randint(50, HEIGHT - 50)
 
             elif state == "SACCADING":
-                # Fine saccade, inizio fissazione o blink
-                if 'duration [ms]' not in saccades_data[-1]:
-                     saccades_data[-1]['duration [ms]'] = (ts - saccade_start_ts) / 1e6
+                duration_ms = (ts - saccade_start_ts) / 1e6
+                duration_s = duration_ms / 1000
+                amplitude = np.sqrt((target_x - start_x)**2 + (target_y - start_y)**2)
+                mean_vel = amplitude / duration_s if duration_s > 0 else 0
+                saccades_data.append({
+                    'saccade id': sac_id, 'start timestamp [ns]': saccade_start_ts, 'duration [ms]': duration_ms,
+                    'amplitude [px]': amplitude, 'mean velocity [px/s]': mean_vel, 'peak velocity [px/s]': mean_vel * (1.5 + random.uniform(-0.2, 0.2))
+                })
+                sac_id += 1
+                gaze_x, gaze_y = target_x, target_y
                 
-                current_gaze_x, current_gaze_y = target_gaze_x, target_gaze_y
-                if random.random() < 0.1: # 10% probabilità di un blink
-                    state = "BLINKING"
-                    state_frames_left = random.randint(10, 25)
-                    blinks_data.append({'blink id': blink_id, 'start timestamp [ns]': ts})
+                if random.random() < 0.1:
+                    state = "BLINKING"; state_frames_left = random.randint(10, 25); blink_start_ts = ts
                 else:
-                    state = "FIXATING"
-                    state_frames_left = random.randint(30, 120)
-                    fix_start_ts = ts
+                    state = "FIXATING"; state_frames_left = random.randint(30, 120); fix_start_ts = ts
             
             elif state == "BLINKING":
-                blinks_data[-1]['end timestamp [ns]'] = ts
-                blinks_data[-1]['duration [ms]'] = (ts - blinks_data[-1]['start timestamp [ns]']) / 1e6
+                blinks_data.append({'blink id': blink_id, 'start timestamp [ns]': blink_start_ts, 'end timestamp [ns]': ts, 'duration [ms]': (ts - blink_start_ts) / 1e6})
                 blink_id += 1
-                state = "FIXATING"
-                state_frames_left = random.randint(30, 120)
-                fix_start_ts = ts
+                state = "FIXATING"; state_frames_left = random.randint(30, 120); fix_start_ts = ts
         
-        # Genera dati in base allo stato
-        pupil_l, pupil_r = np.nan, np.nan
-        gaze_x, gaze_y = np.nan, np.nan
-
-        if state == "BLINKING":
-            pass # i dati rimangono NaN
+        px, py, pupil_l, pupil_r = np.nan, np.nan, np.nan, np.nan
+        if state == "FIXATING":
+            px = int(gaze_x + random.uniform(-1, 1) * 3); py = int(gaze_y + random.uniform(-1, 1) * 3)
         elif state == "SACCADING":
-            progress = 1 - (state_frames_left / (random.randint(5,15) + 1))
-            gaze_x = int(current_gaze_x + (target_gaze_x - current_gaze_x) * progress)
-            gaze_y = int(current_gaze_y + (target_gaze_y - current_gaze_y) * progress)
-        else: # FIXATING
-            gaze_x = int(current_gaze_x + random.uniform(-1, 1) * 3) # Micro-movimenti
-            gaze_y = int(current_gaze_y + random.uniform(-1, 1) * 3)
+            progress = 1 - (state_frames_left / (random.randint(5,15) + 1)); px = int(start_x + (target_x - start_x) * progress); py = int(start_y + (target_y - start_y) * progress)
 
         if state != "BLINKING":
-            pupil_l = PUPIL_BASE + np.sin(i / 100) * PUPIL_AMPLITUDE + random.uniform(-0.1, 0.1)
-            pupil_r = PUPIL_BASE + np.sin(i / 100 + 0.1) * PUPIL_AMPLITUDE + random.uniform(-0.1, 0.1)
+            pupil_l = PUPIL_BASE + np.sin(i / 100) * PUPIL_AMPLITUDE + random.uniform(-0.1, 0.1); pupil_r = PUPIL_BASE + np.sin(i / 100 + 0.1) * PUPIL_AMPLITUDE + random.uniform(-0.1, 0.1)
 
-        gaze_data.append({'timestamp [ns]': ts, 'gaze x [px]': gaze_x, 'gaze y [px]': gaze_y})
+        gaze_data.append({'timestamp [ns]': ts, 'gaze x [px]': px, 'gaze y [px]': py})
         pupil_data.append({'timestamp [ns]': ts, 'pupil diameter left [mm]': pupil_l, 'pupil diameter right [mm]': pupil_r})
 
-    # Conversione in DataFrame e salvataggio
     logging.info("Saving behavioral CSV files...")
     gaze_df = pd.DataFrame(gaze_data); gaze_df.to_csv(unenriched_dir / 'gaze.csv', index=False)
-    pupil_df = pd.DataFrame(pupil_data); pupil_df.to_csv(unenriched_dir / '3d_eye_states.csv', index=False)
-    blinks_df = pd.DataFrame(blinks_data); blinks_df.to_csv(unenriched_dir / 'blinks.csv', index=False)
+    pd.DataFrame(pupil_data).to_csv(unenriched_dir / '3d_eye_states.csv', index=False)
+    pd.DataFrame(blinks_data).to_csv(unenriched_dir / 'blinks.csv', index=False)
     fixations_df = pd.DataFrame(fixations_data); fixations_df.to_csv(unenriched_dir / 'fixations.csv', index=False)
-    saccades_df = pd.DataFrame(saccades_data); saccades_df.to_csv(unenriched_dir / 'saccades.csv', index=False)
+    pd.DataFrame(saccades_data).to_csv(unenriched_dir / 'saccades.csv', index=False)
     
-    # Generazione dati Enriched
     logging.info("Generating enriched data...")
     surface_corners_df['timestamp [ns]'] = timestamps
     surface_corners_df.to_csv(enriched_dir / 'surface_positions.csv', index=False)
@@ -221,47 +187,90 @@ def generate_csv_data(surface_corners_df):
     gaze_enriched_data = []
     for i, row in gaze_df.iterrows():
         if pd.notna(row['gaze x [px]']):
-            surf = surface_corners_df.iloc[i]
-            x, y = row['gaze x [px]'], row['gaze y [px]']
+            surf = surface_corners_df.iloc[i]; x, y = row['gaze x [px]'], row['gaze y [px]']
             on_surface = (surf['tl x [px]'] < x < surf['br x [px]']) and (surf['tl y [px]'] < y < surf['br y [px]'])
-            
-            norm_x, norm_y = np.nan, np.nan
-            if on_surface:
-                norm_x = (x - surf['tl x [px]']) / (surf['br x [px]'] - surf['tl x [px]'])
-                norm_y = (y - surf['tl y [px]']) / (surf['br y [px]'] - surf['tl y [px]'])
+            norm_x, norm_y = (x - surf['tl x [px]']) / (surf['br x [px]'] - surf['tl x [px]']), (y - surf['tl y [px]']) / (surf['br y [px]'] - surf['tl y [px]']) if on_surface else (np.nan, np.nan)
+            gaze_enriched_data.append({'timestamp [ns]': row['timestamp [ns]'], 'gaze detected on surface': on_surface, 'gaze position on surface x [normalized]': norm_x, 'gaze position on surface y [normalized]': norm_y})
+    pd.DataFrame(gaze_enriched_data).to_csv(enriched_dir / 'gaze.csv', index=False)
 
-            gaze_enriched_data.append({
-                'timestamp [ns]': row['timestamp [ns]'],
-                'gaze detected on surface': on_surface,
-                'gaze position on surface x [normalized]': norm_x,
-                'gaze position on surface y [normalized]': norm_y,
-            })
-    gaze_enriched_df = pd.DataFrame(gaze_enriched_data)
-    gaze_enriched_df.to_csv(enriched_dir / 'gaze.csv', index=False)
-
-    # Crea un fixations_enriched.csv fittizio
-    fix_enriched_df = fixations_df.copy()
-    fix_enriched_df['fixation x [normalized]'] = fix_enriched_df['fixation x [px]'] / WIDTH
-    fix_enriched_df['fixation y [normalized]'] = fix_enriched_df['fixation y [px]'] / HEIGHT
-    fix_enriched_df['fixation detected on surface'] = True
-    fix_enriched_df.to_csv(enriched_dir / 'fixations.csv', index=False)
+    fix_enriched_df = fixations_df.copy(); fix_enriched_df['fixation x [normalized]'] = fix_enriched_df['fixation x [px]'] / WIDTH; fix_enriched_df['fixation y [normalized]'] = fix_enriched_df['fixation y [px]'] / HEIGHT
+    fix_enriched_df['fixation detected on surface'] = True; fix_enriched_df.to_csv(enriched_dir / 'fixations.csv', index=False)
     
-    logging.info("All CSV files have been generated.")
+    logging.info("All input CSV files have been generated.")
 
+# --- 6. **NUOVO**: FUNZIONE PER SIMULARE L'OUTPUT DI YOLO ---
+def generate_yolo_simulation_data(object_paths):
+    """
+    Genera i file di output che SPEED creerebbe dopo un'analisi YOLO.
+    Questi file vanno nella cartella di output principale, non nelle sottocartelle di input.
+    """
+    logging.info("Generating simulated YOLO analysis output files...")
+    
+    # Mappa delle classi fittizie
+    class_map = {0: 'red_ball', 1: 'green_square'}
+    
+    # 1. Creare yolo_detections_cache.csv
+    detections = []
+    for frame_idx in tqdm(range(NUM_FRAMES), desc="Simulating YOLO Detections"):
+        for track_id, path_data in object_paths.items():
+            obj = path_data[frame_idx]
+            cx, cy, r = obj['center_x'], obj['center_y'], obj['radius']
+            class_id = 0 if track_id == 1 else 1 # Assegna class_id
+            detections.append({
+                'frame_idx': frame_idx, 'track_id': track_id, 'class_id': class_id,
+                'x1': cx - r, 'y1': cy - r, 'x2': cx + r, 'y2': cy + r
+            })
+    detections_df = pd.DataFrame(detections)
+    detections_df.to_csv(OUTPUT_DIR / 'yolo_detections_cache.csv', index=False)
+
+    # 2. Creare class_id_map.csv
+    id_map_data = [
+        {'track_id': 1, 'class_id': 0, 'class_name': 'red_ball', 'instance_name': 'red_ball_1'},
+        {'track_id': 2, 'class_id': 1, 'class_name': 'green_square', 'instance_name': 'green_square_2'}
+    ]
+    pd.DataFrame(id_map_data).to_csv(OUTPUT_DIR / 'class_id_map.csv', index=False)
+
+    # 3. Creare stats_per_class.csv e stats_per_instance.csv (con dati fittizi)
+    stats_class = [
+        {'class': 'red_ball', 'n_fixations': 120, 'normalized_fixation_count': 0.045, 'avg_pupil_diameter_mm': 4.1, 'total_frames_detected': NUM_FRAMES},
+        {'class': 'green_square', 'n_fixations': 95, 'normalized_fixation_count': 0.035, 'avg_pupil_diameter_mm': 4.3, 'total_frames_detected': NUM_FRAMES}
+    ]
+    stats_instance = [
+        {'instance': 'red_ball_1', 'n_fixations': 120, 'normalized_fixation_count': 0.045, 'avg_pupil_diameter_mm': 4.1, 'total_frames_detected': NUM_FRAMES},
+        {'instance': 'green_square_2', 'n_fixations': 95, 'normalized_fixation_count': 0.035, 'avg_pupil_diameter_mm': 4.3, 'total_frames_detected': NUM_FRAMES}
+    ]
+    pd.DataFrame(stats_class).to_csv(OUTPUT_DIR / 'stats_per_class.csv', index=False)
+    pd.DataFrame(stats_instance).to_csv(OUTPUT_DIR / 'stats_per_instance.csv', index=False)
+    
+    logging.info("Simulated YOLO output files created successfully.")
 
 if __name__ == "__main__":
     logging.info("--- Starting Synthetic Data Generation ---")
     try:
-        surface_df = generate_videos()
+        # La generazione video ora restituisce le traiettorie degli oggetti
+        surface_df, object_paths = generate_videos()
+        
+        # Genera tutti i file CSV di input
         generate_csv_data(surface_df)
-        logging.info("="*50)
-        logging.info(f"SYNTHETIC DATA GENERATION COMPLETE!")
-        logging.info(f"Data saved in: {OUTPUT_DIR.resolve()}")
-        logging.info("You can now use these folders in the SPEED application:")
-        logging.info(f"  - RAW Folder: {raw_dir.resolve()}")
-        logging.info(f"  - Un-enriched Folder: {unenriched_dir.resolve()}")
-        logging.info(f"  - Enriched Folder: {enriched_dir.resolve()}")
-        logging.info("="*50)
+        
+        # **NUOVO**: Genera i file di output della simulazione YOLO
+        generate_yolo_simulation_data(object_paths)
+
+        logging.info("="*60)
+        logging.info("SYNTHETIC DATA GENERATION COMPLETE!")
+        logging.info(f"All data saved in: {OUTPUT_DIR.resolve()}")
+        logging.info("\nCOME USARE QUESTI DATI IN SPEED:")
+        logging.info("1. Esegui `GUI.py`.")
+        logging.info("2. Nella GUI, imposta le cartelle come segue:")
+        logging.info(f"   - Participant Name: synthetic_test")
+        logging.info(f"   - Output Folder:      {OUTPUT_DIR.resolve()}")
+        logging.info(f"   - RAW Data Folder:      {raw_dir.resolve()}")
+        logging.info(f"   - Un-enriched Folder:   {unenriched_dir.resolve()}")
+        logging.info(f"   - Enriched Folder:      {enriched_dir.resolve()}")
+        logging.info("3. **NON eseguire 'RUN CORE ANALYSIS'** (a meno che tu non voglia sovrascrivere i dati).")
+        logging.info("4. Puoi passare direttamente a 'Generate Plots', 'Generate Videos' o 'YOLO Results'.")
+        logging.info("   - Per i risultati YOLO, vai alla scheda 6 e clicca 'Load/Refresh YOLO Results'.")
+        logging.info("="*60)
 
     except Exception as e:
         logging.error(f"An error occurred during data generation: {e}", exc_info=True)
