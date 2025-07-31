@@ -43,10 +43,17 @@ Before using this software, you need to acquire and prepare the data following a
 
 To run the SPEED analysis tool, you'll need Python 3 and several scientific computing libraries. It's highly recommended to use a virtual environment to manage dependencies.
 
-0.  **Install Anaconda**
+1.  **Install Anaconda**
     [Anaconda link](https://www.anaconda.com/docs/getting-started/anaconda/install)
 
-1.  **Create a virtual environment:**
+2.  **(Optional, for NVIDIA GPU users) Install the CUDA Toolkit**
+    To leverage your NVIDIA GPU for faster processing (highly recommended for YOLO analysis), you need to install the NVIDIA CUDA Toolkit. This allows PyTorch to communicate with your graphics card.
+    *   **Check Compatibility**: Before installing, check which version of CUDA is compatible with the version of PyTorch you plan to use. You can find this information on the [PyTorch installation guide](https://pytorch.org/get-started/locally/).
+    *   **Download and Install**: Download the appropriate version of the CUDA Toolkit from the official NVIDIA website:
+        [**NVIDIA CUDA Toolkit Archive**](https://developer.nvidia.com/cuda-toolkit-archive)
+    *   Follow the installation instructions for your operating system. You may need to restart your system.
+
+3.  **Create a virtual environment:**
 
     open Anaconda Prompt
 
@@ -56,7 +63,7 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
     conda install pip
     ```
 
-2.  **Install the required libraries:**
+4.  **Install the required libraries:**
     The required libraries depend on the analysis you want to run. Create a `requirements.txt` file with the content below. For the optional YOLO analysis, you will need `torch` and `ultralytics`.
     ```
     pandas
@@ -75,7 +82,7 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
     pip install -r requirements.txt
     ```
     * **Note on `Tkinter`**: This is part of the Python standard library and does not require a separate installation.
-    * **Note on `torch`**: Installing PyTorch can be complex, especially if you want to use a GPU (highly recommended for YOLO). Please refer to the official [PyTorch installation guide](https://pytorch.org/get-started/locally/) for instructions tailored to your system.
+    * **Note on `torch`**: Installing PyTorch can be complex, especially if you want to use a GPU (highly recommended for YOLO). Please refer to the official PyTorch installation guide for instructions tailored to your system. When installing PyTorch, make sure to select the command that corresponds to the CUDA version you installed.
     * **Note on YOLO**: To use YOLO, you must download the pre-trained neural network weights from the following link: [**yolov8n.pt Download**](https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt). Place this file in the same directory as the scripts.
 
 ---
@@ -94,9 +101,15 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
 
     ![GUI - Setup](images/gui1.png)
 
-    * **Step 2.5**: After selecting the "Un-enriched Data Folder", the **"Event Selection"** box will automatically populate with all events found in `events.csv`. Uncheck any events you wish to exclude from the analysis. You can also modify the selected events, clicking on the **"Modify Selection"** button. 
+    * **Step 2.5**: After selecting the "Un-enriched Data Folder", the **"Event Management"** box will show a summary of the events found in `events.csv`. To manage these events, click the **"Edit Events"** button. This opens a powerful new window (`EventManagerWindow` in `GUI.py`) where you can:
+        *   **Select/Deselect for Analysis**: Click "Yes" or "No" in the first column to toggle whether an event is included in the core analysis.
+        *   **Add New Event**: Use the "Add Event" button to create a new event with a custom name and timestamp.
+        *   **Merge Events**: Select two or more events from the list (using Ctrl-Click or Shift-Click) and click "Merge Selected" to combine them into a single new event. The new event will take the timestamp of the earliest selected event.
+        *   **Remove Events**: Select one or more events and click "Remove Selected" to delete them.
+        *   **Edit Inline**: Double-click on an event's name or timestamp directly in the table to edit its value.
+        *   When you are finished, click **"Save & Close"** to apply your changes. The summary in the main window will update accordingly.
 
-    ![GUI - Event Selection](images/gui_events.png)
+    !GUI - Event Management Window
 
     * **Step 3**: In the "Run Core Analysis" section, configure the analysis mode (e.g., `un-enriched only`, `Run YOLO`).
     * Click the **"RUN CORE ANALYSIS"** button and wait for the confirmation message. This completes the main data processing for the selected events.
