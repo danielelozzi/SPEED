@@ -5,8 +5,8 @@ from pathlib import Path
 import traceback
 import json
 import pandas as pd
-import logging # NUOVA IMPORTAZIONE
-import time # NUOVA IMPORTAZIONE
+import logging
+import time
 
 # Import the main orchestrator functions
 try:
@@ -73,7 +73,7 @@ class EventSelectionWindow:
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v3.4") # Titolo modificato
+        self.root.title("SPEED v3.4 - Enhanced Video & Plots")
         self.root.geometry("800x850")
 
         # Variables for folder paths
@@ -115,6 +115,8 @@ class SpeedApp:
         # --- Input Folders Section ---
         folders_frame = tk.LabelFrame(main_frame, text="2. Input Folders", padx=10, pady=10)
         folders_frame.pack(fill=tk.X, pady=5, padx=10)
+        # Associa la funzione di caricamento eventi alla selezione della cartella un-enriched
+        self.unenriched_dir_var.trace_add("write", lambda *args: self.load_events_from_file())
 
         raw_frame = tk.Frame(folders_frame); raw_frame.pack(fill=tk.X, pady=2)
         tk.Label(raw_frame, text="RAW Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
@@ -131,11 +133,21 @@ class SpeedApp:
         self.enriched_dir_entry = tk.Entry(enriched_frame, textvariable=self.enriched_dir_var); self.enriched_dir_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(enriched_frame, text="Browse...", command=lambda: self.select_folder(self.enriched_dir_var, "Select Enriched Data Folder")).pack(side=tk.RIGHT)
 
-        # --- Event Selection Display (MODIFIED) ---
+        # --- Event Selection Display ---
         self.event_selection_frame = tk.LabelFrame(main_frame, text="2.5. Event Selection", padx=10, pady=10)
         self.event_selection_frame.pack(fill=tk.X, pady=5, padx=10)
-        self.event_summary_label = tk.Label(self.event_selection_frame, text="Select un-enriched folder to load and choose events.")
-        self.event_summary_label.pack(pady=5)
+        
+        event_controls_frame = tk.Frame(self.event_selection_frame)
+        event_controls_frame.pack(fill=tk.X)
+        
+        self.event_summary_label = tk.Label(event_controls_frame, text="Select un-enriched folder to load events.")
+        self.event_summary_label.pack(side=tk.LEFT, pady=5)
+        
+        # --- NUOVO PULSANTE PER MODIFICARE LA SELEZIONE ---
+        self.modify_events_button = tk.Button(event_controls_frame, text="Modify Selection", command=self.open_event_selection_window)
+        self.modify_events_button.pack(side=tk.RIGHT, padx=5)
+        self.modify_events_button.config(state=tk.DISABLED) # Inizialmente disabilitato
+        # --- FINE MODIFICA ---
 
 
         # --- Core Analysis Section ---
@@ -143,7 +155,7 @@ class SpeedApp:
         analysis_frame.pack(fill=tk.X, pady=5, padx=10)
         self.unenriched_var = tk.BooleanVar(value=False)
         tk.Checkbutton(analysis_frame, text="Analyze un-enriched data only (ignores enriched folder)", variable=self.unenriched_var).pack(anchor='w')
-        self.yolo_var = tk.BooleanVar(value=True) # MODIFICATO: YOLO attivo di default
+        self.yolo_var = tk.BooleanVar(value=True)
         tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (GPU Recommended)", variable=self.yolo_var).pack(anchor='w')
         tk.Button(analysis_frame, text="RUN CORE ANALYSIS", command=self.run_core_analysis, font=('Helvetica', 10, 'bold'), bg='#c5e1a5').pack(pady=5)
 
@@ -182,18 +194,17 @@ class SpeedApp:
         video_options_frame = tk.LabelFrame(parent_tab, text="Video Composition Options", padx=10, pady=10)
         video_options_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         video_opts = {
-            "trim_to_events": "Trim video to include selected events only", # NUOVA OPZIONE
+            "trim_to_events": "Trim video to include selected events only",
             "crop_and_correct_perspective": "Crop & Correct Perspective to Surface", "overlay_yolo": "Overlay YOLO object detections",
             "overlay_gaze": "Overlay gaze point", "overlay_pupil_plot": "Overlay pupillometry plot",
             "overlay_fragmentation_plot": "Overlay gaze fragmentation plot", "overlay_event_text": "Overlay event name text",
-            "overlay_on_surface_text": "Overlay 'On Surface' text", # NUOVA OPZIONE
+            "overlay_on_surface_text": "Overlay 'On Surface' text",
             "include_internal_cam": "Include internal camera view (PiP)",
         }
         for key, text in video_opts.items():
             self.video_vars[key] = tk.BooleanVar(value=False)
             tk.Checkbutton(video_options_frame, text=text, variable=self.video_vars[key]).pack(anchor='w')
             
-        # Imposta di default le opzioni più comuni
         self.video_vars['overlay_gaze'].set(True)
         self.video_vars['overlay_event_text'].set(True)
         
@@ -217,15 +228,17 @@ class SpeedApp:
         dir_path = filedialog.askdirectory(title=title)
         if dir_path:
             var.set(dir_path)
-            if title == "Select Un-enriched Data Folder":
-                self.load_and_display_events()
 
-    def load_and_display_events(self):
-        """Opens a new window to select events from events.csv."""
+    # --- LOGICA DI SELEZIONE EVENTI MODIFICATA ---
+    def load_events_from_file(self):
+        """Carica gli eventi dal file events.csv e apre la finestra di selezione."""
         self.event_summary_label.config(text="Loading events...")
+        self.modify_events_button.config(state=tk.DISABLED)
         unenriched_path = self.unenriched_dir_var.get()
+
         if not unenriched_path:
-            self.event_summary_label.config(text="Select un-enriched folder to load and choose events.")
+            self.event_vars.clear() # Pulisce se la cartella viene cancellata
+            self.update_event_summary_display()
             return
 
         events_file = Path(unenriched_path) / 'events.csv'
@@ -236,7 +249,7 @@ class SpeedApp:
 
         try:
             events_df = pd.read_csv(events_file)
-            event_names = events_df['name'].unique().tolist()
+            event_names = events_df['name'].astype(str).unique().tolist()
             if not event_names:
                 messagebox.showinfo("Info", "No events found in events.csv.")
                 self.event_summary_label.config(text="No events found.")
@@ -244,25 +257,39 @@ class SpeedApp:
 
             self.event_vars.clear()
             for name in event_names:
-                self.event_vars[name] = tk.BooleanVar(value=True)
+                self.event_vars[name] = tk.BooleanVar(value=True) # Default a selezionato
 
-            selection_window = EventSelectionWindow(self.root, "Select Events", event_names, self.event_vars)
-            self.root.wait_window(selection_window.top)
-
-            self.update_event_summary_display()
+            # Apre la finestra di dialogo per la prima selezione
+            self.open_event_selection_window()
 
         except Exception as e:
             messagebox.showerror("Error", f"Could not read or process events.csv:\n{e}")
             self.event_summary_label.config(text="Error reading events file.")
 
+    def open_event_selection_window(self):
+        """Apre la finestra di selezione eventi per modificare la selezione corrente."""
+        if not self.event_vars:
+            messagebox.showwarning("Warning", "No events loaded. Please select an 'Un-enriched' folder first.")
+            return
+
+        event_names = list(self.event_vars.keys())
+        selection_window = EventSelectionWindow(self.root, "Select Events", event_names, self.event_vars)
+        self.root.wait_window(selection_window.top)
+
+        # Aggiorna la GUI dopo la chiusura della finestra
+        self.update_event_summary_display()
+
     def update_event_summary_display(self):
-        """Updates the label in the main window to show how many events are selected."""
+        """Aggiorna l'etichetta nella finestra principale per mostrare quanti eventi sono selezionati."""
         total_events = len(self.event_vars)
-        selected_count = sum(var.get() for var in self.event_vars.values())
         if total_events > 0:
-            self.event_summary_label.config(text=f"{selected_count} of {total_events} events selected for analysis.")
+            selected_count = sum(var.get() for var in self.event_vars.values())
+            self.event_summary_label.config(text=f"{selected_count} of {total_events} events selected.")
+            self.modify_events_button.config(state=tk.NORMAL) # Abilita il pulsante
         else:
-            self.event_summary_label.config(text="No events loaded.")
+            self.event_summary_label.config(text="Select un-enriched folder to load events.")
+            self.modify_events_button.config(state=tk.DISABLED) # Disabilita se non ci sono eventi
+    # --- FINE LOGICA MODIFICATA ---
             
     def run_core_analysis(self):
         output_dir = self.output_dir_entry.get().strip()
@@ -273,7 +300,7 @@ class SpeedApp:
 
         selected_events = [name for name, var in self.event_vars.items() if var.get()]
         if not self.event_vars or not selected_events:
-            if not messagebox.askyesno("Confirmation", "No events are selected for analysis. Continue anyway?"):
+            if not messagebox.askyesno("Confirmation", "No events are selected for analysis. This may not produce meaningful results. Continue anyway?"):
                 return
 
         try:
@@ -370,7 +397,6 @@ class SpeedApp:
             treeview.insert("", "end", values=list(row))
 
 if __name__ == '__main__':
-    # --- NUOVO: CONFIGURAZIONE DEL LOGGING ---
     log_dir = Path('./logs')
     log_dir.mkdir(exist_ok=True)
     log_file_path = log_dir / f"speed_log_{time.strftime('%Y%m%d-%H%M%S')}.log"
@@ -380,17 +406,14 @@ if __name__ == '__main__':
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler(log_file_path),
-            logging.StreamHandler() # Per mostrare i log anche in console
+            logging.StreamHandler()
         ]
     )
     logging.info("Application started.")
-    # ------------------------------------
 
     root = tk.Tk()
     app = SpeedApp(root)
     
-    # Questo è necessario su Windows per far funzionare correttamente il multiprocessing
-    # con i file .py che creano una GUI.
     try:
         from multiprocessing import freeze_support
         freeze_support()
