@@ -109,7 +109,7 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
         *   **Edit Inline**: Double-click on an event's name or timestamp directly in the table to edit its value.
         *   When you are finished, click **"Save & Close"** to apply your changes. The summary in the main window will update accordingly.
 
- ![GUI - Plot Generation Tab](images/gui_events.png)
+    ![GUI - Plot Generation Tab](images/gui_events.png)
 
     * **Step 3**: In the "Run Core Analysis" section, configure the analysis mode (e.g., `un-enriched only`, `Run YOLO`).
     * Click the **"RUN CORE ANALYSIS"** button and wait for the confirmation message. This completes the main data processing for the selected events.
