@@ -22,9 +22,9 @@ This step creates a `processed_data` directory containing intermediate files. On
 
 **Step 2: Generate Outputs On-Demand**
 After the core analysis is complete, you can use the dedicated tabs in the GUI to generate as many plots and videos as you need, with any combination of settings, without re-processing the raw data.
-* **Generate Plots:** Select which categories of plots you want to create. Pupillometry plots can now highlight periods where the user's gaze is on a tracked surface. [cite: 1]
-* **Generate Videos:** Compose highly customized videos. You can select different overlays, display the current event's name, show an "On Surface" indicator, or even **trim the video to include only the selected event segments**. [cite: 1]
-* **View YOLO Results:** Load and view the quantitative results from the object detection analysis. [cite: 1]
+* **Generate Plots:** Select which categories of plots you want to create. Pupillometry plots can now highlight periods where the user's gaze is on a tracked surface. 
+* **Generate Videos:** Compose highly customized videos. You can select different overlays, display the current event's name, show an "On Surface" indicator, or even **trim the video to include only the selected event segments**. 
+* **View YOLO Results:** Load and view the quantitative results from the object detection analysis. 
 
 ---
 
@@ -122,12 +122,12 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
     ![GUI - Plot Generation Tab](images/gui2.png)
 
 4.  4.  **Section 5: Generate Videos**
-    * Switch to the "5. Generate Videos" tab. [cite: 1]
+    * Switch to the "5. Generate Videos" tab. 
     * **Configure Video Composition**: Select the desired options. New options include:
         * **"Trim video to include selected events only"**: Creates a shorter video containing only the moments from the events you selected.
         * **"Overlay 'On Surface' text"**: Displays a text indicator when gaze is on the tracked surface (requires Enriched data).
-    * **Set the Output Video Filename**. [cite: 1]
-    * Click the **"GENERATE VIDEO"** button. [cite: 1]
+    * **Set the Output Video Filename**. 
+    * Click the **"GENERATE VIDEO"** button. 
 
     ![GUI - Video Generation Tab with Event Overlay option](images/gui3.png)
 
@@ -164,12 +164,12 @@ This folder contains the main gaze and event data in pixel coordinates, along wi
 | `world_timestamps.csv` | **Always** |
 
 ### 3. Enriched Data Folder
-This folder contains data that has been "enriched" in Pupil Cloud, typically mapped to a defined surface. [cite: 1]
+This folder contains data that has been "enriched" in Pupil Cloud, typically mapped to a defined surface. 
 | Filename | Requirement |
 |---|---|
-| `gaze.csv` | Required if "un-enriched only" is **unchecked** (will be used as `gaze_enriched.csv`) [cite: 1] |
-| `fixations.csv` | Required if "un-enriched only" is **unchecked** (will be used as `fixations_enriched.csv`) [cite: 1] |
-| `surface_positions.csv` | Required for video perspective correction and "On Surface" overlays [cite: 1] |
+| `gaze.csv` | Required if "un-enriched only" is **unchecked** (will be used as `gaze_enriched.csv`)  |
+| `fixations.csv` | Required if "un-enriched only" is **unchecked** (will be used as `fixations_enriched.csv`)  |
+| `surface_positions.csv` | Required for video perspective correction and "On Surface" overlays  |
 
 ## Output Files 📈
 
