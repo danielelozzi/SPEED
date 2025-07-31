@@ -1,4 +1,4 @@
-# SPEED v3.3 - labScoc Processing and Extraction of Eye tracking Data
+# SPEED v3.4 - labScoc Processing and Extraction of Eye tracking Data
 
 *An Advanced Eye-Tracking Data Analysis Software*
 
