@@ -163,6 +163,7 @@ def generate_selected_plots(output_dir_str: str, subj_name: str, plot_selections
 def generate_custom_video(output_dir_str: str, subj_name: str, video_options: dict):
     """
     Calls the video generator with the specified configuration.
+    MODIFIED: Passes selected events for video trimming.
     """
     print("\n>>> GENERATING CUSTOM VIDEO...")
     output_dir = Path(output_dir_str)
@@ -173,6 +174,12 @@ def generate_custom_video(output_dir_str: str, subj_name: str, video_options: di
 
     with open(config_path, 'r') as f:
         config = json.load(f)
+    
+    # --- NUOVA LOGICA ---
+    # Recupera la lista degli eventi selezionati dal file di configurazione
+    # Questo è necessario per l'opzione di ritaglio del video
+    selected_events_for_trimming = config.get("selected_events", [])
+    # --- FINE NUOVA LOGICA ---
         
     try:
         video_generator.create_custom_video(
@@ -180,7 +187,8 @@ def generate_custom_video(output_dir_str: str, subj_name: str, video_options: di
             output_dir=output_dir,
             subj_name=subj_name,
             options=video_options,
-            un_enriched_mode=config.get("unenriched_mode", False)
+            un_enriched_mode=config.get("unenriched_mode", False),
+            selected_events=selected_events_for_trimming # Passa la lista di eventi
         )
         print(">>> Video generation finished.")
     except Exception as e:

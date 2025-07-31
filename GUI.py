@@ -73,7 +73,7 @@ class EventSelectionWindow:
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v3.3 - GPU & Logging Enabled") # Titolo modificato
+        self.root.title("SPEED v3.4 - Enhanced Video & Plots") # Titolo modificato
         self.root.geometry("800x850")
 
         # Variables for folder paths
@@ -171,7 +171,7 @@ class SpeedApp:
         plot_options_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         plot_types = {
             "path_plots": "Path Plots", "heatmaps": "Density Heatmaps", "histograms": "Duration Histograms",
-            "pupillometry": "Pupillometry", "advanced_timeseries": "Advanced Time Series", "fragmentation": "Gaze Fragmentation Plot"
+            "pupillometry": "Pupillometry (with 'On Surface' highlight)", "advanced_timeseries": "Advanced Time Series", "fragmentation": "Gaze Fragmentation Plot"
         }
         for key, text in plot_types.items():
             self.plot_vars[key] = tk.BooleanVar(value=True)
@@ -182,14 +182,21 @@ class SpeedApp:
         video_options_frame = tk.LabelFrame(parent_tab, text="Video Composition Options", padx=10, pady=10)
         video_options_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         video_opts = {
+            "trim_to_events": "Trim video to include selected events only", # NUOVA OPZIONE
             "crop_and_correct_perspective": "Crop & Correct Perspective to Surface", "overlay_yolo": "Overlay YOLO object detections",
             "overlay_gaze": "Overlay gaze point", "overlay_pupil_plot": "Overlay pupillometry plot",
             "overlay_fragmentation_plot": "Overlay gaze fragmentation plot", "overlay_event_text": "Overlay event name text",
+            "overlay_on_surface_text": "Overlay 'On Surface' text", # NUOVA OPZIONE
             "include_internal_cam": "Include internal camera view (PiP)",
         }
         for key, text in video_opts.items():
             self.video_vars[key] = tk.BooleanVar(value=False)
             tk.Checkbutton(video_options_frame, text=text, variable=self.video_vars[key]).pack(anchor='w')
+            
+        # Imposta di default le opzioni più comuni
+        self.video_vars['overlay_gaze'].set(True)
+        self.video_vars['overlay_event_text'].set(True)
+        
         tk.Label(video_options_frame, text="\nOutput Video Filename:").pack(anchor='w')
         self.video_filename_var = tk.StringVar(value="video_output_1.mp4")
         tk.Entry(video_options_frame, textvariable=self.video_filename_var).pack(fill=tk.X, pady=5)

@@ -282,17 +282,42 @@ def _plot_spectral_analysis(pupil_series, title_prefix, output_dir):
         plt.close('all'); gc.collect()
 
 def _plot_generic_timeseries(x_data, y_data_dict, title, xlabel, ylabel, output_path, span_df=None):
-    """Generic function to plot one or more time series."""
+    """
+    Generic function to plot one or more time series.
+    MODIFIED: Draws green spans for 'on surface' gaze.
+    """
     try:
-        fig, ax = plt.subplots(figsize=(12, 6), dpi=PLOT_DPI) # MODIFICATO DPI
+        fig, ax = plt.subplots(figsize=(12, 6), dpi=PLOT_DPI)
+        
+        # --- NUOVA LOGICA PER DISEGNARE LO SFONDO VERDE ---
+        if span_df is not None and 'gaze detected on surface' in span_df.columns and 'time_sec' in span_df.columns:
+            on_surface_spans = span_df[span_df['gaze detected on surface'] == True]
+            if not on_surface_spans.empty:
+                # Calcola la durata di ogni campione (approssimata)
+                time_diffs = span_df['time_sec'].diff().fillna(method='bfill').fillna(0)
+                
+                for _, row in on_surface_spans.iterrows():
+                    start_time = row['time_sec']
+                    # La durata è la differenza col punto successivo, per evitare overlap
+                    duration = time_diffs.loc[row.name] 
+                    ax.axvspan(start_time, start_time + duration, facecolor='green', alpha=0.15, edgecolor='none')
+        # --- FINE NUOVA LOGICA ---
+
         for label, y_data in y_data_dict.items():
             ax.plot(x_data, y_data, label=label, alpha=0.8)
-        ax.set_title(title, fontsize=15); ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
-        ax.legend(); ax.grid(True); fig.tight_layout(); plt.savefig(output_path)
+
+        ax.set_title(title, fontsize=15)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.legend()
+        ax.grid(True, linestyle='--', alpha=0.6)
+        fig.tight_layout()
+        plt.savefig(output_path)
     except Exception as e:
-        logging.error(f"Failed to generate generic time series plot '{title}': {e}", exc_info=True) # MODIFICATO
+        logging.error(f"Failed to generate generic time series plot '{title}': {e}", exc_info=True)
     finally:
-        plt.close('all'); gc.collect()
+        plt.close('all')
+        gc.collect()
 
 def _plot_binary_timeseries(df, start_col, duration_col, total_duration, title, ylabel, output_path):
     """Helper function to plot binary events like blinks over time."""
@@ -333,19 +358,36 @@ def _generate_plots_for_segment_process(pkl_file: Path, plots_dir: Path, plot_se
         saccades = segment_data.get('saccades', pd.DataFrame())
         pupil = segment_data.get('pupil', pd.DataFrame())
 
+        # --- MODIFICA: Calcolo del tempo per TUTTI i dataframe necessari ---
         t_min, total_duration = 0, 1
         base_df_for_time = pupil if not pupil.empty else (gaze_not_enr if not gaze_not_enr.empty else pd.DataFrame())
         if not base_df_for_time.empty:
-            t_min = base_df_for_time['timestamp [ns]'].min()
-            for df in [pupil, gaze_not_enr, saccades, blinks]:
-                if not df.empty and ('timestamp [ns]' in df.columns or 'start timestamp [ns]' in df.columns):
-                    ts_col = 'timestamp [ns]' if 'timestamp [ns]' in df.columns else 'start timestamp [ns]'
-                    df['time_sec'] = (df[ts_col] - t_min) / NS_TO_S
+            t_min = base_df_for_time[get_timestamp_col(base_df_for_time)].min()
+            # Aggiungi 'time_sec' a tutti i dataframe rilevanti
+            for df_name, df in segment_data.items():
+                if not df.empty and df_name != 'events':
+                    ts_col = get_timestamp_col(df)
+                    if ts_col:
+                        df['time_sec'] = (df[ts_col] - t_min) / NS_TO_S
+            
             total_duration = base_df_for_time['time_sec'].max()
+        # --- FINE MODIFICA ---
 
+        # MODIFICATO: `span_df` viene ora creato usando il nuovo `time_sec`
         span_df = None
         if not un_enriched_mode and not pupil.empty and not gaze_enr.empty and 'gaze detected on surface' in gaze_enr.columns:
-            span_df = pd.merge_asof(pupil.sort_values('timestamp [ns]'), gaze_enr[['timestamp [ns]', 'gaze detected on surface']].sort_values('timestamp [ns]'), on='timestamp [ns]', direction='nearest')
+            # Assicurati che anche gaze_enr abbia la colonna time_sec prima del merge
+            if 'time_sec' not in gaze_enr.columns:
+                 ts_col = get_timestamp_col(gaze_enr)
+                 if ts_col: gaze_enr['time_sec'] = (gaze_enr[ts_col] - t_min) / NS_TO_S
+
+            # Merge pupil e gaze_enr
+            span_df = pd.merge_asof(
+                pupil.sort_values('timestamp [ns]'), 
+                gaze_enr[['timestamp [ns]', 'gaze detected on surface', 'time_sec']].sort_values('timestamp [ns]'), 
+                on='timestamp [ns]', 
+                direction='nearest' # Usa 'nearest' per la miglior corrispondenza
+            )
 
         # Esecuzione delle funzioni di plot
         if plot_selections.get("histograms"):
@@ -366,30 +408,30 @@ def _generate_plots_for_segment_process(pkl_file: Path, plots_dir: Path, plot_se
             if not un_enriched_mode and not fixations_enr.empty: _plot_heatmap(fixations_enr, 'fixation x [normalized]', 'fixation y [normalized]', f"Fixation Heatmap (Enriched) - {safe_event_name}", plots_dir / f"heatmap_fix_enriched_{safe_event_name}.pdf", True)
             if not un_enriched_mode and not gaze_enr.empty: _plot_heatmap(gaze_enr, 'gaze position on surface x [normalized]', 'gaze position on surface y [normalized]', f"Gaze Heatmap (Enriched) - {safe_event_name}", plots_dir / f"heatmap_gaze_enriched_{safe_event_name}.pdf", True)
 
-        if plot_selections.get("pupillometry") and not pupil.empty:
+        if plot_selections.get("pupillometry") and not pupil.empty and 'time_sec' in pupil.columns:
             y_data = {}
             if 'pupil diameter left [mm]' in pupil.columns: y_data['Left Pupil'] = pupil['pupil diameter left [mm]']
             if 'pupil diameter right [mm]' in pupil.columns: y_data['Right Pupil'] = pupil['pupil diameter right [mm]']
-            if y_data: _plot_generic_timeseries(pupil['time_sec'], y_data, f"Pupil Diameter - {safe_event_name}", "Time (s)", "Diameter [mm]", plots_dir / f"pupillometry_{safe_event_name}.pdf", span_df)
+            if y_data: _plot_generic_timeseries(pupil['time_sec'], y_data, f"Pupil Diameter - {safe_event_name}", "Time (s)", "Diameter [mm]", plots_dir / f"pupillometry_{safe_event_name}.pdf", span_df) # Passa span_df qui
             if 'pupil diameter left [mm]' in pupil.columns: _plot_spectral_analysis(pupil['pupil diameter left [mm]'], f"total_{safe_event_name}", plots_dir)
             if span_df is not None and not span_df.empty and 'gaze detected on surface' in span_df.columns:
                 if 'pupil diameter left [mm]' in span_df.columns: _plot_spectral_analysis(span_df[span_df['gaze detected on surface'] == True]['pupil diameter left [mm]'], f"onsurface_{safe_event_name}", plots_dir)
 
-        if plot_selections.get("fragmentation") and not gaze_not_enr.empty and 'gaze_speed_px_per_s' in gaze_not_enr.columns:
+        if plot_selections.get("fragmentation") and not gaze_not_enr.empty and 'gaze_speed_px_per_s' in gaze_not_enr.columns and 'time_sec' in gaze_not_enr.columns:
             _plot_generic_timeseries(gaze_not_enr['time_sec'], {'Fragmentation': gaze_not_enr['gaze_speed_px_per_s']}, f"Gaze Fragmentation (Speed) - {safe_event_name}", "Time (s)", "Speed (pixels/sec)", plots_dir / f"fragmentation_{safe_event_name}.pdf")
 
         if plot_selections.get("advanced_timeseries"):
-            if not pupil.empty and 'pupil diameter left [mm]' in pupil.columns and 'pupil diameter right [mm]' in pupil.columns:
+            if not pupil.empty and 'pupil diameter left [mm]' in pupil.columns and 'pupil diameter right [mm]' in pupil.columns and 'time_sec' in pupil.columns:
                 pupil['pupil_mean_mm'] = pupil[['pupil diameter left [mm]', 'pupil diameter right [mm]']].mean(axis=1)
-                _plot_generic_timeseries(pupil['time_sec'], {'Mean Pupil Diameter': pupil['pupil_mean_mm']}, f"Mean Pupil Diameter - {safe_event_name}", "Time (s)", "Diameter [mm]", plots_dir / f"pupil_diameter_mean_{safe_event_name}.pdf", span_df)
-            if not saccades.empty:
+                _plot_generic_timeseries(pupil['time_sec'], {'Mean Pupil Diameter': pupil['pupil_mean_mm']}, f"Mean Pupil Diameter - {safe_event_name}", "Time (s)", "Diameter [mm]", plots_dir / f"pupil_diameter_mean_{safe_event_name}.pdf", span_df) # Passa span_df qui
+            if not saccades.empty and 'time_sec' in saccades.columns:
                 vel_y_data, vel_unit = {}, None
                 if 'mean velocity [px/s]' in saccades.columns: vel_y_data['Mean Velocity'] = saccades['mean velocity [px/s]']; vel_y_data['Peak Velocity'] = saccades['peak velocity [px/s]']; vel_unit = "px/s"
                 if vel_y_data: _plot_generic_timeseries(saccades['time_sec'], vel_y_data, f"Saccade Velocity - {safe_event_name}", "Time (s)", f"Velocity [{vel_unit}]", plots_dir / f"saccade_velocities_{safe_event_name}.pdf")
                 amp_y_data, amp_unit = {}, None
                 if 'amplitude [px]' in saccades.columns: amp_y_data['Amplitude'] = saccades['amplitude [px]']; amp_unit = "px"
                 if amp_y_data: _plot_generic_timeseries(saccades['time_sec'], amp_y_data, f"Saccade Amplitude - {safe_event_name}", "Time (s)", f"Amplitude [{amp_unit}]", plots_dir / f"saccade_amplitude_{safe_event_name}.pdf")
-            if not blinks.empty and 'start timestamp [ns]' in blinks.columns and 'duration [ms]' in blinks.columns:
+            if not blinks.empty and 'start timestamp [ns]' in blinks.columns and 'duration [ms]' in blinks.columns and 'time_sec' in blinks.columns:
                 blinks['duration_sec'] = blinks['duration [ms]'] / 1000
                 _plot_binary_timeseries(blinks, 'time_sec', 'duration_sec', total_duration, f"Blink Events - {safe_event_name}", "Blink", plots_dir / f"blink_time_series_{safe_event_name}.pdf")
         
@@ -413,7 +455,16 @@ def generate_plots_on_demand(output_dir_str: str, subj_name: str, plot_selection
     if not processed_data_dir.exists():
         raise FileNotFoundError("Processed data directory not found. Please run the Core Analysis first.")
 
-    video_width, video_height = get_video_dimensions(output_dir / 'eyetracking_file' / 'external.mp4')
+    # Tenta di trovare la cartella dei dati sorgente per ottenere le dimensioni del video
+    try:
+        with open(output_dir / 'config.json', 'r') as f:
+            config = json.load(f)
+        data_dir = Path(config['source_folders']['unenriched'])
+        video_width, video_height = get_video_dimensions(next(data_dir.glob('*.mp4')))
+    except (FileNotFoundError, StopIteration, KeyError):
+        logging.warning("Could not determine original video dimensions. Plots might be affected.")
+        video_width, video_height = None, None
+
     pkl_files = sorted(processed_data_dir.glob("*.pkl"))
 
     if not pkl_files:
