@@ -284,29 +284,36 @@ def _plot_spectral_analysis(pupil_series, title_prefix, output_dir):
 
 def _plot_generic_timeseries(x_data, y_data_dict, title, xlabel, ylabel, output_path, span_df=None):
     """
-    Generic function to plot one or more time series.
-    MODIFIED: Draws green spans for 'on surface' gaze.
+    MODIFIED: Draws green spans for 'on surface' and red spans for 'off surface'.
     """
     try:
         fig, ax = plt.subplots(figsize=(12, 6), dpi=PLOT_DPI)
         
-        # --- NUOVA LOGICA PER DISEGNARE LO SFONDO VERDE ---
+        # --- NUOVA LOGICA PER SFONDO VERDE/ROSSO ---
         if span_df is not None and 'gaze detected on surface' in span_df.columns and 'time_sec' in span_df.columns:
+            # Calcola la durata di ogni campione una sola volta per efficienza
+            time_diffs = span_df['time_sec'].diff().fillna(method='bfill').fillna(method='ffill').fillna(0)
+            
+            # Disegna le aree VERDI per 'on surface' (True)
             on_surface_spans = span_df[span_df['gaze detected on surface'] == True]
-            if not on_surface_spans.empty:
-                # Calcola la durata di ogni campione (approssimata)
-                time_diffs = span_df['time_sec'].diff().fillna(method='bfill').fillna(0)
-                
-                for _, row in on_surface_spans.iterrows():
-                    start_time = row['time_sec']
-                    # La durata è la differenza col punto successivo, per evitare overlap
-                    duration = time_diffs.loc[row.name] 
-                    ax.axvspan(start_time, start_time + duration, facecolor='green', alpha=0.15, edgecolor='none')
+            for index, row in on_surface_spans.iterrows():
+                start_time = row['time_sec']
+                duration = time_diffs.loc[index]
+                ax.axvspan(start_time, start_time + duration, facecolor='green', alpha=0.2, edgecolor='none')
+
+            # Disegna le aree ROSSE per 'off surface' (False)
+            off_surface_spans = span_df[span_df['gaze detected on surface'] == False]
+            for index, row in off_surface_spans.iterrows():
+                start_time = row['time_sec']
+                duration = time_diffs.loc[index]
+                ax.axvspan(start_time, start_time + duration, facecolor='red', alpha=0.15, edgecolor='none')
         # --- FINE NUOVA LOGICA ---
 
+        # Disegna le linee del grafico della pupillometria
         for label, y_data in y_data_dict.items():
             ax.plot(x_data, y_data, label=label, alpha=0.8)
 
+        # Imposta i dettagli del grafico
         ax.set_title(title, fontsize=15)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
@@ -314,6 +321,7 @@ def _plot_generic_timeseries(x_data, y_data_dict, title, xlabel, ylabel, output_
         ax.grid(True, linestyle='--', alpha=0.6)
         fig.tight_layout()
         plt.savefig(output_path)
+        
     except Exception as e:
         logging.error(f"Failed to generate generic time series plot '{title}': {e}", exc_info=True)
     finally:
