@@ -2,8 +2,8 @@
 
 *An Advanced Eye-Tracking Data Analysis Software*
 
-SPEED is a Python-based tool with a graphical user interface (GUI) for processing, analyzing, and visualizing eye-tracking data from cognitive and behavioral experiments. 
-This version also support GPU.
+SPEED is a Python-based tool with a graphical user interface (GUI) for processing, analyzing, and visualizing eye-tracking data from cognitive and behavioral experiments.
+This version also supports GPU acceleration.
 
 ## The Modular Workflow
 
@@ -22,9 +22,9 @@ This step creates a `processed_data` directory containing intermediate files. On
 
 **Step 2: Generate Outputs On-Demand**
 After the core analysis is complete, you can use the dedicated tabs in the GUI to generate as many plots and videos as you need, with any combination of settings, without re-processing the raw data.
-* **Generate Plots:** Select which categories of plots you want to create. Pupillometry plots can now highlight periods where the user's gaze is on a tracked surface. 
-* **Generate Videos:** Compose highly customized videos. You can select different overlays, display the current event's name, show an "On Surface" indicator, or even **trim the video to include only the selected event segments**. 
-* **View YOLO Results:** Load and view the quantitative results from the object detection analysis. 
+* **Generate Plots:** Select which categories of plots you want to create. Pupillometry plots can now highlight periods where the user's gaze is on a tracked surface.
+* **Generate Videos:** Compose highly customized videos. You can select different overlays, display the current event's name, show an "On Surface" indicator, or even **trim the video to include only the selected event segments**.
+* **View YOLO Results:** Load and view the quantitative results from the object detection analysis.
 
 ---
 
@@ -48,10 +48,10 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
 
 2.  **(Optional, for NVIDIA GPU users) Install the CUDA Toolkit**
     To leverage your NVIDIA GPU for faster processing (highly recommended for YOLO analysis), you need to install the NVIDIA CUDA Toolkit. This allows PyTorch to communicate with your graphics card.
-    *   **Check Compatibility**: Before installing, check which version of CUDA is compatible with the version of PyTorch you plan to use. You can find this information on the [PyTorch installation guide](https://pytorch.org/get-started/locally/).
-    *   **Download and Install**: Download the appropriate version of the CUDA Toolkit from the official NVIDIA website:
+    * **Check Compatibility**: Before installing, check which version of CUDA is compatible with the version of PyTorch you plan to use. You can find this information on the [PyTorch installation guide](https://pytorch.org/get-started/locally/).
+    * **Download and Install**: Download the appropriate version of the CUDA Toolkit from the official NVIDIA website:
         [**NVIDIA CUDA Toolkit Archive**](https://developer.nvidia.com/cuda-toolkit-archive)
-    *   Follow the installation instructions for your operating system. You may need to restart your system.
+    * Follow the installation instructions for your operating system. You may need to restart your system.
 
 3.  **Create a virtual environment:**
 
@@ -102,12 +102,12 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
     ![GUI - Setup](images/gui1.png)
 
     * **Step 2.5**: After selecting the "Un-enriched Data Folder", the **"Event Management"** box will show a summary of the events found in `events.csv`. To manage these events, click the **"Edit Events"** button. This opens a powerful new window (`EventManagerWindow` in `GUI.py`) where you can:
-        *   **Select/Deselect for Analysis**: Click "Yes" or "No" in the first column to toggle whether an event is included in the core analysis.
-        *   **Add New Event**: Use the "Add Event" button to create a new event with a custom name and timestamp.
-        *   **Merge Events**: Select two or more events from the list (using Ctrl-Click or Shift-Click) and click "Merge Selected" to combine them into a single new event. The new event will take the timestamp of the earliest selected event.
-        *   **Remove Events**: Select one or more events and click "Remove Selected" to delete them.
-        *   **Edit Inline**: Double-click on an event's name or timestamp directly in the table to edit its value.
-        *   When you are finished, click **"Save & Close"** to apply your changes. The summary in the main window will update accordingly.
+        * **Select/Deselect for Analysis**: Click "Yes" or "No" in the first column to toggle whether an event is included in the core analysis.
+        * **Add New Event**: Use the "Add Event" button to create a new event with a custom name and timestamp.
+        * **Merge Events**: Select two or more events from the list (using Ctrl-Click or Shift-Click) and click "Merge Selected" to combine them into a single new event. The new event will take the timestamp of the earliest selected event.
+        * **Remove Events**: Select one or more events and click "Remove Selected" to delete them.
+        * **Edit Inline**: Double-click on an event's name or timestamp directly in the table to edit its value.
+        * When you are finished, click **"Save & Close"** to apply your changes. The summary in the main window will update accordingly.
 
     ![GUI - Plot Generation Tab](images/gui_events.png)
 
@@ -121,13 +121,11 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
 
     ![GUI - Plot Generation Tab](images/gui2.png)
 
-4.  4.  **Section 5: Generate Videos**
-    * Switch to the "5. Generate Videos" tab. 
-    * **Configure Video Composition**: Select the desired options. New options include:
-        * **"Trim video to include selected events only"**: Creates a shorter video containing only the moments from the events you selected.
-        * **"Overlay 'On Surface' text"**: Displays a text indicator when gaze is on the tracked surface (requires Enriched data).
-    * **Set the Output Video Filename**. 
-    * Click the **"GENERATE VIDEO"** button. 
+4.  **Section 5: Generate Videos**
+    * Switch to the "5. Generate Videos" tab.
+    * Configure the video composition by selecting the desired options.
+    * Set the **Output Video Filename**.
+    * Click the **"GENERATE VIDEO"** button.
 
     ![GUI - Video Generation Tab with Event Overlay option](images/gui3.png)
 
@@ -164,12 +162,12 @@ This folder contains the main gaze and event data in pixel coordinates, along wi
 | `world_timestamps.csv` | **Always** |
 
 ### 3. Enriched Data Folder
-This folder contains data that has been "enriched" in Pupil Cloud, typically mapped to a defined surface. 
+This folder contains data that has been "enriched" in Pupil Cloud, typically mapped to a defined surface.
 | Filename | Requirement |
 |---|---|
-| `gaze.csv` | Required if "un-enriched only" is **unchecked** (will be used as `gaze_enriched.csv`)  |
-| `fixations.csv` | Required if "un-enriched only" is **unchecked** (will be used as `fixations_enriched.csv`)  |
-| `surface_positions.csv` | Required for video perspective correction and "On Surface" overlays  |
+| `gaze.csv` | Required if "un-enriched only" is **unchecked** (will be used as `gaze_enriched.csv`) |
+| `fixations.csv` | Required if "un-enriched only" is **unchecked** (will be used as `fixations_enriched.csv`) |
+| `surface_positions.csv` | Required for video perspective correction and "On Surface" overlays |
 
 ## Output Files 📈
 
@@ -187,6 +185,58 @@ All outputs are saved within the specified `analysis_results_{participant_name}`
     * `stats_per_instance.csv`: Statistics for each individual tracked object instance.
     * `class_id_map.csv`: A utility file that maps tracking IDs to class names.
 
+### Description of Output Plots
+
+The "Generate Plots" tab can create several visualizations for each analyzed event segment. Here is a description of each:
+
+* **Duration Histograms (`histograms`)**
+    * **Purpose**: Shows the frequency distribution of the durations of fixations, blinks, and saccades.
+    * **Usefulness**: Helps to quickly understand if eye movements or blinks were predominantly short or long during a segment.
+
+* **Path Plots (`path_plots`)**
+    * **Purpose**: Visualizes the sequence of gaze points (Gaze Path) or fixations (Fixation Path) over time.
+    * **Usefulness**: Allows for the reconstruction of the user's visual path on the screen (un-enriched data, in pixels) or on a normalized surface (enriched data).
+
+* **Heatmaps (`heatmaps`)**
+    * **Purpose**: Generates a density map that highlights the areas where gaze (Gaze Heatmap) or fixations (Fixation Heatmap) were most concentrated.
+    * **Usefulness**: Provides an immediate view of the areas of greatest visual interest. Hotter areas (red) indicate more attention.
+
+* **Pupillometry (`pupillometry`)**
+    * **Purpose**: Shows the trend of the pupil diameter (in mm) over time. The plot can include a colored background: green when the gaze is on the tracked surface, red when it is not (requires enriched data). Spectral analyses (Periodogram and Spectrogram) are also generated to examine the frequencies of pupil fluctuation.
+    * **Usefulness**: Pupil diameter is often correlated with cognitive load, effort, and emotional response. Spectral analysis can reveal rhythmic patterns not visible in the raw signal.
+
+* **Gaze Fragmentation (`fragmentation`)**
+    * **Purpose**: Displays the speed of the gaze (pixels/second) over time.
+    * **Usefulness**: High fragmentation values indicate more erratic and less stable visual scanning, which can be an index of uncertainty or widespread visual exploration.
+
+* **Advanced Time Series (`advanced_timeseries`)**
+    * **Purpose**: Offers a series of detailed plots over time, including the amplitude and velocity of saccades and a binary representation of the presence of blinks.
+    * **Usefulness**: Provides a more in-depth analysis of the dynamics of individual ocular events during a segment.
+
+### Custom Video Composition
+
+The "Generate Videos" tab is a powerful tool for creating dynamic visualizations that combine the scene video with eye-tracking data. The options can be combined to create highly informative outputs.
+
+* **Structural Video Options**
+    * **Trim video to include selected events only**: Instead of generating a video of the entire session, this option creates clips that start with a selected event and end at the beginning of the next, focusing attention only on the salient moments.
+    * **Crop & Correct Perspective**: If AprilTags were used, this option straightens the video image to show only the tracked surface (e.g., a PC screen) as a perfect rectangle, correcting for distortions due to head angle.
+
+* **Data Overlays**
+    * **Gaze Point**: Draws a circle (usually red) indicating exactly where the user is looking in each frame.
+    * **YOLO Detections**: If YOLO analysis was performed, this option draws bounding boxes around detected objects, with labels showing the class name and tracking ID.
+    * **Internal Camera (PiP)**: Shows the video from the camera recording the user's eye in a small Picture-in-Picture frame, useful for verifying tracking quality.
+    * **Event Text**: Displays the name of the current event at the top of the screen, providing immediate context about what is happening in the session.
+    * **'On Surface' Text**: Shows a text indicator (usually green) when the participant's gaze is within the boundaries of the tracked surface (requires enriched data).
+    * **Pupillometry Plot**: Renders a real-time graph of the pupil diameter directly onto the video.
+    * **Fragmentation Plot**: Similar to the above, but shows the trend of gaze speed.
+
+* **Combining Features**
+    The real power lies in combining these options. For example, you can create a video that:
+    1.  Is **trimmed** to show only the "Difficult Task" event segment.
+    2.  Has the **perspective corrected** onto the computer screen.
+    3.  Shows the user's **gaze point** and **YOLO boxes** on specific interface buttons.
+    4.  Displays the **pupillometry plot** in a corner to visually correlate the increase in pupil diameter with complex actions.
+    5.  Shows the **"Difficult Task"** text at the top for clear contextual reference.
 ---
 ## 🧪 Synthetic Data Generator (`generate_synthetic_data.py`)
 
@@ -200,9 +250,9 @@ The script generates all the necessary `.csv` and `.mp4` files that mimic a real
     ```bash
     python generate_synthetic_data.py
     ```
-2.  The script will create a new folder named `synthetic_data` in the current directory.
+2.  The script will create a new folder named `synthetic_data_output` in the current directory.
 3.  This folder will contain all the necessary files (`gaze.csv`, `fixations.csv`, `world.mp4`, etc.).
-4.  In the SPEED GUI, you can now use the `synthetic_data` folder as input (e.g., for both the "Un-enriched Data Folder" and "Enriched Data Folder" paths) to run a full analysis pipeline.
+4.  In the SPEED GUI, you can now use the folders inside `synthetic_data_output` as input to run a full analysis pipeline.
 
 ---
 ## ✍️ Authors & Citation
@@ -220,4 +270,4 @@ The script generates all the necessary `.csv` and `.mp4` files that mimic a real
 
 ## 💻 Artificial Intelligence disclosure
 
-This code is partially written using Google Gemini Pro 2.5
+This code is partially written using Google Gemini.
