@@ -30,7 +30,7 @@ class EventManagerWindow(tk.Toplevel):
         frame = tk.Frame(self, padx=10, pady=10)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        cols = ("Selected", "Event Name", "Timestamp (s)")
+        cols = ("Selected", "Event Name", "Timestamp (ns)")
         self.tree = ttk.Treeview(frame, columns=cols, show='headings', selectmode='extended')
         for col in cols:
             self.tree.heading(col, text=col)
