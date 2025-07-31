@@ -4,11 +4,27 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
+import logging # MODIFICATO
+import torch # NUOVA IMPORTAZIONE
+
 try:
     from ultralytics import YOLO
 except ImportError:
-    print("ERROR: Ultralytics (YOLO) not installed. Cannot run object detection.")
+    logging.error("Ultralytics (YOLO) not installed. Cannot run object detection.")
     YOLO = None
+
+def _get_yolo_device():
+    """Determines the optimal device for YOLO inference (CUDA, MPS, or CPU)."""
+    if torch.cuda.is_available():
+        logging.info("CUDA GPU detected. Using 'cuda' for YOLO.")
+        return 'cuda'
+    # Per macOS con chip Apple Silicon (M1, M2, etc.)
+    elif torch.backends.mps.is_available():
+        logging.info("Apple MPS detected. Using 'mps' for YOLO.")
+        return 'mps'
+    else:
+        logging.info("No compatible GPU detected. Using 'cpu' for YOLO.")
+        return 'cpu'
 
 def _load_and_sync_data(data_dir: Path):
     """Loads and synchronizes fixation, pupil, and world timestamps."""
@@ -57,53 +73,58 @@ def _is_inside(px, py, x1, y1, x2, y2):
 def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str):
     """
     Runs YOLO object detection and tracking, correlates with gaze data, and saves statistics.
-    Uses a cache to avoid re-running the tracking.
+    Uses a cache to avoid re-running the tracking and leverages GPU if available.
     """
     if YOLO is None:
-        print("Skipping YOLO analysis because Ultralytics is not installed.")
+        logging.warning("Skipping YOLO analysis because Ultralytics is not installed.")
         return
 
     video_path = data_dir / 'external.mp4'
     if not video_path.exists():
-        print("Skipping YOLO analysis: external.mp4 not found.")
+        logging.warning("Skipping YOLO analysis: external.mp4 not found.")
         return
+
+    # --- MODIFICATO: Rilevamento automatico del dispositivo (GPU/CPU) ---
+    yolo_device = _get_yolo_device()
+    # -------------------------------------------------------------
 
     # 1. Load Model
     try:
         model = YOLO('yolov8n.pt')
     except Exception as e:
-        print(f"Error loading YOLO model (yolov8n.pt): {e}. Skipping YOLO analysis.")
+        logging.error(f"Error loading YOLO model (yolov8n.pt): {e}. Skipping YOLO analysis.")
         return
 
     # 2. Load and Sync Eye-Tracking Data
     try:
         synced_et_data = _load_and_sync_data(data_dir)
     except Exception as e:
-        print(f"Error loading/syncing eye-tracking data for YOLO: {e}. Skipping YOLO analysis.")
+        logging.error(f"Error loading/syncing eye-tracking data for YOLO: {e}. Skipping YOLO analysis.")
         return
 
-    # --- START OF NEW CACHING LOGIC ---
     yolo_cache_path = output_dir / 'yolo_detections_cache.csv'
 
     if yolo_cache_path.exists():
-        print(f"YOLO cache found. Loading detections from: {yolo_cache_path}")
+        logging.info(f"YOLO cache found. Loading detections from: {yolo_cache_path}")
         detections_df = pd.read_csv(yolo_cache_path)
     else:
-        print("YOLO cache not found. Starting video tracking (this may take some time)...")
+        logging.info("YOLO cache not found. Starting video tracking...")
         # 3. Process Video (Detection and Tracking)
         cap = cv2.VideoCapture(str(video_path))
         frame_idx = 0
         detections = []
         
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        pbar = tqdm(total=total_frames, desc="YOLO Tracking")
+        pbar = tqdm(total=total_frames, desc=f"YOLO Tracking on {yolo_device.upper()}")
 
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
             
-            results = model.track(frame, persist=True, verbose=False)
+            # --- MODIFICATO: Usa il dispositivo rilevato per l'inferenza ---
+            results = model.track(frame, persist=True, verbose=False, device=yolo_device)
+            # -----------------------------------------------------------------
             
             if results[0].boxes is not None and results[0].boxes.id is not None:
                 boxes = results[0].boxes.xyxy.cpu().numpy()
@@ -125,17 +146,15 @@ def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str):
         pbar.close()
 
         if not detections:
-            print("No objects detected by YOLO. Skipping correlation.")
+            logging.warning("No objects detected by YOLO. Skipping correlation.")
             return
 
         detections_df = pd.DataFrame(detections)
-        # Save results to cache for future runs
-        print(f"Saving YOLO detections to cache at: {yolo_cache_path}")
+        logging.info(f"Saving YOLO detections to cache at: {yolo_cache_path}")
         detections_df.to_csv(yolo_cache_path, index=False)
-    # --- END OF NEW CACHING LOGIC ---
 
     # 4. Correlate Detections with Fixations
-    print("Correlating detections with fixations...")
+    logging.info("Correlating detections with fixations...")
     
     merged_df = pd.merge(detections_df, synced_et_data, left_on='frame_idx', right_on='frame', how='inner')
 
@@ -146,13 +165,13 @@ def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str):
                 fixation_hits.append(row)
 
     if not fixation_hits:
-        print("No fixations overlapped with detected objects.")
+        logging.warning("No fixations overlapped with detected objects.")
         return
 
     hits_df = pd.DataFrame(fixation_hits)
 
     # 5. Calculate Statistics
-    print("Calculating statistics...")
+    logging.info("Calculating statistics...")
 
     class_map = {int(k): v for k, v in model.names.items()}
     hits_df['class_name'] = hits_df['class_id'].map(class_map)
@@ -200,4 +219,4 @@ def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str):
     id_map = hits_df[['track_id', 'class_id', 'class_name', 'instance_name']].drop_duplicates()
     id_map.to_csv(output_dir / 'class_id_map.csv', index=False)
     
-    print("YOLO analysis completed and statistics saved.")
+    logging.info("YOLO analysis completed and statistics saved.")

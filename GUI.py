@@ -5,6 +5,8 @@ from pathlib import Path
 import traceback
 import json
 import pandas as pd
+import logging # NUOVA IMPORTAZIONE
+import time # NUOVA IMPORTAZIONE
 
 # Import the main orchestrator functions
 try:
@@ -71,8 +73,8 @@ class EventSelectionWindow:
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v3.3")
-        self.root.geometry("800x850") # Adjusted size
+        self.root.title("SPEED v3.3 - GPU & Logging Enabled") # Titolo modificato
+        self.root.geometry("800x850")
 
         # Variables for folder paths
         self.raw_dir_var = tk.StringVar()
@@ -141,8 +143,8 @@ class SpeedApp:
         analysis_frame.pack(fill=tk.X, pady=5, padx=10)
         self.unenriched_var = tk.BooleanVar(value=False)
         tk.Checkbutton(analysis_frame, text="Analyze un-enriched data only (ignores enriched folder)", variable=self.unenriched_var).pack(anchor='w')
-        self.yolo_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (requires GPU)", variable=self.yolo_var).pack(anchor='w')
+        self.yolo_var = tk.BooleanVar(value=True) # MODIFICATO: YOLO attivo di default
+        tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (GPU Recommended)", variable=self.yolo_var).pack(anchor='w')
         tk.Button(analysis_frame, text="RUN CORE ANALYSIS", command=self.run_core_analysis, font=('Helvetica', 10, 'bold'), bg='#c5e1a5').pack(pady=5)
 
         # --- Output Notebook ---
@@ -237,11 +239,9 @@ class SpeedApp:
             for name in event_names:
                 self.event_vars[name] = tk.BooleanVar(value=True)
 
-            # Open the selection window and wait for it to close
             selection_window = EventSelectionWindow(self.root, "Select Events", event_names, self.event_vars)
             self.root.wait_window(selection_window.top)
 
-            # After window is closed, update the summary label
             self.update_event_summary_display()
 
         except Exception as e:
@@ -258,8 +258,6 @@ class SpeedApp:
             self.event_summary_label.config(text="No events loaded.")
             
     def run_core_analysis(self):
-        # This function now reads the choices from self.event_vars, which were
-        # set in the separate EventSelectionWindow. The logic here remains the same.
         output_dir = self.output_dir_entry.get().strip()
         subj_name = self.participant_name_var.get().strip()
         if not (output_dir and subj_name and self.raw_dir_var.get() and self.unenriched_dir_var.get()):
@@ -272,7 +270,9 @@ class SpeedApp:
                 return
 
         try:
-            messagebox.showinfo("In Progress", "Starting core analysis. This might take some time...")
+            messagebox.showinfo("In Progress", "Starting core analysis. This might take some time... Check the log file for details.")
+            logging.info("="*50)
+            logging.info(f"STARTING CORE ANALYSIS FOR: {subj_name}")
             main_analyzer.run_core_analysis(
                 subj_name=subj_name, output_dir_str=output_dir, raw_dir_str=self.raw_dir_var.get(),
                 unenriched_dir_str=self.unenriched_dir_var.get(), enriched_dir_str=self.enriched_dir_var.get(),
@@ -280,10 +280,12 @@ class SpeedApp:
                 selected_events=selected_events
             )
             messagebox.showinfo("Success", f"Core analysis completed.\nResults saved in: {output_dir}")
+            logging.info(f"CORE ANALYSIS FOR {subj_name} COMPLETED SUCCESSFULLY.")
+            logging.info("="*50)
         except Exception as e:
-            messagebox.showerror("Analysis Error", f"An error occurred: {e}\n\n{traceback.format_exc()}")
+            logging.error(f"An error occurred during Core Analysis: {e}\n{traceback.format_exc()}")
+            messagebox.showerror("Analysis Error", f"An error occurred: {e}\n\nSee log file for full traceback.")
             
-    # --- Other methods (update_output_dir_default, select_output_dir, etc.) remain unchanged ---
     def update_output_dir_default(self, *args):
         subj_name = self.participant_name_var.get().strip()
         if subj_name:
@@ -308,11 +310,14 @@ class SpeedApp:
         output_dir_path, subj_name = common_paths
         plot_selections = {key: var.get() for key, var in self.plot_vars.items()}
         try:
-            messagebox.showinfo("In Progress", "Generating selected plots...")
+            messagebox.showinfo("In Progress", "Generating selected plots... This may take a while.")
+            logging.info("--- Starting Plot Generation ---")
             main_analyzer.generate_selected_plots(output_dir_str=str(output_dir_path), subj_name=subj_name, plot_selections=plot_selections)
             messagebox.showinfo("Success", f"Plots generated in {output_dir_path / 'plots'}")
+            logging.info("--- Plot Generation Finished ---")
         except Exception as e:
-            messagebox.showerror("Plotting Error", f"An error occurred: {e}\n\n{traceback.format_exc()}")
+            logging.error(f"An error occurred during Plot Generation: {e}\n{traceback.format_exc()}")
+            messagebox.showerror("Plotting Error", f"An error occurred: {e}\n\nSee log file for full traceback.")
 
     def run_video_generation(self):
         common_paths = self._get_common_paths()
@@ -325,10 +330,13 @@ class SpeedApp:
             return
         try:
             messagebox.showinfo("In Progress", "Generating custom video. This process can be very slow...")
+            logging.info("--- Starting Video Generation ---")
             main_analyzer.generate_custom_video(output_dir_str=str(output_dir_path), subj_name=subj_name, video_options=video_options)
             messagebox.showinfo("Success", f"Video saved to {output_dir_path / video_options['output_filename']}")
+            logging.info("--- Video Generation Finished ---")
         except Exception as e:
-            messagebox.showerror("Video Error", f"An error occurred: {e}\n\n{traceback.format_exc()}")
+            logging.error(f"An error occurred during Video Generation: {e}\n{traceback.format_exc()}")
+            messagebox.showerror("Video Error", f"An error occurred: {e}\n\nSee log file for full traceback.")
 
     def load_yolo_results(self):
         common_paths = self._get_common_paths()
@@ -338,8 +346,11 @@ class SpeedApp:
         instance_csv = output_dir_path / 'stats_per_instance.csv'
         try:
             if class_csv.exists(): self._populate_treeview(self.class_treeview, pd.read_csv(class_csv))
+            else: logging.warning(f"Could not find {class_csv}")
             if instance_csv.exists(): self._populate_treeview(self.instance_treeview, pd.read_csv(instance_csv))
+            else: logging.warning(f"Could not find {instance_csv}")
         except Exception as e:
+            logging.error(f"Could not read the YOLO result CSV files: {e}")
             messagebox.showerror("Read Error", f"Could not read the YOLO result CSV files: {e}")
 
     def _populate_treeview(self, treeview, dataframe):
@@ -352,6 +363,32 @@ class SpeedApp:
             treeview.insert("", "end", values=list(row))
 
 if __name__ == '__main__':
+    # --- NUOVO: CONFIGURAZIONE DEL LOGGING ---
+    log_dir = Path('./logs')
+    log_dir.mkdir(exist_ok=True)
+    log_file_path = log_dir / f"speed_log_{time.strftime('%Y%m%d-%H%M%S')}.log"
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file_path),
+            logging.StreamHandler() # Per mostrare i log anche in console
+        ]
+    )
+    logging.info("Application started.")
+    # ------------------------------------
+
     root = tk.Tk()
     app = SpeedApp(root)
+    
+    # Questo è necessario su Windows per far funzionare correttamente il multiprocessing
+    # con i file .py che creano una GUI.
+    try:
+        from multiprocessing import freeze_support
+        freeze_support()
+    except (ImportError, RuntimeError):
+        pass
+
     root.mainloop()
+    logging.info("Application closed.")
