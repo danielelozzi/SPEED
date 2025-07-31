@@ -25,15 +25,12 @@ class EventManagerWindow(tk.Toplevel):
         self.grab_set()
 
         self.events_df = events_df.copy()
-        # Risultato da restituire alla chiusura
         self.saved_df = None
 
-        # --- Setup Treeview ---
         frame = tk.Frame(self, padx=10, pady=10)
         frame.pack(fill=tk.BOTH, expand=True)
 
         cols = ("Selected", "Event Name", "Timestamp (s)")
-        # --- MODIFICA: Abilita la selezione estesa ---
         self.tree = ttk.Treeview(frame, columns=cols, show='headings', selectmode='extended')
         for col in cols:
             self.tree.heading(col, text=col)
@@ -42,76 +39,57 @@ class EventManagerWindow(tk.Toplevel):
         self.tree.column("Timestamp (s)", width=150, anchor=tk.CENTER)
         
         self.populate_tree()
-
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # --- Scrollbar ---
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # --- Bindings ---
         self.tree.bind("<Double-1>", self.on_double_click)
         self.tree.bind("<Button-1>", self.on_click)
-        # --- MODIFICA: Aggiorna lo stato dei pulsanti al cambio di selezione ---
         self.tree.bind('<<TreeviewSelect>>', self.on_selection_change)
 
-        # --- Buttons ---
         button_frame = tk.Frame(self, pady=10)
         button_frame.pack(fill=tk.X)
         
         tk.Button(button_frame, text="Add Event", command=self.add_event).pack(side=tk.LEFT, padx=10)
-        
-        # --- MODIFICA: Aggiungi pulsante Merge e lega lo stato alla selezione ---
         self.merge_button = tk.Button(button_frame, text="Merge Selected", command=self.merge_events, state=tk.DISABLED)
         self.merge_button.pack(side=tk.LEFT, padx=5)
-        
         self.remove_button = tk.Button(button_frame, text="Remove Selected", command=self.remove_selected_events, state=tk.DISABLED)
         self.remove_button.pack(side=tk.LEFT, padx=5)
-        
         tk.Button(button_frame, text="Save & Close", command=self.save_and_close, font=('Helvetica', 10, 'bold')).pack(side=tk.RIGHT, padx=10)
         tk.Button(button_frame, text="Cancel", command=self.destroy).pack(side=tk.RIGHT, padx=5)
 
     def populate_tree(self):
-        """Fills the treeview with data from the dataframe."""
         for item in self.tree.get_children():
             self.tree.delete(item)
-            
         self.events_df.sort_values('timestamp [ns]', inplace=True)
-
         for index, row in self.events_df.iterrows():
             selected_text = "Yes" if row['selected'] else "No"
             timestamp_sec = row['timestamp [ns]'] / 1e9
             self.tree.insert("", "end", iid=str(index), values=(selected_text, row['name'], f"{timestamp_sec:.4f}"))
 
     def on_selection_change(self, event):
-        """Updates button states based on the number of selected items."""
         num_selected = len(self.tree.selection())
         self.remove_button.config(state=tk.NORMAL if num_selected > 0 else tk.DISABLED)
         self.merge_button.config(state=tk.NORMAL if num_selected >= 2 else tk.DISABLED)
 
     def on_click(self, event):
-        """Handle single clicks to toggle the 'Selected' state."""
         region = self.tree.identify("region", event.x, event.y)
         column = self.tree.identify_column(event.x)
-        
         if region == "cell" and column == "#1":
             item_id = self.tree.identify_row(event.y)
             if item_id:
-                # Deseleziona gli altri per evitare confusione
                 self.tree.selection_set(())
                 df_index = int(item_id)
                 self.events_df.loc[df_index, 'selected'] = not self.events_df.loc[df_index, 'selected']
                 self.populate_tree()
 
     def on_double_click(self, event):
-        """Handle double clicks for editing cells."""
         region = self.tree.identify("region", event.x, event.y)
         if region != "cell": return
-
         column_id = self.tree.identify_column(event.x)
         item_id = self.tree.identify_row(event.y)
-        
         if column_id not in ("#2", "#3"): return
 
         x, y, width, height = self.tree.bbox(item_id, column_id)
@@ -119,7 +97,6 @@ class EventManagerWindow(tk.Toplevel):
         current_values = self.tree.item(item_id, 'values')
         col_index = int(column_id.replace('#', '')) - 1
         entry.insert(0, current_values[col_index])
-        
         entry.place(x=x, y=y, width=width, height=height)
         entry.focus_set()
 
@@ -137,18 +114,14 @@ class EventManagerWindow(tk.Toplevel):
                 messagebox.showerror("Invalid Input", "Please enter a valid number for the timestamp.")
             finally:
                 entry.destroy()
-
         entry.bind("<Return>", save_edit)
         entry.bind("<FocusOut>", save_edit)
 
     def add_event(self):
-        """Adds a new event to the dataframe."""
         name = simpledialog.askstring("Add Event", "Enter the new event name:", parent=self)
         if not name: return
-
         ts_str = simpledialog.askstring("Add Event", f"Enter timestamp in seconds for '{name}':", parent=self)
         if not ts_str: return
-        
         try:
             ts_sec = float(ts_str)
             new_index = self.events_df.index.max() + 1 if not self.events_df.empty else 0
@@ -159,54 +132,43 @@ class EventManagerWindow(tk.Toplevel):
             messagebox.showerror("Invalid Input", "Please enter a valid number for the timestamp.")
 
     def merge_events(self):
-        """Merges selected events into a new single event."""
         selected_items = self.tree.selection()
         if len(selected_items) < 2: return
-
         new_name = simpledialog.askstring("Merge Events", "Enter the name for the new merged event:", parent=self)
         if not new_name: return
-
         indices = [int(item_id) for item_id in selected_items]
         selected_df = self.events_df.loc[indices]
-        
-        # Il timestamp del nuovo evento è quello del primo evento selezionato
         first_timestamp_ns = selected_df['timestamp [ns]'].min()
-        
         new_index = self.events_df.index.max() + 1
         new_row = {'name': new_name, 'timestamp [ns]': first_timestamp_ns, 'selected': True}
-        
         self.events_df = pd.concat([self.events_df, pd.DataFrame(new_row, index=[new_index])])
         self.populate_tree()
         messagebox.showinfo("Success", f"Event '{new_name}' created from merge.")
 
     def remove_selected_events(self):
-        """Removes the selected rows from the treeview and dataframe."""
         selected_items = self.tree.selection()
         if not selected_items: return
-
         if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to remove {len(selected_items)} event(s)?"):
             indices_to_drop = [int(item_id) for item_id in selected_items]
             self.events_df.drop(indices_to_drop, inplace=True)
             self.populate_tree()
 
     def save_and_close(self):
-        """Saves the modified dataframe and closes the window."""
         self.saved_df = self.events_df
         self.destroy()
 
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v3.6 - Event Editor & Merge")
+        self.root.title("SPEED v3.4")
         self.root.geometry("800x750")
 
         self.raw_dir_var = tk.StringVar()
         self.unenriched_dir_var = tk.StringVar()
         self.enriched_dir_var = tk.StringVar()
-
         self.plot_vars = {}
         self.video_vars = {}
-        self.events_df = pd.DataFrame() # DataFrame per contenere gli eventi
+        self.events_df = pd.DataFrame()
 
         self.canvas = tk.Canvas(root)
         self.scrollbar = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
@@ -217,17 +179,14 @@ class SpeedApp:
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
-        
         main_frame = self.scrollable_frame
 
         setup_frame = tk.LabelFrame(main_frame, text="1. Project Setup", padx=10, pady=10)
         setup_frame.pack(fill=tk.X, pady=10, padx=10)
-
         name_frame = tk.Frame(setup_frame); name_frame.pack(fill=tk.X, pady=2)
         tk.Label(name_frame, text="Participant Name:", width=20, anchor='w').pack(side=tk.LEFT)
         self.participant_name_var = tk.StringVar(); self.participant_name_var.trace_add("write", self.update_output_dir_default)
         tk.Entry(name_frame, textvariable=self.participant_name_var).pack(fill=tk.X, expand=True)
-
         output_frame = tk.Frame(setup_frame); output_frame.pack(fill=tk.X, pady=2)
         tk.Label(output_frame, text="Output Folder:", width=20, anchor='w').pack(side=tk.LEFT)
         self.output_dir_entry = tk.Entry(output_frame); self.output_dir_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
@@ -236,17 +195,14 @@ class SpeedApp:
         folders_frame = tk.LabelFrame(main_frame, text="2. Input Folders", padx=10, pady=10)
         folders_frame.pack(fill=tk.X, pady=5, padx=10)
         self.unenriched_dir_var.trace_add("write", lambda *args: self.load_events_from_file())
-
         raw_frame = tk.Frame(folders_frame); raw_frame.pack(fill=tk.X, pady=2)
         tk.Label(raw_frame, text="RAW Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
         tk.Entry(raw_frame, textvariable=self.raw_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(raw_frame, text="Browse...", command=lambda: self.select_folder(self.raw_dir_var, "Select RAW Data Folder")).pack(side=tk.RIGHT)
-
         unenriched_frame = tk.Frame(folders_frame); unenriched_frame.pack(fill=tk.X, pady=2)
         tk.Label(unenriched_frame, text="Un-enriched Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
         tk.Entry(unenriched_frame, textvariable=self.unenriched_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(unenriched_frame, text="Browse...", command=lambda: self.select_folder(self.unenriched_dir_var, "Select Un-enriched Data Folder")).pack(side=tk.RIGHT)
-
         enriched_frame = tk.Frame(folders_frame); enriched_frame.pack(fill=tk.X, pady=2)
         tk.Label(enriched_frame, text="Enriched Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
         tk.Entry(enriched_frame, textvariable=self.enriched_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
@@ -254,13 +210,10 @@ class SpeedApp:
         
         self.event_selection_frame = tk.LabelFrame(main_frame, text="2.5. Event Management", padx=10, pady=10)
         self.event_selection_frame.pack(fill=tk.X, pady=5, padx=10)
-        
         event_controls_frame = tk.Frame(self.event_selection_frame)
         event_controls_frame.pack(fill=tk.X)
-        
         self.event_summary_label = tk.Label(event_controls_frame, text="Select un-enriched folder to load events.")
         self.event_summary_label.pack(side=tk.LEFT, pady=5)
-        
         self.modify_events_button = tk.Button(event_controls_frame, text="Edit Events", command=self.open_event_manager)
         self.modify_events_button.pack(side=tk.RIGHT, padx=5)
         self.modify_events_button.config(state=tk.DISABLED)
@@ -278,7 +231,6 @@ class SpeedApp:
         plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='4. Generate Plots')
         video_tab = tk.Frame(notebook); notebook.add(video_tab, text='5. Generate Videos')
         yolo_tab = tk.Frame(notebook); notebook.add(yolo_tab, text='6. YOLO Results')
-
         self.setup_plot_tab(plot_tab)
         self.setup_video_tab(video_tab)
         self.setup_yolo_tab(yolo_tab)
@@ -324,31 +276,30 @@ class SpeedApp:
             self.events_df = pd.DataFrame()
             self.update_event_summary_display()
             return
-
         events_file = Path(unenriched_path) / 'events.csv'
         if not events_file.exists():
             messagebox.showerror("Error", "events.csv not found.")
-            self.events_df = pd.DataFrame()
-            self.update_event_summary_display()
+            self.events_df = pd.DataFrame(); self.update_event_summary_display()
             return
-
         try:
             self.events_df = pd.read_csv(events_file)
-            self.events_df['selected'] = True # Seleziona tutto di default
+            # --- CORREZIONE CHIAVE ---
+            # Pulisce i nomi degli eventi subito dopo il caricamento per coerenza
+            if 'name' in self.events_df.columns:
+                self.events_df['name'] = self.events_df['name'].astype(str).str.replace(r'[\\/]', '_', regex=True)
+            # --- FINE CORREZIONE ---
+            self.events_df['selected'] = True
             self.update_event_summary_display()
         except Exception as e:
             messagebox.showerror("Error", f"Could not read events.csv:\n{e}")
-            self.events_df = pd.DataFrame()
-            self.update_event_summary_display()
+            self.events_df = pd.DataFrame(); self.update_event_summary_display()
 
     def open_event_manager(self):
         if self.events_df.empty:
-            messagebox.showwarning("Warning", "No events loaded. Please select an 'Un-enriched' folder.")
+            messagebox.showwarning("Warning", "No events loaded.")
             return
-
         manager = EventManagerWindow(self.root, self.events_df)
         self.root.wait_window(manager)
-
         if manager.saved_df is not None:
             self.events_df = manager.saved_df
             self.update_event_summary_display()
@@ -370,41 +321,25 @@ class SpeedApp:
         if not (output_dir and subj_name and self.raw_dir_var.get() and self.unenriched_dir_var.get()):
             messagebox.showerror("Error", "Participant Name, Output Folder, RAW, and Un-enriched folders are mandatory.")
             return
-
-        if self.events_df.empty:
-            if not messagebox.askyesno("Confirmation", "No events loaded or defined. Continue without event-based analysis?"):
-                return
-        
+        if self.events_df.empty and not messagebox.askyesno("Confirmation", "No events loaded. Continue?"):
+            return
         try:
-            # Prepara il percorso di output
             working_data_dir = Path(output_dir) / 'eyetracking_file'
             working_data_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Copia i file sorgente originali (la prima volta)
-            # La logica _prepare_eyetracking_files va chiamata qui per assicurare che il file originale sia copiato
-            # prima di essere potenzialmente sovrascritto.
-            # Nota: la logica di analisi assume che questo sia già avvenuto.
-            # Per semplicità, ci affidiamo al fatto che l'utente non modifichi gli eventi *prima* di aver avviato l'analisi,
-            # ma per robustezza, la gestione dei file andrebbe centralizzata.
-            
-            # Salva il DataFrame degli eventi modificato
+            # Questa chiamata assicura che i file di base siano copiati prima di sovrascrivere events.csv
+            main_analyzer._prepare_eyetracking_files(
+                 Path(output_dir), Path(self.raw_dir_var.get()),
+                 Path(self.unenriched_dir_var.get()),
+                 Path(self.enriched_dir_var.get()) if self.enriched_dir_var.get() else Path(),
+                 self.unenriched_var.get()
+            )
             df_to_save = self.events_df.copy()
             output_cols = [col for col in ['name', 'timestamp [ns]'] if col in df_to_save.columns]
             df_to_save = df_to_save[output_cols]
             events_output_path = working_data_dir / 'events.csv'
-            # Prima di salvare, assicurati che i file base siano copiati
-            # Questa chiamata è ridondante se l'analisi è già partita ma necessaria per sicurezza
-            main_analyzer._prepare_eyetracking_files(
-                 Path(output_dir), Path(self.raw_dir_var.get()), 
-                 Path(self.unenriched_dir_var.get()), 
-                 Path(self.enriched_dir_var.get()) if self.enriched_dir_var.get() else Path(), 
-                 self.unenriched_var.get()
-            )
             df_to_save.to_csv(events_output_path, index=False)
             logging.info(f"Saved/updated user-modified event list to {events_output_path}")
-
             selected_event_names = self.events_df[self.events_df['selected']]['name'].tolist()
-
             messagebox.showinfo("In Progress", "Starting core analysis...")
             main_analyzer.run_core_analysis(
                 subj_name=subj_name, output_dir_str=output_dir, raw_dir_str=self.raw_dir_var.get(),
@@ -414,7 +349,7 @@ class SpeedApp:
             )
             messagebox.showinfo("Success", f"Core analysis completed.\nResults in: {output_dir}")
         except Exception as e:
-            logging.error(f"An error occurred during Core Analysis: {e}\n{traceback.format_exc()}")
+            logging.error(f"Core Analysis Error: {e}\n{traceback.format_exc()}")
             messagebox.showerror("Analysis Error", f"An error occurred: {e}\n\nSee log for details.")
 
     def update_output_dir_default(self, *args):
@@ -493,15 +428,12 @@ if __name__ == '__main__':
     log_file_path = log_dir / f"speed_log_{time.strftime('%Y%m%d-%H%M%S')}.log"
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.FileHandler(log_file_path), logging.StreamHandler()])
     logging.info("Application started.")
-
     root = tk.Tk()
     app = SpeedApp(root)
-    
     try:
         from multiprocessing import freeze_support
         freeze_support()
     except (ImportError, RuntimeError):
         pass
-
     root.mainloop()
     logging.info("Application closed.")
