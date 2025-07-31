@@ -73,7 +73,7 @@ class EventSelectionWindow:
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v3.4 - Enhanced Video & Plots") # Titolo modificato
+        self.root.title("SPEED v3.4") # Titolo modificato
         self.root.geometry("800x850")
 
         # Variables for folder paths
