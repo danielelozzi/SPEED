@@ -94,7 +94,7 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
 
     ![GUI - Setup](images/gui1.png)
 
-    * **Step 2.5**: After selecting the "Un-enriched Data Folder", the **"Event Selection"** box will automatically populate with all events found in `events.csv`. Uncheck any events you wish to exclude from the analysis.
+    * **Step 2.5**: After selecting the "Un-enriched Data Folder", the **"Event Selection"** box will automatically populate with all events found in `events.csv`. Uncheck any events you wish to exclude from the analysis. You can also modify the selected events, clicking on the **"Modify Selection"** button. 
 
     ![GUI - Event Selection](images/gui_events.png)
 
