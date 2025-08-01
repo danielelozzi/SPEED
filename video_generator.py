@@ -5,6 +5,7 @@ import cv2
 from pathlib import Path
 from tqdm import tqdm
 import traceback
+from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip # Aggiunto
 
 # --- Constants ---
 NS_TO_S = 1e9 # Conversion factor from nanoseconds to seconds
@@ -201,6 +202,8 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
     MODIFIED: Can trim video to selected events.
     """
     video_out_path = output_dir / options.get('output_filename', f'video_output_{subj_name}.mp4')
+    # Nuovo: percorso temporaneo per il video senza audio
+    temp_video_path = output_dir / f'temp_no_audio_{subj_name}.mp4'
     
     print("Loading and synchronizing data...")
     try:
@@ -239,7 +242,8 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
     
     out_w, out_h = (1280, 720) if options.get('crop_and_correct_perspective') else (original_w, original_h)
 
-    writer = cv2.VideoWriter(str(video_out_path), cv2.VideoWriter_fourcc(*'mp4v'), fps, (out_w, out_h))
+    # Scrittura del video su un file temporaneo senza audio
+    writer = cv2.VideoWriter(str(temp_video_path), cv2.VideoWriter_fourcc(*'mp4v'), fps, (out_w, out_h))
     print(f"The output video will be saved to: {video_out_path}")
 
     # Setup for Event Text & Trimming
@@ -337,7 +341,7 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                     
                     M = None
                     if options.get('crop_and_correct_perspective') and pd.notna(frame_data.get('tl x [px]')):
-                        src_pts = np.float32([[frame_data[c] for c in [f'{p} x [px]', f'{p} y [px]']] for p in ['tl','tr','br','bl']])
+                        src_pts = np.float32([[frame_data[c] for c in [f'{p} x [px]', f'{p} y [px']]] for p in ['tl','tr','br','bl']])
                         dst_pts = np.float32([[0, 0], [out_w, 0], [out_w, out_h], [0, out_h]])
                         M = cv2.getPerspectiveTransform(src_pts, dst_pts)
                         frame = cv2.warpPerspective(frame, M, (out_w, out_h))
@@ -432,4 +436,42 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
         if cap_int:
             cap_int.release()
         writer.release()
-        print("Video creation process completed!")
+        
+        # --- NUOVA LOGICA: Aggiunta dell'audio ---
+        if external_vid_path.exists():
+            try:
+                print("Adding audio to the generated video...")
+                video_clip = VideoFileClip(str(temp_video_path))
+                original_audio_clip = AudioFileClip(str(external_vid_path))
+                
+                # Taglia l'audio in base ai segmenti di trimming, se l'opzione è attiva
+                if options.get('trim_to_events') and frame_segments:
+                    start_frame, end_frame = frame_segments[0]
+                    start_time = start_frame / fps
+                    end_time = end_frame / fps
+                    trimmed_audio = original_audio_clip.subclip(start_time, end_time)
+                    final_clip = video_clip.set_audio(trimmed_audio)
+                else:
+                    final_clip = video_clip.set_audio(original_audio_clip)
+
+                # Salva il video finale
+                final_clip.write_videofile(str(video_out_path), codec='libx264', audio_codec='aac', logger=None)
+                
+                video_clip.close()
+                original_audio_clip.close()
+                if 'trimmed_audio' in locals():
+                    trimmed_audio.close()
+                
+                # Rimuovi il file temporaneo senza audio
+                temp_video_path.unlink(missing_ok=True)
+                
+                print("Video creation with audio completed!")
+            except Exception as e:
+                print(f"WARNING: An error occurred while adding audio. The video will be saved without audio. Error: {e}")
+                # Rinominare il file temporaneo nel nome finale se l'aggiunta audio fallisce
+                if temp_video_path.exists():
+                    temp_video_path.rename(video_out_path)
+                print("Video creation process completed, but without audio.")
+        else:
+            print("No external video file found to extract audio from. Video saved without audio.")
+        # --- FINE NUOVA LOGICA ---
