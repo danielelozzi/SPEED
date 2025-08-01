@@ -36,7 +36,7 @@ class EventManagerWindow(tk.Toplevel):
             self.tree.heading(col, text=col)
         self.tree.column("Selected", width=80, anchor=tk.CENTER)
         self.tree.column("Event Name", width=350)
-        self.tree.column("Timestamp (ms)", width=150, anchor=tk.CENTER)
+        self.tree.column("Timestamp (ns)", width=150, anchor=tk.CENTER)
         
         self.populate_tree()
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
