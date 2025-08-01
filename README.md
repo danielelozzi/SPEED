@@ -178,7 +178,7 @@ All outputs are saved within the specified `analysis_results_{participant_name}`
 * **`plots/`**: Contains all the generated PDF plots for the analyzed events.
 * **`config.json`**: A file saving the settings used for the Core Analysis, including the `selected_events` list for reproducibility.
 * **`summary_results_{subj_name}.csv`**: A CSV file with the main quantitative outcomes of the analysis for the selected events.
-* **`{video_name}.mp4`**: Each custom video you generate is saved in the main output folder.
+* **`{video_name}.mp4`**: Each custom video you generate is saved in the main output folder. The audio will be included if available in the original file.
 * **YOLO Outputs**:
     * `yolo_detections_cache.csv`: A cache of the raw YOLO detections.
     * `stats_per_class.csv`: Aggregated statistics for each object class.
