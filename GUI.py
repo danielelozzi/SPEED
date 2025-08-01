@@ -20,11 +20,210 @@ class EventManagerWindow(tk.Toplevel):
     def __init__(self, parent, events_df: pd.DataFrame):
         super().__init__(parent)
         self.title("Event Manager")
+        self.geometry("800x600") # Aumentata leggermente la larghezza per i nuovi pulsanti
+        self.transient(parent)
+        self.grab_set()
+
+        self.events_df = events_df.copy()
+        self.events_df.sort_values('timestamp [ns]', inplace=True)
+        self.saved_df = None
+
+        frame = tk.Frame(self, padx=10, pady=10)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        cols = ("Selected", "Event Name", "Timestamp (ns)")
+        self.tree = ttk.Treeview(frame, columns=cols, show='headings', selectmode='browse') # 'browse' permette solo una selezione singola
+        for col in cols:
+            self.tree.heading(col, text=col)
+        self.tree.column("Selected", width=80, anchor=tk.CENTER)
+        self.tree.column("Event Name", width=400)
+        self.tree.column("Timestamp (ns)", width=150, anchor=tk.CENTER)
+        
+        self.populate_tree()
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.tree.bind("<Double-1>", self.on_double_click)
+        self.tree.bind("<Button-1>", self.on_click)
+        self.tree.bind('<<TreeviewSelect>>', self.on_selection_change)
+
+        button_frame = tk.Frame(self, pady=10)
+        button_frame.pack(fill=tk.X)
+        
+        tk.Button(button_frame, text="Sort by Time", command=self.sort_events).pack(side=tk.LEFT, padx=5)
+        tk.Button(button_frame, text="Add Event", command=self.add_event).pack(side=tk.LEFT, padx=5)
+        
+        # --- NUOVO: Pulsante per modificare il timestamp ---
+        self.modify_ts_button = tk.Button(button_frame, text="Modify Timestamp", command=self.modify_selected_timestamp, state=tk.DISABLED)
+        self.modify_ts_button.pack(side=tk.LEFT, padx=5)
+
+        self.merge_button = tk.Button(button_frame, text="Merge Selected", command=self.merge_events, state=tk.DISABLED)
+        self.merge_button.pack(side=tk.LEFT, padx=5)
+        self.remove_button = tk.Button(button_frame, text="Remove Selected", command=self.remove_selected_events, state=tk.DISABLED)
+        self.remove_button.pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(button_frame, text="Save & Close", command=self.save_and_close, font=('Helvetica', 10, 'bold')).pack(side=tk.RIGHT, padx=10)
+        tk.Button(button_frame, text="Cancel", command=self.destroy).pack(side=tk.RIGHT, padx=5)
+
+    def populate_tree(self):
+        # Salva la selezione corrente per ripristinarla dopo l'aggiornamento
+        selected_item = self.tree.selection()
+        
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        for index, row in self.events_df.iterrows():
+            selected_text = "Yes" if row['selected'] else "No"
+            timestamp_sec = row['timestamp [ns]'] / 1e9
+            self.tree.insert("", "end", iid=str(index), values=(selected_text, row['name'], f"{timestamp_sec:.4f}"))
+        
+        # Ripristina la selezione se esiste ancora
+        if selected_item and self.tree.exists(selected_item[0]):
+            self.tree.selection_set(selected_item)
+
+    def sort_events(self):
+        self.events_df.sort_values('timestamp [ns]', inplace=True)
+        self.populate_tree()
+
+    def on_selection_change(self, event):
+        num_selected = len(self.tree.selection())
+        # Abilita il pulsante di modifica solo se è selezionato UN solo evento
+        self.modify_ts_button.config(state=tk.NORMAL if num_selected == 1 else tk.DISABLED)
+        
+        # Logica per gli altri pulsanti
+        self.remove_button.config(state=tk.NORMAL if num_selected > 0 else tk.DISABLED)
+        self.merge_button.config(state=tk.NORMAL if num_selected >= 2 else tk.DISABLED)
+
+    def on_click(self, event):
+        region = self.tree.identify("region", event.x, event.y)
+        column = self.tree.identify_column(event.x)
+        if region == "cell" and column == "#1":
+            item_id = self.tree.identify_row(event.y)
+            if item_id:
+                # Usa 'browse' per la selezione singola, quindi non serve deselezionare
+                df_index = int(item_id)
+                self.events_df.loc[df_index, 'selected'] = not self.events_df.loc[df_index, 'selected']
+                self.populate_tree()
+
+    def on_double_click(self, event):
+        # Permette di modificare solo il nome con il doppio clic
+        region = self.tree.identify("region", event.x, event.y)
+        if region != "cell": return
+        column_id = self.tree.identify_column(event.x)
+        item_id = self.tree.identify_row(event.y)
+        
+        # Abilitato solo per la colonna del nome (#2)
+        if column_id != "#2": return
+
+        x, y, width, height = self.tree.bbox(item_id, column_id)
+        entry = ttk.Entry(self.tree)
+        current_values = self.tree.item(item_id, 'values')
+        entry.insert(0, current_values[1]) # Colonna nome
+        entry.place(x=x, y=y, width=width, height=height)
+        entry.focus_set()
+
+        def save_name_edit(event):
+            new_value = entry.get()
+            df_index = int(item_id)
+            self.events_df.loc[df_index, 'name'] = new_value
+            self.populate_tree()
+            entry.destroy()
+        entry.bind("<Return>", save_name_edit)
+        entry.bind("<FocusOut>", save_name_edit)
+
+    def add_event(self):
+        name = simpledialog.askstring("Add Event", "Enter the new event name:", parent=self)
+        if not name: return
+        ts_str = simpledialog.askstring("Add Event", f"Enter timestamp in seconds for '{name}':", parent=self)
+        if not ts_str: return
+        try:
+            ts_sec = float(ts_str)
+            new_index = self.events_df.index.max() + 1 if not self.events_df.empty else 0
+            new_row = {'name': name, 'timestamp [ns]': int(ts_sec * 1e9), 'selected': True}
+            self.events_df = pd.concat([self.events_df, pd.DataFrame(new_row, index=[new_index])])
+            self.populate_tree()
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Please enter a valid number for the timestamp.")
+
+    # --- NUOVO: Metodo chiamato dal pulsante "Modify Timestamp" ---
+    def modify_selected_timestamp(self):
+        selected_items = self.tree.selection()
+        if not selected_items:
+            return
+        
+        item_id = selected_items[0]
+        df_index = int(item_id)
+        
+        current_name = self.events_df.loc[df_index, 'name']
+        current_ts_sec = self.events_df.loc[df_index, 'timestamp [ns]'] / 1e9
+
+        # Chiede all'utente il nuovo valore
+        prompt_title = "Modify Timestamp"
+        prompt_text = f"Enter new timestamp in seconds for event:\n'{current_name}'"
+        
+        new_ts_str = simpledialog.askstring(prompt_title, prompt_text, initialvalue=f"{current_ts_sec:.4f}", parent=self)
+
+        if new_ts_str:
+            try:
+                new_ts_sec = float(new_ts_str)
+                # Aggiorna il DataFrame
+                self.events_df.loc[df_index, 'timestamp [ns]'] = int(new_ts_sec * 1e9)
+                # Aggiorna la tabella nella GUI
+                self.populate_tree()
+            except ValueError:
+                messagebox.showerror("Invalid Input", "Please enter a valid number for the timestamp.", parent=self)
+
+    def merge_events(self):
+        # Per unire eventi, è meglio permettere selezioni multiple. Modifichiamo temporaneamente la modalità.
+        self.tree.config(selectmode="extended")
+        messagebox.showinfo("Merge Events", "Select two or more events to merge using Ctrl-Click or Shift-Click, then click 'Merge Selected' again.", parent=self)
+        
+        # Questo è un trucco per gestire il doppio click sul pulsante. 
+        # L'utente clicca una volta per attivare la modalità, seleziona, e poi clicca di nuovo.
+        if len(self.tree.selection()) < 2: return
+        
+        selected_items = self.tree.selection()
+        new_name = simpledialog.askstring("Merge Events", "Enter the name for the new merged event:", parent=self)
+        if not new_name:
+            self.tree.config(selectmode="browse") # Ripristina la modalità
+            return
+            
+        indices = [int(item_id) for item_id in selected_items]
+        selected_df = self.events_df.loc[indices]
+        first_timestamp_ns = selected_df['timestamp [ns]'].min()
+        new_index = self.events_df.index.max() + 1
+        new_row = {'name': new_name, 'timestamp [ns]': first_timestamp_ns, 'selected': True}
+        self.events_df = pd.concat([self.events_df, pd.DataFrame(new_row, index=[new_index])])
+        self.populate_tree()
+        messagebox.showinfo("Success", f"Event '{new_name}' created from merge.", parent=self)
+        self.tree.config(selectmode="browse") # Ripristina la modalità di selezione singola
+
+    def remove_selected_events(self):
+        selected_items = self.tree.selection()
+        if not selected_items: return
+        if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to remove {len(selected_items)} event(s)?", parent=self):
+            indices_to_drop = [int(item_id) for item_id in selected_items]
+            self.events_df.drop(indices_to_drop, inplace=True)
+            self.populate_tree()
+
+    def save_and_close(self):
+        self.saved_df = self.events_df
+        self.destroy()
+        
+    """A window for viewing, selecting, editing, adding, merging, and removing events."""
+    def __init__(self, parent, events_df: pd.DataFrame):
+        super().__init__(parent)
+        self.title("Event Manager")
         self.geometry("750x600")
         self.transient(parent)
         self.grab_set()
 
         self.events_df = events_df.copy()
+        # Sorts the data only once, when the window is opened
+        self.events_df.sort_values('timestamp [ns]', inplace=True)
         self.saved_df = None
 
         frame = tk.Frame(self, padx=10, pady=10)
@@ -52,7 +251,8 @@ class EventManagerWindow(tk.Toplevel):
         button_frame = tk.Frame(self, pady=10)
         button_frame.pack(fill=tk.X)
         
-        tk.Button(button_frame, text="Add Event", command=self.add_event).pack(side=tk.LEFT, padx=10)
+        tk.Button(button_frame, text="Sort by Time", command=self.sort_events).pack(side=tk.LEFT, padx=10)
+        tk.Button(button_frame, text="Add Event", command=self.add_event).pack(side=tk.LEFT, padx=5)
         self.merge_button = tk.Button(button_frame, text="Merge Selected", command=self.merge_events, state=tk.DISABLED)
         self.merge_button.pack(side=tk.LEFT, padx=5)
         self.remove_button = tk.Button(button_frame, text="Remove Selected", command=self.remove_selected_events, state=tk.DISABLED)
@@ -63,11 +263,16 @@ class EventManagerWindow(tk.Toplevel):
     def populate_tree(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
-        self.events_df.sort_values('timestamp [ns]', inplace=True)
+        
         for index, row in self.events_df.iterrows():
             selected_text = "Yes" if row['selected'] else "No"
             timestamp_sec = row['timestamp [ns]'] / 1e9
             self.tree.insert("", "end", iid=str(index), values=(selected_text, row['name'], f"{timestamp_sec:.4f}"))
+
+    def sort_events(self):
+        """Sorts the events by timestamp and repopulates the tree."""
+        self.events_df.sort_values('timestamp [ns]', inplace=True)
+        self.populate_tree()
 
     def on_selection_change(self, event):
         num_selected = len(self.tree.selection())
