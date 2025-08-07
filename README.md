@@ -1,4 +1,4 @@
-# SPEED v3.4 - labScoc Processing and Extraction of Eye tracking Data
+# SPEED v3.5 - labScoc Processing and Extraction of Eye tracking Data
 
 *An Advanced Eye-Tracking Data Analysis Software*
 
@@ -7,7 +7,7 @@ This version also supports GPU acceleration.
 
 ## The Modular Workflow
 
-SPEED v3.4 operates on a two-step workflow designed to save time and computational resources.
+SPEED v3.5 operates on a two-step workflow designed to save time and computational resources.
 
 **Step 1: Run Core Analysis**
 This is the main data processing stage. You run this step **only once** per participant for a given set of events. The software will:
@@ -72,6 +72,7 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
     opencv-python
     scipy
     tqdm
+    moviepy
     # Optional for YOLO analysis
     torch
     ultralytics
