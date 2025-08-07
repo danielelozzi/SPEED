@@ -7,8 +7,6 @@ import json
 import pandas as pd
 import logging
 import time
-import cv2
-from PIL import Image, ImageTk
 
 # Importa l'editor video dal suo nuovo file
 from interactive_video_editor import InteractiveVideoEditor
@@ -404,7 +402,8 @@ class SpeedApp:
             output_dir_path.mkdir(parents=True, exist_ok=True)
             
             final_events_df = self.events_df.copy()
-            cols_to_save = ['name', 'timestamp [ns]', 'recording id']
+            # Pulisce le colonne di servizio come 'source' prima di salvare
+            cols_to_save = ['name', 'timestamp [ns]', 'recording id', 'selected']
             final_events_df = final_events_df[[col for col in cols_to_save if col in final_events_df.columns]]
             if 'recording id' not in final_events_df.columns and not final_events_df.empty:
                 final_events_df['recording id'] = 'rec_001'

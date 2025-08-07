@@ -9,14 +9,6 @@ class InteractiveVideoEditor(tk.Toplevel):
     """
     Una finestra di editor video interattiva per aggiungere, rimuovere e modificare
     eventi direttamente su una timeline visuale.
-
-    Funzionalità:
-    - Visualizzazione del video con controlli di play/pausa.
-    - Timeline con cursore per navigare frame per frame.
-    - Visualizzazione degli eventi sulla timeline con colori diversi per fonte.
-    - Aggiunta di nuovi eventi al frame corrente.
-    - Spostamento di eventi tramite drag-and-drop sulla timeline.
-    - Rimozione di eventi selezionati.
     """
     def __init__(self, parent, video_path, events_df: pd.DataFrame, world_timestamps_df: pd.DataFrame):
         super().__init__(parent)
@@ -44,6 +36,7 @@ class InteractiveVideoEditor(tk.Toplevel):
         self.is_playing = False
         self.current_frame_idx = 0
         self.root = parent
+        self.is_updating = False # Flag per prevenire il loop infinito
 
         # --- GUI Setup ---
         main_frame = tk.Frame(self)
@@ -85,11 +78,19 @@ class InteractiveVideoEditor(tk.Toplevel):
         self.destroy()
 
     def seek_frame(self, frame_idx_str):
-        if not self.is_playing:
-            self.update_frame(int(float(frame_idx_str)))
+        # **CORREZIONE**: Esegui solo se non stiamo già aggiornando
+        if self.is_updating or self.is_playing:
+            return
+        self.update_frame(int(float(frame_idx_str)))
 
     def update_frame(self, frame_idx):
+        if self.is_updating:
+            return
+        self.is_updating = True
+
         self.current_frame_idx = max(0, min(int(frame_idx), self.total_frames - 1))
+        
+        # **CORREZIONE**: Aggiorna lo slider qui, protetto dal flag
         self.frame_scale.set(self.current_frame_idx)
         
         self.time_label.config(text=f"Frame: {self.current_frame_idx} / {self.total_frames}")
@@ -102,6 +103,8 @@ class InteractiveVideoEditor(tk.Toplevel):
             self.photo = ImageTk.PhotoImage(image=img)
             self.video_label.config(image=self.photo)
             self.draw_timeline()
+        
+        self.is_updating = False
 
     def toggle_play(self):
         self.is_playing = not self.is_playing
@@ -111,7 +114,7 @@ class InteractiveVideoEditor(tk.Toplevel):
     def play_video(self):
         if self.is_playing and self.current_frame_idx < self.total_frames - 1:
             self.update_frame(self.current_frame_idx + 1)
-            self.root.after(int(1000 / self.fps), self.play_video)
+            self.after(int(1000 / self.fps), self.play_video)
         else:
             self.is_playing = False
             self.play_pause_btn.config(text="▶ Play")
@@ -142,7 +145,7 @@ class InteractiveVideoEditor(tk.Toplevel):
     def get_event_at_pos(self, x):
         canvas_width = self.timeline_canvas.winfo_width()
         for index, event in self.events_df.iterrows():
-            if abs(x - ((self.get_frame_from_ts(event['timestamp [ns]']) / self.total_frames) * canvas_width)) < 5: # Tolleranza di 5 pixel
+            if abs(x - ((self.get_frame_from_ts(event['timestamp [ns]']) / self.total_frames) * canvas_width)) < 5:
                 return index
         return None
 
@@ -167,8 +170,7 @@ class InteractiveVideoEditor(tk.Toplevel):
             self.dragged_event_index = None
             self.events_df.sort_values('timestamp [ns]', inplace=True)
             self.events_df = self.events_df.reset_index(drop=True)
-            # Deseleziona dopo lo spostamento per evitare eliminazioni accidentali
-            self.selected_event_index = None 
+            self.selected_event_index = None
             self.draw_timeline()
 
     def add_event_at_frame(self):
