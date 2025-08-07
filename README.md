@@ -131,7 +131,7 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
         * **Drag & Drop Editing**: Click and drag an existing event marker along the timeline to intuitively adjust its timestamp.
         * **Remove Events**: Select an event by clicking its marker and use the "Remove Selected Event" button.
     
-    [GUI - Interactive Event Management](images/gui_events_interactive.png)
+    ![GUI - Interactive Event Management](images/gui_events_interactive.png)
 
 4.  **Section 3: Run Core Analysis**
     * In the "Run Core Analysis" section, configure the analysis mode (e.g., `un-enriched only`, `Run YOLO`).
