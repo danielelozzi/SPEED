@@ -95,48 +95,62 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
     python GUI.py
     ```
 
-2.  **Sections 1-3: Setup and Core Analysis**
-    * **Step 1**: In the top sections of the GUI, fill in the **Participant Name** and select the **Output Folder**.
-    * **Step 2**: Use the "Browse..." buttons to select the required **Input Folders**: **RAW** and **Un-enriched**. The **Enriched** folder is optional.
+2.  **Section 1-2: Setup and Input**
+    * In the top sections of the GUI, fill in the **Participant Name** and select the **Output Folder**.
+    * Use the "Browse..." buttons to select the required **Input Folders**: **RAW** and **Un-enriched**. The **Enriched** folder is optional.
 
     ![GUI - Setup](images/gui1.png)
 
-    * **Step 2.5**: After selecting the "Un-enriched Data Folder", the **"Event Management"** box will show a summary of the events found in `events.csv`. To manage these events, click the **"Edit Events"** button. This opens a powerful new window (`EventManagerWindow` in `GUI.py`) where you can:
-        * **Select/Deselect for Analysis**: Click "Yes" or "No" in the first column to toggle whether an event is included in the core analysis.
-        * **Add New Event**: Use the "Add Event" button to create a new event with a custom name and timestamp.
-        * **Merge Events**: Select two or more events from the list (using Ctrl-Click or Shift-Click) and click "Merge Selected" to combine them into a single new event. The new event will take the timestamp of the earliest selected event.
-        * **Remove Events**: Select one or more events and click "Remove Selected" to delete them.
-        * **Edit Inline**: Double-click on an event's name or timestamp directly in the table to edit its value.
-        * When you are finished, click **"Save & Close"** to apply your changes. The summary in the main window will update accordingly.
+3.  **Section 2.5: Advanced Event Management**
+    This section provides powerful and flexible tools for managing your experimental events. You have three main ways to load and edit events:
 
-    ![GUI - Plot Generation Tab](images/gui_events.png)
+    **Method 1: Default Loading (Automatic)**
+    * Simply by selecting the "Un-enriched Data Folder", the application will automatically load the `events.csv` file found inside it. The summary box will update to show how many events were loaded.
 
-    * **Step 3**: In the "Run Core Analysis" section, configure the analysis mode (e.g., `un-enriched only`, `Run YOLO`).
-    * Click the **"RUN CORE ANALYSIS"** button and wait for the confirmation message. This completes the main data processing for the selected events.
+    **Method 2: Loading a Custom Event File**
+    * Use the **"Browse..."** button in the "Optional Events File" field to select any other `.csv` file from your computer.
+    * This file will immediately override the default `events.csv`. This is useful for applying a pre-defined set of events to different recordings without modifying the original data folders.
 
-3.  **Section 4: Generate Plots**
+    **Method 3: Using the Interactive Editors**
+    Once events are loaded (using Method 1 or 2), two powerful editing buttons become available:
+    * **Edit in Table**: This opens a spreadsheet-like window where you can:
+        * **Select/Deselect for Analysis**: Click "Yes" or "No" to toggle an event's inclusion.
+        * **Edit Inline**: Double-click on an event's name or timestamp to change its value.
+        * **Add/Remove/Merge**: Use the buttons to add new events, delete selected ones, or merge multiple events into a single new one.
+        * **Sort**: Instantly reorder all events by their timestamp.
+
+    * **Edit on Video**: This opens a revolutionary interactive video editor:
+        * **Visual Playback**: Watch the `external.mp4` video with standard play/pause controls.
+        * **Timeline Navigation**: A timeline below the video shows markers for all current events. Click anywhere on the timeline to jump to that frame.
+        * **Add Events**: Pause the video at the exact moment you need, and click "Add Event at Current Frame" to create a new event marker.
+        * **Drag & Drop Editing**: Click and drag an existing event marker along the timeline to intuitively adjust its timestamp.
+        * **Remove Events**: Select an event by clicking its marker and use the "Remove Selected Event" button.
+
+    *After editing, click **"Save & Close"** in the editor window. The changes will be saved in memory and used for the analysis.*
+
+    ![GUI - Event Management](images/gui_events.png) 4.  **Section 3: Run Core Analysis**
+    * In the "Run Core Analysis" section, configure the analysis mode (e.g., `un-enriched only`, `Run YOLO`).
+    * Click the **"RUN CORE ANALYSIS"** button. This will use the final, user-edited list of events to perform the main data processing.
+
+5.  **Section 4: Generate Plots**
     * Switch to the "4. Generate Plots" tab.
-    * Select the categories of plots you wish to generate. These plots will only be created for the events you analyzed in the previous step.
+    * Select the categories of plots you wish to generate.
     * Click the **"GENERATE SELECTED PLOTS"** button.
 
     ![GUI - Plot Generation Tab](images/gui2.png)
 
-4.  **Section 5: Generate Videos**
+6.  **Section 5: Generate Videos**
     * Switch to the "5. Generate Videos" tab.
-    * Configure the video composition by selecting the desired options.
-    * Set the **Output Video Filename**.
+    * Configure the video composition and set the **Output Video Filename**.
     * Click the **"GENERATE VIDEO"** button.
 
     ![GUI - Video Generation Tab with Event Overlay option](images/gui3.png)
 
-5.  **Section 6: YOLO Results**
+7.  **Section 6: YOLO Results**
     * Switch to the "6. YOLO Results" tab.
-    * Click **"Load/Refresh YOLO Results"**.
-    * The tables will be populated with statistics calculated during the Core Analysis.
+    * Click **"Load/Refresh YOLO Results"** to view the statistics.
 
     ![GUI - YOLO Results Tab](images/gui4.png)
-
----
 
 ## Input Folder Structure 📂
 

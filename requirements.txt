@@ -6,3 +6,4 @@ opencv-python
 scipy
 tqdm
 pyinstaller
+moviepy

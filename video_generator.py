@@ -5,7 +5,7 @@ import cv2
 from pathlib import Path
 from tqdm import tqdm
 import traceback
-from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip # Aggiunto
+from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip # Aggiunto
 
 # --- Constants ---
 NS_TO_S = 1e9 # Conversion factor from nanoseconds to seconds
@@ -341,7 +341,7 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                     
                     M = None
                     if options.get('crop_and_correct_perspective') and pd.notna(frame_data.get('tl x [px]')):
-                        src_pts = np.float32([[frame_data[c] for c in [f'{p} x [px]', f'{p} y [px']]] for p in ['tl','tr','br','bl']])
+                        src_pts = np.float32([[frame_data[c] for c in [f'{p} x [px]', f'{p} y [px]']] for p in ['tl','tr','br','bl']])
                         dst_pts = np.float32([[0, 0], [out_w, 0], [out_w, out_h], [0, out_h]])
                         M = cv2.getPerspectiveTransform(src_pts, dst_pts)
                         frame = cv2.warpPerspective(frame, M, (out_w, out_h))

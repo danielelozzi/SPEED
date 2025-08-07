@@ -7,12 +7,12 @@ import shutil
 # Import application modules
 import speed_script_events as speed_events
 import video_generator
-import yolo_analyzer # Import the new module
+import yolo_analyzer 
 
-def _prepare_eyetracking_files(output_dir: Path, raw_dir: Path, unenriched_dir: Path, enriched_dir: Path, un_enriched_mode: bool):
+def _prepare_eyetracking_files(output_dir: Path, raw_dir: Path, unenriched_dir: Path, enriched_dir: Path, un_enriched_mode: bool, custom_event_path: str = None):
     """
     Copies and renames the necessary files from the input folders to the working folder.
-    (No changes needed in this function compared to the previous version)
+    MODIFIED: Uses the custom event file if provided.
     """
     data_dir = output_dir / 'eyetracking_file'
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -34,7 +34,6 @@ def _prepare_eyetracking_files(output_dir: Path, raw_dir: Path, unenriched_dir: 
         
         # Files from the Un-enriched folder
         'external.mp4': (external_video_source_path, True),
-        'events.csv': (unenriched_dir / 'events.csv', True),
         'fixations.csv': (unenriched_dir / 'fixations.csv', True),
         'gaze.csv': (unenriched_dir / 'gaze.csv', True),
         'blinks.csv': (unenriched_dir / 'blinks.csv', True),
@@ -45,6 +44,18 @@ def _prepare_eyetracking_files(output_dir: Path, raw_dir: Path, unenriched_dir: 
         # Files from the Enriched folder (optional, but looked for here)
         'surface_positions.csv': (enriched_dir / 'surface_positions.csv', False),
     }
+
+    # --- MODIFIED LOGIC ---
+    # If a custom event path is provided (from the GUI), copy that file.
+    # Otherwise, fall back to the one in the un-enriched folder.
+    if custom_event_path and Path(custom_event_path).exists():
+        print(f"Using user-modified event file from: {custom_event_path}")
+        shutil.copy(custom_event_path, data_dir / 'events.csv')
+    # If no custom path, get it from the standard location
+    else:
+        file_map['events.csv'] = (unenriched_dir / 'events.csv', True)
+    # --- END MODIFIED LOGIC ---
+
 
     # Add Enriched files (gaze/fixations) only if not in "un-enriched only" mode
     if not un_enriched_mode:
@@ -59,6 +70,9 @@ def _prepare_eyetracking_files(output_dir: Path, raw_dir: Path, unenriched_dir: 
     for dest_name, (source_path, required) in file_map.items():
         if source_path.exists():
             dest_path = data_dir / dest_name
+            # Don't overwrite events.csv if it was already handled
+            if dest_name == 'events.csv' and (data_dir / 'events.csv').exists():
+                continue
             shutil.copy(source_path, dest_path)
             print(f"Copied: {source_path.name} -> {dest_path.name}")
         elif required:
@@ -77,7 +91,8 @@ def run_core_analysis(
     enriched_dir_str: str, 
     un_enriched_mode: bool, 
     run_yolo: bool,
-    selected_events: list # NUOVO PARAMETRO
+    selected_events: list,
+    custom_event_path: str = None # NUOVO PARAMETRO
 ):
     """
     Executes the complete analysis, including YOLO analysis if requested.
@@ -91,13 +106,14 @@ def run_core_analysis(
             Path(raw_dir_str),
             Path(unenriched_dir_str),
             Path(enriched_dir_str) if enriched_dir_str else Path(),
-            un_enriched_mode
+            un_enriched_mode,
+            custom_event_path # Passa il parametro
         )
 
         config = {
             "source_folders": { "raw": raw_dir_str, "unenriched": unenriched_dir_str, "enriched": enriched_dir_str },
             "unenriched_mode": un_enriched_mode, "yolo_mode": run_yolo,
-            "selected_events": selected_events # Salva anche gli eventi selezionati
+            "selected_events": selected_events
         }
         with open(output_dir / 'config.json', 'w') as f:
             json.dump(config, f, indent=4)
@@ -108,7 +124,7 @@ def run_core_analysis(
             data_dir_str=str(working_data_dir),
             output_dir_str=str(output_dir),
             un_enriched_mode=un_enriched_mode,
-            selected_events=selected_events # PASSA GLI EVENTI
+            selected_events=selected_events
         )
         print(">>> Standard data analysis finished.")
 
@@ -130,8 +146,6 @@ def run_core_analysis(
         print(f"!!! Error during core analysis: {e}")
         traceback.print_exc()
         raise
-
-# The generate_selected_plots and generate_custom_video functions remain unchanged
 
 def generate_selected_plots(output_dir_str: str, subj_name: str, plot_selections: dict):
     """
@@ -163,7 +177,6 @@ def generate_selected_plots(output_dir_str: str, subj_name: str, plot_selections
 def generate_custom_video(output_dir_str: str, subj_name: str, video_options: dict):
     """
     Calls the video generator with the specified configuration.
-    MODIFIED: Passes selected events for video trimming.
     """
     print("\n>>> GENERATING CUSTOM VIDEO...")
     output_dir = Path(output_dir_str)
@@ -175,11 +188,7 @@ def generate_custom_video(output_dir_str: str, subj_name: str, video_options: di
     with open(config_path, 'r') as f:
         config = json.load(f)
     
-    # --- NUOVA LOGICA ---
-    # Recupera la lista degli eventi selezionati dal file di configurazione
-    # Questo è necessario per l'opzione di ritaglio del video
     selected_events_for_trimming = config.get("selected_events", [])
-    # --- FINE NUOVA LOGICA ---
         
     try:
         video_generator.create_custom_video(
@@ -188,7 +197,7 @@ def generate_custom_video(output_dir_str: str, subj_name: str, video_options: di
             subj_name=subj_name,
             options=video_options,
             un_enriched_mode=config.get("unenriched_mode", False),
-            selected_events=selected_events_for_trimming # Passa la lista di eventi
+            selected_events=selected_events_for_trimming
         )
         print(">>> Video generation finished.")
     except Exception as e:
