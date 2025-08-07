@@ -119,6 +119,10 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
         * **Edit Inline**: Double-click on an event's name or timestamp to change its value.
         * **Add/Remove/Merge**: Use the buttons to add new events, delete selected ones, or merge multiple events into a single new one.
         * **Sort**: Instantly reorder all events by their timestamp.
+    
+    *After editing, click **"Save & Close"** in the editor window. The changes will be saved in memory and used for the analysis.*
+
+    ![GUI - Event Management](images/gui_events.png)
 
     * **Edit on Video**: This opens a revolutionary interactive video editor:
         * **Visual Playback**: Watch the `external.mp4` video with standard play/pause controls.
@@ -126,10 +130,10 @@ To run the SPEED analysis tool, you'll need Python 3 and several scientific comp
         * **Add Events**: Pause the video at the exact moment you need, and click "Add Event at Current Frame" to create a new event marker.
         * **Drag & Drop Editing**: Click and drag an existing event marker along the timeline to intuitively adjust its timestamp.
         * **Remove Events**: Select an event by clicking its marker and use the "Remove Selected Event" button.
+    
+    [GUI - Interactive Event Management](images/gui_events_interactive.png)
 
-    *After editing, click **"Save & Close"** in the editor window. The changes will be saved in memory and used for the analysis.*
-
-    ![GUI - Event Management](images/gui_events.png) 4.  **Section 3: Run Core Analysis**
+4.  **Section 3: Run Core Analysis**
     * In the "Run Core Analysis" section, configure the analysis mode (e.g., `un-enriched only`, `Run YOLO`).
     * Click the **"RUN CORE ANALYSIS"** button. This will use the final, user-edited list of events to perform the main data processing.
 

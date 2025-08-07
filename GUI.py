@@ -9,9 +9,7 @@ import logging
 import time
 import cv2
 from PIL import Image, ImageTk
-import threading
 
-# Import the main orchestrator functions
 try:
     import main_analyzer_advanced as main_analyzer
 except ImportError as e:
@@ -19,7 +17,10 @@ except ImportError as e:
     exit()
 
 class EventManagerWindow(tk.Toplevel):
-    """A window for viewing, selecting, editing, adding, merging, and removing events."""
+    """
+    Una finestra per visualizzare, selezionare, modificare, aggiungere, unire e rimuovere eventi
+    in una vista tabellare.
+    """
     def __init__(self, parent, events_df: pd.DataFrame):
         super().__init__(parent)
         self.title("Event Manager (Table View)")
@@ -36,13 +37,14 @@ class EventManagerWindow(tk.Toplevel):
         frame = tk.Frame(self, padx=10, pady=10)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        cols = ("Selected", "Event Name", "Timestamp (s)")
+        cols = ("Selected", "Event Name", "Timestamp (s)", "Source")
         self.tree = ttk.Treeview(frame, columns=cols, show='headings', selectmode='extended')
         for col in cols:
             self.tree.heading(col, text=col)
         self.tree.column("Selected", width=80, anchor=tk.CENTER)
-        self.tree.column("Event Name", width=400)
+        self.tree.column("Event Name", width=350)
         self.tree.column("Timestamp (s)", width=150, anchor=tk.CENTER)
+        self.tree.column("Source", width=100, anchor=tk.CENTER)
 
         self.populate_tree()
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -69,12 +71,12 @@ class EventManagerWindow(tk.Toplevel):
         tk.Button(button_frame, text="Cancel", command=self.destroy).pack(side=tk.RIGHT, padx=5)
 
     def populate_tree(self):
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        self.tree.delete(*self.tree.get_children())
         for index, row in self.events_df.iterrows():
-            selected_text = "Yes" if row['selected'] else "No"
+            selected_text = "Yes" if row.get('selected', True) else "No"
             timestamp_sec = row['timestamp [ns]'] / 1e9
-            self.tree.insert("", "end", iid=str(index), values=(selected_text, row['name'], f"{timestamp_sec:.4f}"))
+            source = row.get('source', 'manual')
+            self.tree.insert("", "end", iid=str(index), values=(selected_text, row['name'], f"{timestamp_sec:.4f}", source))
 
     def sort_events(self):
         self.events_df.sort_values('timestamp [ns]', inplace=True)
@@ -100,6 +102,8 @@ class EventManagerWindow(tk.Toplevel):
         if region != "cell": return
         column_id = self.tree.identify_column(event.x)
         item_id = self.tree.identify_row(event.y)
+        df_index = int(item_id)
+        
         if column_id not in ("#2", "#3"): return
 
         x, y, width, height = self.tree.bbox(item_id, column_id)
@@ -110,9 +114,8 @@ class EventManagerWindow(tk.Toplevel):
         entry.place(x=x, y=y, width=width, height=height)
         entry.focus_set()
 
-        def save_edit(event):
+        def save_edit(evt):
             new_value = entry.get()
-            df_index = int(item_id)
             try:
                 if column_id == "#2":
                     self.events_df.loc[df_index, 'name'] = new_value
@@ -134,10 +137,9 @@ class EventManagerWindow(tk.Toplevel):
         if not ts_str: return
         try:
             ts_sec = float(ts_str)
-            new_index = self.events_df.index.max() + 1 if not self.events_df.empty else 0
-            new_row = {'name': name, 'timestamp [ns]': int(ts_sec * 1e9), 'selected': True}
-            self.events_df = pd.concat([self.events_df, pd.DataFrame(new_row, index=[new_index])])
-            self.populate_tree()
+            new_row = {'name': name, 'timestamp [ns]': int(ts_sec * 1e9), 'selected': True, 'source': 'manual', 'recording id': 'rec_001'}
+            self.events_df = pd.concat([self.events_df, pd.DataFrame([new_row])], ignore_index=True)
+            self.sort_events()
         except ValueError:
             messagebox.showerror("Invalid Input", "Please enter a valid number for the timestamp.")
 
@@ -149,10 +151,10 @@ class EventManagerWindow(tk.Toplevel):
         indices = [int(item_id) for item_id in selected_items]
         selected_df = self.events_df.loc[indices]
         first_timestamp_ns = selected_df['timestamp [ns]'].min()
-        new_index = self.events_df.index.max() + 1
-        new_row = {'name': new_name, 'timestamp [ns]': first_timestamp_ns, 'selected': True}
-        self.events_df = pd.concat([self.events_df, pd.DataFrame(new_row, index=[new_index])])
-        self.populate_tree()
+        new_row = {'name': new_name, 'timestamp [ns]': first_timestamp_ns, 'selected': True, 'source': 'manual', 'recording id': 'rec_001'}
+        self.events_df.drop(indices, inplace=True)
+        self.events_df = pd.concat([self.events_df, pd.DataFrame([new_row])], ignore_index=True)
+        self.sort_events()
 
     def remove_selected_events(self):
         selected_items = self.tree.selection()
@@ -167,6 +169,10 @@ class EventManagerWindow(tk.Toplevel):
         self.destroy()
 
 class InteractiveVideoEditor(tk.Toplevel):
+    """
+    Editor video interattivo per eventi.
+    Gestisce eventi da più fonti e li distingue per colore.
+    """
     def __init__(self, parent, video_path, events_df: pd.DataFrame, world_timestamps_df: pd.DataFrame):
         super().__init__(parent)
         self.title("Interactive Video Event Editor")
@@ -174,13 +180,12 @@ class InteractiveVideoEditor(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
 
-        if not video_path.exists():
+        if not video_path or not video_path.exists():
             messagebox.showerror("Error", f"Video file not found:\n{video_path}", parent=self)
             self.destroy()
             return
-
-        self.video_path = video_path
-        self.events_df = events_df.copy()
+            
+        self.events_df = events_df.copy().reset_index(drop=True)
         if 'timestamp [ns]' not in self.events_df.columns and not self.events_df.empty:
             messagebox.showerror("Error", "Events DataFrame must have a 'timestamp [ns]' column.", parent=self)
             self.destroy()
@@ -193,17 +198,13 @@ class InteractiveVideoEditor(tk.Toplevel):
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) if self.cap.get(cv2.CAP_PROP_FPS) > 0 else 30
         self.is_playing = False
         self.current_frame_idx = 0
-        self.root = parent # Reference to the main app window for 'after'
+        self.root = parent
 
-        # Main frame
         main_frame = tk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        # Video display
         self.video_label = tk.Label(main_frame)
         self.video_label.pack(pady=10)
 
-        # Timeline
         self.timeline_canvas = tk.Canvas(main_frame, height=80, bg='lightgrey')
         self.timeline_canvas.pack(fill=tk.X, padx=10, side=tk.BOTTOM)
         self.timeline_canvas.bind("<Button-1>", self.handle_timeline_click)
@@ -211,7 +212,6 @@ class InteractiveVideoEditor(tk.Toplevel):
         self.timeline_canvas.bind("<ButtonRelease-1>", self.handle_timeline_release)
         self.dragged_event_index = None
 
-        # Controls
         controls_frame = tk.Frame(main_frame)
         controls_frame.pack(fill=tk.X, padx=10, side=tk.BOTTOM)
         self.play_pause_btn = tk.Button(controls_frame, text="▶ Play", command=self.toggle_play, width=10)
@@ -230,12 +230,11 @@ class InteractiveVideoEditor(tk.Toplevel):
         
         self.selected_event_index = None
         self.update_frame(self.current_frame_idx)
-        # We need to wait until the window is drawn to get the correct canvas width
         self.after(100, lambda: self.draw_timeline())
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def on_close(self):
-        self.is_playing = False # Stop any background playing
+        self.is_playing = False
         self.cap.release()
         self.destroy()
 
@@ -252,16 +251,11 @@ class InteractiveVideoEditor(tk.Toplevel):
     def update_frame(self, frame_idx):
         self.current_frame_idx = max(0, min(int(frame_idx), self.total_frames - 1))
         self.frame_scale.set(self.current_frame_idx)
-        
-        current_time_str = self.format_time(self.current_frame_idx)
-        total_time_str = self.format_time(self.total_frames)
-        self.time_label.config(text=f"{current_time_str} / {total_time_str}")
-
+        self.time_label.config(text=f"{self.format_time(self.current_frame_idx)} / {self.format_time(self.total_frames)}")
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame_idx)
         ret, frame = self.cap.read()
         if ret:
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(frame_rgb)
+            img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             img.thumbnail((900, 650))
             self.photo = ImageTk.PhotoImage(image=img)
             self.video_label.config(image=self.photo)
@@ -269,114 +263,96 @@ class InteractiveVideoEditor(tk.Toplevel):
 
     def toggle_play(self):
         self.is_playing = not self.is_playing
-        if self.is_playing:
-            self.play_pause_btn.config(text="❚❚ Pause")
-            self.play_video()
-        else:
-            self.play_pause_btn.config(text="▶ Play")
+        self.play_pause_btn.config(text="❚❚ Pause" if self.is_playing else "▶ Play")
+        if self.is_playing: self.play_video()
 
     def play_video(self):
-        if self.is_playing:
-            if self.current_frame_idx < self.total_frames -1:
-                self.update_frame(self.current_frame_idx + 1)
-                self.root.after(int(1000 / self.fps), self.play_video)
-            else:
-                self.is_playing = False
-                self.play_pause_btn.config(text="▶ Play")
+        if self.is_playing and self.current_frame_idx < self.total_frames - 1:
+            self.update_frame(self.current_frame_idx + 1)
+            self.root.after(int(1000 / self.fps), self.play_video)
+        else:
+            self.is_playing = False
+            self.play_pause_btn.config(text="▶ Play")
 
     def get_frame_from_ts(self, ts):
         if self.world_ts.empty: return 0
-        # Find the index in the timestamp dataframe that is closest to the event's timestamp
-        closest_index = (self.world_ts['timestamp [ns]'] - ts).abs().idxmin()
-        # The 'frame' column should hold the corresponding video frame number
-        if 'frame' in self.world_ts.columns:
-            return self.world_ts.loc[closest_index, 'frame']
-        # Fallback to using the dataframe index if 'frame' column doesn't exist
-        return closest_index
+        return (self.world_ts['timestamp [ns]'] - ts).abs().idxmin()
 
     def draw_timeline(self):
         self.timeline_canvas.delete("all")
         canvas_width = self.timeline_canvas.winfo_width()
         if canvas_width <= 1: return
-
-        # Draw event markers
+        
+        color_map = {'default': 'red', 'optional': 'purple', 'manual': 'green'}
+        
         for index, event in self.events_df.iterrows():
             frame_idx = self.get_frame_from_ts(event['timestamp [ns]'])
             x_pos = (frame_idx / self.total_frames) * canvas_width
-            color = "blue" if index == self.selected_event_index else "red"
-            width = 3 if index == self.selected_event_index else 2
-            tag = f"event_{index}"
-            self.timeline_canvas.create_line(x_pos, 10, x_pos, 50, fill=color, width=width, tags=tag)
-            self.timeline_canvas.create_text(x_pos, 60, text=event['name'], anchor=tk.N, tags=tag)
+            base_color = color_map.get(event.get('source', 'manual'), 'black')
+            final_color = "blue" if index == self.selected_event_index else base_color
+            
+            self.timeline_canvas.create_line(x_pos, 10, x_pos, 50, fill=final_color, width=3 if final_color=="blue" else 2)
+            self.timeline_canvas.create_text(x_pos, 60, text=event['name'], anchor=tk.N, fill=final_color)
 
-        # Draw current frame cursor
         cursor_x = (self.current_frame_idx / self.total_frames) * canvas_width
-        self.timeline_canvas.create_line(cursor_x, 0, cursor_x, 80, fill='green', width=2)
+        self.timeline_canvas.create_line(cursor_x, 0, cursor_x, 80, fill='dark green', width=2)
     
     def get_event_at_pos(self, x):
         canvas_width = self.timeline_canvas.winfo_width()
         for index, event in self.events_df.iterrows():
-            frame_idx = self.get_frame_from_ts(event['timestamp [ns]'])
-            event_x = (frame_idx / self.total_frames) * canvas_width
-            if abs(x - event_x) < 5: # 5px tolerance
+            if abs(x - ((self.get_frame_from_ts(event['timestamp [ns]']) / self.total_frames) * canvas_width)) < 5:
                 return index
         return None
 
     def handle_timeline_click(self, event):
-        self.selected_event_index = self.get_event_at_pos(event.x)
-        self.dragged_event_index = self.selected_event_index
-
-        if self.selected_event_index is None:
-            canvas_width = self.timeline_canvas.winfo_width()
-            clicked_frame = int((event.x / canvas_width) * self.total_frames)
-            self.update_frame(clicked_frame)
+        clicked_event = self.get_event_at_pos(event.x)
+        self.selected_event_index = clicked_event
+        self.dragged_event_index = clicked_event
+        if clicked_event is None:
+            self.update_frame((event.x / self.timeline_canvas.winfo_width()) * self.total_frames)
         self.draw_timeline()
 
     def handle_timeline_drag(self, event):
         if self.dragged_event_index is not None:
             canvas_width = self.timeline_canvas.winfo_width()
             new_frame = max(0, min(int((event.x / canvas_width) * self.total_frames), self.total_frames - 1))
-            
             if new_frame < len(self.world_ts):
-                new_ts = self.world_ts.iloc[new_frame]['timestamp [ns]']
-                self.events_df.loc[self.dragged_event_index, 'timestamp [ns]'] = new_ts
+                self.events_df.loc[self.dragged_event_index, 'timestamp [ns]'] = self.world_ts.iloc[new_frame]['timestamp [ns]']
                 self.update_frame(new_frame)
             
     def handle_timeline_release(self, event):
-        self.dragged_event_index = None
-        self.events_df.sort_values('timestamp [ns]', inplace=True)
+        if self.dragged_event_index is not None:
+            self.dragged_event_index = None
+            self.events_df.sort_values('timestamp [ns]', inplace=True)
+            self.events_df = self.events_df.reset_index(drop=True)
+            self.selected_event_index = None
 
     def add_event_at_frame(self):
         name = simpledialog.askstring("Add Event", "Enter event name:", parent=self)
-        if not name: return
-
-        if self.current_frame_idx < len(self.world_ts):
+        if name and self.current_frame_idx < len(self.world_ts):
             ts = self.world_ts.iloc[self.current_frame_idx]['timestamp [ns]']
-            new_index = self.events_df.index.max() + 1 if not self.events_df.empty else 0
-            new_row = {'name': name, 'timestamp [ns]': ts, 'selected': True, 'recording id': 'rec_001'} # Added recording id for compatibility
-            new_df = pd.DataFrame(new_row, index=[new_index])
-            self.events_df = pd.concat([self.events_df, new_df]).reset_index(drop=True)
+            new_row = {'name': name, 'timestamp [ns]': ts, 'selected': True, 'source': 'manual', 'recording id': 'rec_001'}
+            self.events_df = pd.concat([self.events_df, pd.DataFrame([new_row])], ignore_index=True)
             self.events_df.sort_values('timestamp [ns]', inplace=True)
+            self.events_df = self.events_df.reset_index(drop=True)
             self.draw_timeline()
-        else:
-            messagebox.showwarning("Warning", "Cannot add event, frame index is out of timestamp range.", parent=self)
 
     def remove_selected_event(self):
         if self.selected_event_index is None:
             messagebox.showinfo("Info", "Click on an event on the timeline to select it first.", parent=self)
             return
-        
         event_name = self.events_df.loc[self.selected_event_index, 'name']
         if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to remove the event '{event_name}'?", parent=self):
             self.events_df.drop(self.selected_event_index, inplace=True)
+            self.events_df = self.events_df.reset_index(drop=True)
             self.selected_event_index = None
             self.draw_timeline()
 
     def save_and_close(self):
         self.is_playing = False
-        self.saved_df = self.events_df
-        self.cap.release()
-        self.destroy()
+        cols_to_save = ['name', 'timestamp [ns]', 'recording id', 'selected', 'source']
+        self.saved_df = self.events_df[[col for col in cols_to_save if col in self.events_df.columns]]
+        self.on_close()
 
 class SpeedApp:
     def __init__(self, root):
@@ -404,7 +380,7 @@ class SpeedApp:
         self.scrollbar.pack(side="right", fill="y")
         main_frame = self.scrollable_frame
 
-        # Sezione 1: Setup
+        # --- Sezione 1: Setup ---
         setup_frame = tk.LabelFrame(main_frame, text="1. Project Setup", padx=10, pady=10)
         setup_frame.pack(fill=tk.X, pady=10, padx=10)
         name_frame = tk.Frame(setup_frame); name_frame.pack(fill=tk.X, pady=2)
@@ -416,7 +392,7 @@ class SpeedApp:
         self.output_dir_entry = tk.Entry(output_frame); self.output_dir_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(output_frame, text="Browse...", command=self.select_output_dir).pack(side=tk.RIGHT)
 
-        # Sezione 2: Input Folders
+        # --- Sezione 2: Input Folders ---
         folders_frame = tk.LabelFrame(main_frame, text="2. Input Folders", padx=10, pady=10)
         folders_frame.pack(fill=tk.X, pady=5, padx=10)
         self.unenriched_dir_var.trace_add("write", lambda *args: self.load_data_for_editors())
@@ -433,7 +409,7 @@ class SpeedApp:
         tk.Entry(enriched_frame, textvariable=self.enriched_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(enriched_frame, text="Browse...", command=lambda: self.select_folder(self.enriched_dir_var, "Select Enriched Data Folder")).pack(side=tk.RIGHT)
         
-        # Sezione 2.5: Event Management
+        # --- Sezione 2.5: Event Management ---
         event_frame = tk.LabelFrame(main_frame, text="2.5 Event Management", padx=10, pady=10)
         event_frame.pack(fill=tk.X, pady=5, padx=10)
         ext_event_file_frame = tk.Frame(event_frame)
@@ -451,7 +427,7 @@ class SpeedApp:
         self.edit_events_btn = tk.Button(event_buttons_frame, text="Edit in Table", command=self.open_event_manager_table, state=tk.DISABLED)
         self.edit_events_btn.pack(side=tk.RIGHT, padx=5)
 
-        # Sezione 3: Analisi
+        # --- Sezione 3: Analisi ---
         analysis_frame = tk.LabelFrame(main_frame, text="3. Run Core Analysis", padx=10, pady=10)
         analysis_frame.pack(fill=tk.X, pady=5, padx=10)
         self.unenriched_var = tk.BooleanVar(value=False)
@@ -460,7 +436,7 @@ class SpeedApp:
         tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (GPU Recommended)", variable=self.yolo_var).pack(anchor='w')
         tk.Button(analysis_frame, text="RUN CORE ANALYSIS", command=self.run_core_analysis, font=('Helvetica', 10, 'bold'), bg='#c5e1a5').pack(pady=5)
 
-        # Sezioni 4, 5, 6 (Tabs)
+        # --- Sezioni 4, 5, 6 (Tabs) ---
         notebook = ttk.Notebook(main_frame)
         notebook.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
         plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='4. Generate Plots')
@@ -512,32 +488,46 @@ class SpeedApp:
     def load_data_for_editors(self):
         unenriched_path_str = self.unenriched_dir_var.get()
         ext_event_file_str = self.external_event_file_var.get()
+        
+        event_dfs = []
+        
+        if unenriched_path_str:
+            default_events_path = Path(unenriched_path_str) / 'events.csv'
+            if default_events_path.exists():
+                try:
+                    df_default = pd.read_csv(default_events_path)
+                    df_default['source'] = 'default'
+                    event_dfs.append(df_default)
+                except Exception as e:
+                    messagebox.showerror("Error", f"Could not read default events.csv:\n{e}")
 
-        event_file_to_load = None
-        if ext_event_file_str and Path(ext_event_file_str).exists():
-            event_file_to_load = Path(ext_event_file_str)
-        elif unenriched_path_str and (Path(unenriched_path_str) / 'events.csv').exists():
-            event_file_to_load = Path(unenriched_path_str) / 'events.csv'
+        if ext_event_file_str:
+            optional_events_path = Path(ext_event_file_str)
+            if optional_events_path.exists():
+                try:
+                    df_optional = pd.read_csv(optional_events_path)
+                    df_optional['source'] = 'optional'
+                    event_dfs.append(df_optional)
+                except Exception as e:
+                    messagebox.showerror("Error", f"Could not read optional events file:\n{e}")
 
-        if event_file_to_load:
-            try:
-                self.events_df = pd.read_csv(event_file_to_load)
-                if 'name' in self.events_df.columns:
-                     self.events_df['name'] = self.events_df['name'].astype(str).str.replace(r'[\\/]', '_', regex=True)
-                if 'selected' not in self.events_df.columns:
-                    self.events_df['selected'] = True
-            except Exception as e:
-                messagebox.showerror("Error", f"Could not read events file:\n{event_file_to_load}\n{e}")
-                self.events_df = pd.DataFrame()
+        if event_dfs:
+            self.events_df = pd.concat(event_dfs, ignore_index=True).sort_values('timestamp [ns]').reset_index(drop=True)
+            if 'selected' not in self.events_df.columns:
+                self.events_df['selected'] = True
         else:
             self.events_df = pd.DataFrame()
 
-        if unenriched_path_str and (Path(unenriched_path_str) / 'world_timestamps.csv').exists():
-            try:
-                self.world_timestamps_df = pd.read_csv(Path(unenriched_path_str) / 'world_timestamps.csv')
-                self.world_timestamps_df['frame'] = self.world_timestamps_df.index
-            except Exception as e:
-                messagebox.showerror("Error", f"Could not read world_timestamps.csv:\n{e}")
+        if unenriched_path_str:
+            world_ts_path = Path(unenriched_path_str) / 'world_timestamps.csv'
+            if world_ts_path.exists():
+                try:
+                    self.world_timestamps_df = pd.read_csv(world_ts_path)
+                    if 'frame' not in self.world_timestamps_df.columns:
+                        self.world_timestamps_df['frame'] = self.world_timestamps_df.index
+                except Exception:
+                    self.world_timestamps_df = pd.DataFrame()
+            else:
                 self.world_timestamps_df = pd.DataFrame()
         else:
             self.world_timestamps_df = pd.DataFrame()
@@ -545,24 +535,26 @@ class SpeedApp:
         self.update_event_summary_display()
 
     def update_event_summary_display(self):
-        total_events = len(self.events_df)
-        if total_events > 0:
-            selected_count = self.events_df['selected'].sum()
-            self.event_summary_label.config(text=f"{selected_count} of {total_events} events loaded.")
+        if not self.events_df.empty:
+            selected_count = self.events_df['selected'].sum() if 'selected' in self.events_df.columns else len(self.events_df)
+            self.event_summary_label.config(text=f"{selected_count} of {len(self.events_df)} events loaded.")
             self.edit_events_btn.config(state=tk.NORMAL)
-            video_path = Path(self.unenriched_dir_var.get()) / 'external.mp4' if self.unenriched_dir_var.get() else Path()
-            if not self.world_timestamps_df.empty and video_path.exists():
-                self.edit_video_btn.config(state=tk.NORMAL)
-            else:
-                self.edit_video_btn.config(state=tk.DISABLED)
         else:
             self.event_summary_label.config(text="Load data to manage events.")
             self.edit_events_btn.config(state=tk.DISABLED)
-            self.edit_video_btn.config(state=tk.DISABLED)
+
+        video_path = None
+        if self.unenriched_dir_var.get():
+            try:
+                video_path = next(Path(self.unenriched_dir_var.get()).glob('*.mp4'))
+            except StopIteration:
+                video_path = None
+
+        self.edit_video_btn.config(state=tk.NORMAL if video_path and video_path.exists() else tk.DISABLED)
 
     def open_event_manager_table(self):
         if self.events_df.empty:
-            messagebox.showwarning("Warning", "No events loaded.")
+            messagebox.showwarning("Warning", "No events loaded to edit.")
             return
         manager = EventManagerWindow(self.root, self.events_df)
         self.root.wait_window(manager)
@@ -570,9 +562,9 @@ class SpeedApp:
             self.events_df = manager.saved_df.reset_index(drop=True)
             self.update_event_summary_display()
             logging.info("Event list updated via table editor.")
-            
+
     def open_event_manager_video(self):
-        video_path = Path(self.unenriched_dir_var.get()) / 'external.mp4'
+        video_path = next(Path(self.unenriched_dir_var.get()).glob('*.mp4'))
         manager = InteractiveVideoEditor(self.root, video_path, self.events_df, self.world_timestamps_df)
         self.root.wait_window(manager)
         if manager.saved_df is not None:
@@ -587,29 +579,33 @@ class SpeedApp:
             messagebox.showerror("Error", "Participant Name, Output Folder, RAW, and Un-enriched folders are mandatory.")
             return
             
-        if self.events_df.empty and not messagebox.askyesno("Confirmation", "No events have been loaded or defined. The analysis will run on the entire recording without segmentation. Continue?"):
+        if self.events_df.empty and not messagebox.askyesno("Confirmation", "No events loaded. Analysis will run on the entire recording without segmentation. Continue?"):
             return
             
         try:
-            temp_dir = Path(output_dir) / 'temp_for_analysis'
-            temp_dir.mkdir(parents=True, exist_ok=True)
+            output_dir_path = Path(output_dir)
+            output_dir_path.mkdir(parents=True, exist_ok=True)
             
-            df_to_save = self.events_df.copy()
-            output_cols = [col for col in ['name', 'timestamp [ns]', 'recording id'] if col in df_to_save.columns]
-            df_to_save = df_to_save[output_cols]
-            events_output_path = temp_dir / 'events.csv'
-            df_to_save.to_csv(events_output_path, index=False)
-            logging.info(f"User-modified event list saved to temporary location: {events_output_path}")
+            final_events_df = self.events_df.copy()
+            cols_to_save = ['name', 'timestamp [ns]', 'recording id']
+            final_events_df = final_events_df[[col for col in cols_to_save if col in final_events_df.columns]]
+            if 'recording id' not in final_events_df.columns and not final_events_df.empty:
+                final_events_df['recording id'] = 'rec_001'
 
-            selected_event_names = self.events_df[self.events_df['selected']]['name'].tolist() if 'selected' in self.events_df and not self.events_df.empty else []
+            modified_events_path = output_dir_path / 'modified_events.csv'
+            final_events_df.to_csv(modified_events_path, index=False)
+            logging.info(f"Final user-modified event list saved to: {modified_events_path}")
+
+            selected_event_names = self.events_df[self.events_df['selected']]['name'].tolist() if 'selected' in self.events_df.columns and not self.events_df.empty else []
 
             messagebox.showinfo("In Progress", "Starting core analysis...")
+            
             main_analyzer.run_core_analysis(
                 subj_name=subj_name, output_dir_str=output_dir, raw_dir_str=self.raw_dir_var.get(),
                 unenriched_dir_str=self.unenriched_dir_var.get(), enriched_dir_str=self.enriched_dir_var.get(),
                 un_enriched_mode=self.unenriched_var.get(), run_yolo=self.yolo_var.get(),
                 selected_events=selected_event_names,
-                custom_event_path=str(events_output_path)
+                custom_event_path=str(modified_events_path) 
             )
             messagebox.showinfo("Success", f"Core analysis completed.\nResults in: {output_dir}")
         except Exception as e:
