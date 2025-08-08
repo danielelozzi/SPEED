@@ -52,48 +52,43 @@ jobs:
           fi
           pyinstaller --noconfirm $PYINSTALLER_FLAGS --windowed --name "SpeedAnalyzer" GUI.py
 
-      # 5. NUOVO: Comprimi l'eseguibile in un file .zip per la release
+      # 5. Package the executable into a .zip file for the release
       - name: Package the executable
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
-            # Su Windows, l'eseguibile è in dist/SpeedAnalyzer.exe
+            # On Windows, the executable is dist/SpeedAnalyzer.exe
             7z a ${{ matrix.asset_name }} ./dist/SpeedAnalyzer.exe
           else
-            # Su macOS, l'eseguibile è una cartella .app in dist/
+            # On macOS, the executable is a .app folder in dist/
             cd dist
             zip -r ../${{ matrix.asset_name }} ./SpeedAnalyzer.app
             cd ..
           fi
 
-      # 6. NUOVO: Carica il file .zip come artifact per il prossimo job
+      # 6. Upload the packaged executable as an artifact for the next job
       - name: Upload packaged executable
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
           path: ${{ matrix.asset_name }}
 
-  # -------------------------------------------------------------------
-  # NUOVO JOB: Questo job si occupa di creare la release
-  # -------------------------------------------------------------------
+  # This job creates the release
   release:
     name: Create GitHub Release
-    # Esegui questo job solo dopo che tutti i build sono stati completati con successo
     needs: build
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Scarica tutti gli artifact (i file .zip) creati dal job di build
+      # 1. Download all artifacts (the .zip files) created by the build job
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts # Scarica tutto nella cartella 'artifacts'
+          path: artifacts
 
-      # 2. Usa un'azione specializzata per creare la release e caricare i file
+      # 2. Use a specialized action to create the release and upload the files
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
-          # Il corpo della release può contenere note. Qui usiamo il nome e il messaggio del tag.
-          body_path: ${{ github.event.head_commit.message }}
-          # Prende tutti i file .zip dalla cartella dove li abbiamo scaricati e li carica
+          # This action automatically uses the annotated tag's message as the release body
           files: artifacts/**/*.zip
