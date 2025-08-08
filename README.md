@@ -5,6 +5,8 @@
 SPEED is a Python-based tool with a graphical user interface (GUI) for processing, analyzing, and visualizing eye-tracking data from cognitive and behavioral experiments.
 This version also supports GPU acceleration.
 
+The release version is available for [MacOS and for Windows](https://github.com/danielelozzi/SPEED/releases/tag/v3.5)
+
 ## The Modular Workflow
 
 SPEED v3.5 operates on a two-step workflow designed to save time and computational resources.
