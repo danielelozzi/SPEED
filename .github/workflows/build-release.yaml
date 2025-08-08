@@ -5,7 +5,7 @@ name: Build and Release Executables
 on:
   push:
     tags:
-      - 'v*' # Triggers every time you create and publish a tag starting with "v" (e.g., v3.1, v3.1.1, etc.)
+      - 'v*' # Triggers every time you create and publish a tag starting with "v"
 
 # Jobs to run
 jobs:
@@ -17,6 +17,11 @@ jobs:
     strategy:
       matrix:
         os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            asset_name: SpeedAnalyzer-windows.zip
+          - os: macos-latest
+            asset_name: SpeedAnalyzer-macos.zip
 
     # Steps that make up the job
     steps:
@@ -36,31 +41,59 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4. Run PyInstaller to create the executable with OS-specific flags
+      # 4. Run PyInstaller to create the executable
       - name: Build with PyInstaller
-        # **CORREZIONE**: Aggiunta questa riga per forzare l'uso della shell Bash anche su Windows
         shell: bash
         run: |
-          # Set the correct build flag based on the operating system
-          # --onefile for Windows, --onedir for macOS .app bundles
           if [ "$RUNNER_OS" == "Windows" ]; then
             PYINSTALLER_FLAGS="--onefile"
           else
             PYINSTALLER_FLAGS="--onedir"
           fi
+          pyinstaller --noconfirm $PYINSTALLER_FLAGS --windowed --name "SpeedAnalyzer" GUI.py
 
-          pyinstaller --noconfirm $PYINSTALLER_FLAGS --windowed --name "SpeedAnalyzer" \
-          --hidden-import "pandas" \
-          --hidden-import "seaborn" \
-          --hidden-import "ultralytics.utils" \
-          --hidden-import "pkg_resources.extern" \
-          GUI.py
+      # 5. NUOVO: Comprimi l'eseguibile in un file .zip per la release
+      - name: Package the executable
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            # Su Windows, l'eseguibile è in dist/SpeedAnalyzer.exe
+            7z a ${{ matrix.asset_name }} ./dist/SpeedAnalyzer.exe
+          else
+            # Su macOS, l'eseguibile è una cartella .app in dist/
+            cd dist
+            zip -r ../${{ matrix.asset_name }} ./SpeedAnalyzer.app
+            cd ..
+          fi
 
-      # 5. Upload the result (the executable or .app folder) as an "artifact"
-      - name: Upload Artifact
+      # 6. NUOVO: Carica il file .zip come artifact per il prossimo job
+      - name: Upload packaged executable
         uses: actions/upload-artifact@v4
         with:
-          # The artifact name will be "SpeedAnalyzer-windows-latest" or "SpeedAnalyzer-macos-latest"
-          name: SpeedAnalyzer-${{ matrix.os }}
-          # The folder to upload, which contains the compiled file or .app directory
-          path: dist/
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+
+  # -------------------------------------------------------------------
+  # NUOVO JOB: Questo job si occupa di creare la release
+  # -------------------------------------------------------------------
+  release:
+    name: Create GitHub Release
+    # Esegui questo job solo dopo che tutti i build sono stati completati con successo
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Scarica tutti gli artifact (i file .zip) creati dal job di build
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts # Scarica tutto nella cartella 'artifacts'
+
+      # 2. Usa un'azione specializzata per creare la release e caricare i file
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          # Il corpo della release può contenere note. Qui usiamo il nome e il messaggio del tag.
+          body_path: ${{ github.event.head_commit.message }}
+          # Prende tutti i file .zip dalla cartella dove li abbiamo scaricati e li carica
+          files: artifacts/**/*.zip
