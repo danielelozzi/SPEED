@@ -60,7 +60,6 @@ def generate_videos():
     writer_int = cv2.VideoWriter(str(int_video_path), fourcc, FPS, (200, 200))
     
     surface_corners = []
-    # **NUOVO**: Dizionario per memorizzare le traiettorie degli oggetti YOLO
     object_paths = {1: [], 2: []} # track_id 1 e 2
 
     logging.info("Generating external.mp4 and internal.mp4...")
@@ -114,10 +113,21 @@ def generate_csv_data(surface_corners_df):
     events_df = pd.DataFrame({
         'timestamp [ns]': timestamps[event_indices],
         'name': [f'Event_{chr(65+i)}' for i in range(NUM_EVENTS)],
-        'recording id': ['rec_001'] * NUM_EVENTS
+        'recording id': ['rec_001'] * NUM_EVENTS,
+        'source': ['default'] * NUM_EVENTS # NUOVO: Aggiunge la fonte
     })
     events_df.to_csv(unenriched_dir / 'events.csv', index=False)
 
+    # NUOVO: Crea anche un file modified_events.csv per simulare l'output dell'editor
+    logging.info("Generating modified_events.csv to simulate editor output...")
+    modified_events_df = events_df.copy()
+    modified_events_df.loc[0, 'name'] = 'Edited_Event_A' # Simula una modifica
+    modified_events_df = modified_events_df.drop(1) # Simula una rimozione
+    new_event_ts = timestamps[random.randint(100, NUM_FRAMES - 100)]
+    new_event = pd.DataFrame([{'timestamp [ns]': new_event_ts, 'name': 'Manually_Added_Event', 'recording id': 'rec_001', 'source': 'manual'}])
+    modified_events_df = pd.concat([modified_events_df, new_event], ignore_index=True).sort_values('timestamp [ns]')
+    modified_events_df.to_csv(OUTPUT_DIR / 'modified_events.csv', index=False)
+    
     logging.info("Generating behavioral data (gaze, fixations, saccades, blinks)...")
     gaze_data, pupil_data, blinks_data, saccades_data, fixations_data = [], [], [], [], []
     fix_id, sac_id, blink_id = 0, 0, 0
@@ -198,63 +208,12 @@ def generate_csv_data(surface_corners_df):
     
     logging.info("All input CSV files have been generated.")
 
-# --- 6. **NUOVO**: FUNZIONE PER SIMULARE L'OUTPUT DI YOLO ---
-def generate_yolo_simulation_data(object_paths):
-    """
-    Genera i file di output che SPEED creerebbe dopo un'analisi YOLO.
-    Questi file vanno nella cartella di output principale, non nelle sottocartelle di input.
-    """
-    logging.info("Generating simulated YOLO analysis output files...")
-    
-    # Mappa delle classi fittizie
-    class_map = {0: 'red_ball', 1: 'green_square'}
-    
-    # 1. Creare yolo_detections_cache.csv
-    detections = []
-    for frame_idx in tqdm(range(NUM_FRAMES), desc="Simulating YOLO Detections"):
-        for track_id, path_data in object_paths.items():
-            obj = path_data[frame_idx]
-            cx, cy, r = obj['center_x'], obj['center_y'], obj['radius']
-            class_id = 0 if track_id == 1 else 1 # Assegna class_id
-            detections.append({
-                'frame_idx': frame_idx, 'track_id': track_id, 'class_id': class_id,
-                'x1': cx - r, 'y1': cy - r, 'x2': cx + r, 'y2': cy + r
-            })
-    detections_df = pd.DataFrame(detections)
-    detections_df.to_csv(OUTPUT_DIR / 'yolo_detections_cache.csv', index=False)
-
-    # 2. Creare class_id_map.csv
-    id_map_data = [
-        {'track_id': 1, 'class_id': 0, 'class_name': 'red_ball', 'instance_name': 'red_ball_1'},
-        {'track_id': 2, 'class_id': 1, 'class_name': 'green_square', 'instance_name': 'green_square_2'}
-    ]
-    pd.DataFrame(id_map_data).to_csv(OUTPUT_DIR / 'class_id_map.csv', index=False)
-
-    # 3. Creare stats_per_class.csv e stats_per_instance.csv (con dati fittizi)
-    stats_class = [
-        {'class': 'red_ball', 'n_fixations': 120, 'normalized_fixation_count': 0.045, 'avg_pupil_diameter_mm': 4.1, 'total_frames_detected': NUM_FRAMES},
-        {'class': 'green_square', 'n_fixations': 95, 'normalized_fixation_count': 0.035, 'avg_pupil_diameter_mm': 4.3, 'total_frames_detected': NUM_FRAMES}
-    ]
-    stats_instance = [
-        {'instance': 'red_ball_1', 'n_fixations': 120, 'normalized_fixation_count': 0.045, 'avg_pupil_diameter_mm': 4.1, 'total_frames_detected': NUM_FRAMES},
-        {'instance': 'green_square_2', 'n_fixations': 95, 'normalized_fixation_count': 0.035, 'avg_pupil_diameter_mm': 4.3, 'total_frames_detected': NUM_FRAMES}
-    ]
-    pd.DataFrame(stats_class).to_csv(OUTPUT_DIR / 'stats_per_class.csv', index=False)
-    pd.DataFrame(stats_instance).to_csv(OUTPUT_DIR / 'stats_per_instance.csv', index=False)
-    
-    logging.info("Simulated YOLO output files created successfully.")
 
 if __name__ == "__main__":
     logging.info("--- Starting Synthetic Data Generation ---")
     try:
-        # La generazione video ora restituisce le traiettorie degli oggetti
         surface_df, object_paths = generate_videos()
-        
-        # Genera tutti i file CSV di input
         generate_csv_data(surface_df)
-        
-        # **NUOVO**: Genera i file di output della simulazione YOLO
-        generate_yolo_simulation_data(object_paths)
 
         logging.info("="*60)
         logging.info("SYNTHETIC DATA GENERATION COMPLETE!")
@@ -267,9 +226,11 @@ if __name__ == "__main__":
         logging.info(f"   - RAW Data Folder:      {raw_dir.resolve()}")
         logging.info(f"   - Un-enriched Folder:   {unenriched_dir.resolve()}")
         logging.info(f"   - Enriched Folder:      {enriched_dir.resolve()}")
-        logging.info("3. **NON eseguire 'RUN CORE ANALYSIS'** (a meno che tu non voglia sovrascrivere i dati).")
-        logging.info("4. Puoi passare direttamente a 'Generate Plots', 'Generate Videos' o 'YOLO Results'.")
-        logging.info("   - Per i risultati YOLO, vai alla scheda 6 e clicca 'Load/Refresh YOLO Results'.")
+        logging.info("3. Gli eventi di default (`events.csv`) verranno caricati automaticamente.")
+        logging.info("4. Clicca su 'Edit on Video'. Vedrai gli eventi e potrai modificarli.")
+        logging.info("5. Dopo aver salvato, un file `modified_events.csv` verrà creato in `synthetic_data_output`.")
+        logging.info("6. Esegui 'RUN CORE ANALYSIS'. L'analisi userà automaticamente `modified_events.csv`.")
+        logging.info("7. Procedi con la generazione di plot e video come al solito.")
         logging.info("="*60)
 
     except Exception as e:
