@@ -37,8 +37,9 @@ jobs:
           pip install -r requirements.txt
 
       # 4. Run PyInstaller to create the executable with OS-specific flags
-      # NOTA: I passaggi per scaricare e includere yolov8n.pt sono stati rimossi.
       - name: Build with PyInstaller
+        # **CORREZIONE**: Aggiunta questa riga per forzare l'uso della shell Bash anche su Windows
+        shell: bash
         run: |
           # Set the correct build flag based on the operating system
           # --onefile for Windows, --onedir for macOS .app bundles
