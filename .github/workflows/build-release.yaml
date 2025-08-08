@@ -1,22 +1,20 @@
-# Nome del workflow che apparirà nella sezione "Actions" di GitHub
+# Nome del workflow
 name: Build and Release Executables
 
-# Attivazione: quando far partire il workflow
+# Attivazione
 on:
   push:
     tags:
-      - 'v*' # Si attiva ogni volta che carichi un tag che inizia con "v"
+      - 'v*'
 
-# NUOVO: Concedi i permessi di scrittura per creare la release
+# PERMESSI: Questa è la correzione cruciale
 permissions:
   contents: write
 
 # Lavori da eseguire
 jobs:
   build:
-    # Nome del lavoro, dinamico in base al sistema operativo
     name: Build on ${{ matrix.os }}
-    # Sistema operativo su cui eseguire il lavoro
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -26,26 +24,17 @@ jobs:
             asset_name: SpeedAnalyzer-windows.zip
           - os: macos-latest
             asset_name: SpeedAnalyzer-macos.zip
-
-    # Passaggi che compongono il lavoro
     steps:
-      # 1. Scarica il codice del repository sulla macchina virtuale
       - name: Checkout code
         uses: actions/checkout@v4
-
-      # 2. Imposta la versione di Python specificata
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      # 3. Installa tutte le dipendenze dal file requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      # 4. Esegui PyInstaller per creare l'eseguibile
       - name: Build with PyInstaller
         shell: bash
         run: |
@@ -55,45 +44,32 @@ jobs:
             PYINSTALLER_FLAGS="--onedir"
           fi
           pyinstaller --noconfirm $PYINSTALLER_FLAGS --windowed --name "SpeedAnalyzer" GUI.py
-
-      # 5. Comprimi l'eseguibile in un file .zip per la release
       - name: Package the executable
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
-            # Su Windows, l'eseguibile è dist/SpeedAnalyzer.exe
             7z a ${{ matrix.asset_name }} ./dist/SpeedAnalyzer.exe
           else
-            # Su macOS, l'eseguibile è una cartella .app in dist/
             cd dist
             zip -r ../${{ matrix.asset_name }} ./SpeedAnalyzer.app
             cd ..
           fi
-
-      # 6. Carica l'eseguibile compresso come "artifact" per il lavoro successivo
       - name: Upload packaged executable
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
           path: ${{ matrix.asset_name }}
 
-  # Questo lavoro si occupa di creare la Release su GitHub
   release:
     name: Create GitHub Release
-    # Esegui questo lavoro solo dopo che tutti i build sono stati completati
     needs: build
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Scarica tutti gli artifact (.zip) creati dal lavoro di build
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      # 2. Usa un'azione specializzata per creare la Release e caricare i file
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
-          # L'azione usa automaticamente il messaggio del tag come descrizione della release
           files: artifacts/**/*.zip
