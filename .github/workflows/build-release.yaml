@@ -1,18 +1,18 @@
-# Workflow name that will appear in the GitHub "Actions" section
+# Nome del workflow che apparirà nella sezione "Actions" di GitHub
 name: Build and Release Executables
 
-# Trigger: when to start the workflow
+# Attivazione: quando far partire il workflow
 on:
   push:
     tags:
-      - 'v*' # Triggers every time you create and publish a tag starting with "v"
+      - 'v*' # Si attiva ogni volta che carichi un tag che inizia con "v"
 
-# Jobs to run
+# Lavori da eseguire
 jobs:
   build:
-    # Job name, which will be dynamic based on the operating system
+    # Nome del lavoro, dinamico in base al sistema operativo
     name: Build on ${{ matrix.os }}
-    # Operating system to run the job on (Windows and macOS)
+    # Sistema operativo su cui eseguire il lavoro
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -23,25 +23,25 @@ jobs:
           - os: macos-latest
             asset_name: SpeedAnalyzer-macos.zip
 
-    # Steps that make up the job
+    # Passaggi che compongono il lavoro
     steps:
-      # 1. Checkout the repository code onto the virtual machine
+      # 1. Scarica il codice del repository sulla macchina virtuale
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Set up the specified Python version
+      # 2. Imposta la versione di Python specificata
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      # 3. Install all project dependencies from the requirements.txt file
+      # 3. Installa tutte le dipendenze dal file requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4. Run PyInstaller to create the executable
+      # 4. Esegui PyInstaller per creare l'eseguibile
       - name: Build with PyInstaller
         shell: bash
         run: |
@@ -52,43 +52,44 @@ jobs:
           fi
           pyinstaller --noconfirm $PYINSTALLER_FLAGS --windowed --name "SpeedAnalyzer" GUI.py
 
-      # 5. Package the executable into a .zip file for the release
+      # 5. Comprimi l'eseguibile in un file .zip per la release
       - name: Package the executable
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
-            # On Windows, the executable is dist/SpeedAnalyzer.exe
+            # Su Windows, l'eseguibile è dist/SpeedAnalyzer.exe
             7z a ${{ matrix.asset_name }} ./dist/SpeedAnalyzer.exe
           else
-            # On macOS, the executable is a .app folder in dist/
+            # Su macOS, l'eseguibile è una cartella .app in dist/
             cd dist
             zip -r ../${{ matrix.asset_name }} ./SpeedAnalyzer.app
             cd ..
           fi
 
-      # 6. Upload the packaged executable as an artifact for the next job
+      # 6. Carica l'eseguibile compresso come "artifact" per il lavoro successivo
       - name: Upload packaged executable
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
           path: ${{ matrix.asset_name }}
 
-  # This job creates the release
+  # Questo lavoro si occupa di creare la Release su GitHub
   release:
     name: Create GitHub Release
+    # Esegui questo lavoro solo dopo che tutti i build sono stati completati
     needs: build
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Download all artifacts (the .zip files) created by the build job
+      # 1. Scarica tutti gli artifact (.zip) creati dal lavoro di build
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      # 2. Use a specialized action to create the release and upload the files
+      # 2. Usa un'azione specializzata per creare la Release e caricare i file
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
-          # This action automatically uses the annotated tag's message as the release body
+          # L'azione usa automaticamente il messaggio del tag come descrizione della release
           files: artifacts/**/*.zip
