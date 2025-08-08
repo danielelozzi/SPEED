@@ -7,6 +7,10 @@ on:
     tags:
       - 'v*' # Si attiva ogni volta che carichi un tag che inizia con "v"
 
+# NUOVO: Concedi i permessi di scrittura per creare la release
+permissions:
+  contents: write
+
 # Lavori da eseguire
 jobs:
   build:
