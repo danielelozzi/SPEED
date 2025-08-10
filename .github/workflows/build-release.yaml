@@ -47,7 +47,6 @@ jobs:
           else
             PYINSTALLER_FLAGS="--onedir"
           fi
-          # NOTA: il percorso al file GUI è corretto
           pyinstaller --noconfirm $PYINSTALLER_FLAGS --windowed --name "SpeedApp" ./desktop_app/GUI.py
 
       - name: Package the executable
@@ -59,7 +58,7 @@ jobs:
             cd dist
             zip -r ../${{ matrix.asset_name }} ./SpeedApp.app
             cd ..
-          fi # <-- ECCO LA CORREZIONE: Aggiunto 'fi' per chiudere il blocco if
+          fi
 
       - name: Upload packaged executable
         uses: actions/upload-artifact@v4
@@ -77,4 +76,8 @@ jobs:
         with:
           path: artifacts
       - name: Create Release and Upload Assets
-        uses: softprops/action-gh-release@
+        # --- ECCO LA CORREZIONE ---
+        # Ho aggiunto la versione @v2 all'azione
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
