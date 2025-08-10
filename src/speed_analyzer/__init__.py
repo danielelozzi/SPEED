@@ -6,10 +6,11 @@ import shutil
 import logging
 from typing import Optional, Dict
 
-# Importa i moduli di analisi dalla sottocartella
-from .analysis_modules import speed_script_events
-from .analysis_modules import yolo_analyzer
-from .analysis_modules import video_generator
+# --- MODIFICA CHIAVE QUI ---
+# Usiamo import assoluti dal nome del package per evitare ambiguità.
+from speed_analyzer.analysis_modules import speed_script_events
+from speed_analyzer.analysis_modules import yolo_analyzer
+from speed_analyzer.analysis_modules import video_generator
 
 # Esporta la funzione principale per renderla accessibile con "from speed_analyzer import run_full_analysis"
 __all__ = ["run_full_analysis"]

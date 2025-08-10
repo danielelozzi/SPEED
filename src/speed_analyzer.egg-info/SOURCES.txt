@@ -1,0 +1,12 @@
+LICENSE
+README.md
+setup.py
+src/speed_analyzer/__init__.py
+src/speed_analyzer/speed_script_events.py
+src/speed_analyzer/video_generator.py
+src/speed_analyzer/yolo_analyzer.py
+src/speed_analyzer.egg-info/PKG-INFO
+src/speed_analyzer.egg-info/SOURCES.txt
+src/speed_analyzer.egg-info/dependency_links.txt
+src/speed_analyzer.egg-info/requires.txt
+src/speed_analyzer.egg-info/top_level.txt

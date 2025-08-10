@@ -2,9 +2,9 @@
 import pandas as pd
 from pathlib import Path
 
-# Per far funzionare questo esempio in locale, assicurati di aver
-# installato il package con: pip install -e .
-from src.speed_analyzer import run_full_analysis
+# --- MODIFICA CHIAVE QUI ---
+# Ora che il package è installato, l'import è diretto, senza 'src'.
+from speed_analyzer import run_full_analysis
 
 # --- 1. IMPOSTA I PERCORSI E I PARAMETRI ---
 BASE_PATH = Path("./synthetic_data_output")
@@ -42,5 +42,9 @@ try:
         generate_video=True, video_options=video_config
     )
     print(f"\nAnalisi completata con successo! Risultati in: {risultati_path}")
+except FileNotFoundError as e:
+    print(f"\nERRORE: Un file o una cartella necessari non sono stati trovati. Controlla i percorsi.")
+    print(f"Dettagli: {e}")
 except Exception as e:
-    print(f"\nERRORE durante l'analisi: {e}")
+    print(f"\nSi è verificato un errore inaspettato durante l'analisi.")
+    print(f"Dettagli: {e}")
