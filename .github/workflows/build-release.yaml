@@ -1,38 +1,44 @@
-name: Build, Release and Publish
+# Nome del workflow
+name: Build and Release Executables
 
+# Attivazione
 on:
   push:
     tags:
       - 'v*'
 
+# Permessi di scrittura per la release
 permissions:
   contents: write
 
+# Lavori da eseguire
 jobs:
-  # --- JOB 1: Build degli eseguibili per la release ---
-  build_executables:
-    name: Build Executable on ${{ matrix.os }}
+  build:
+    name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [windows-latest, macos-latest]
         include:
           - os: windows-latest
-            asset_name: SpeedApp-v${{ github.ref_name }}.windows.zip
+            asset_name: SpeedApp-windows.zip
           - os: macos-latest
-            asset_name: SpeedApp-v${{ github.ref_name }}.macos.zip
+            asset_name: SpeedApp-macos.zip
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
       - name: Build with PyInstaller
         shell: bash
         run: |
@@ -41,8 +47,9 @@ jobs:
           else
             PYINSTALLER_FLAGS="--onedir"
           fi
-          # NOTA: il percorso al file GUI è cambiato
+          # NOTA: il percorso al file GUI è corretto
           pyinstaller --noconfirm $PYINSTALLER_FLAGS --windowed --name "SpeedApp" ./desktop_app/GUI.py
+
       - name: Package the executable
         shell: bash
         run: |
@@ -52,16 +59,17 @@ jobs:
             cd dist
             zip -r ../${{ matrix.asset_name }} ./SpeedApp.app
             cd ..
-      - name: Upload artifact for release
+          fi # <-- ECCO LA CORREZIONE: Aggiunto 'fi' per chiudere il blocco if
+
+      - name: Upload packaged executable
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
           path: ${{ matrix.asset_name }}
 
-  # --- JOB 2: Crea la Release su GitHub ---
-  create_release:
+  release:
     name: Create GitHub Release
-    needs: build_executables
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -69,26 +77,4 @@ jobs:
         with:
           path: artifacts
       - name: Create Release and Upload Assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/**/*.zip
-
-  # --- JOB 3: Pubblica il Package su PyPI ---
-  publish_package:
-    name: Publish Python Package to PyPI
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Install build dependencies
-        run: python -m pip install build
-      - name: Build package
-        run: python -m build
-      - name: Publish package to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+        uses: softprops/action-gh-release@
