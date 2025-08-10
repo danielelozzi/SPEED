@@ -1,4 +1,3 @@
-# src/speed_analyzer/__init__.py
 import pandas as pd
 from pathlib import Path
 import json
@@ -7,10 +6,11 @@ import logging
 from typing import Optional, Dict
 
 # --- MODIFICA CHIAVE QUI ---
-# Usiamo import assoluti dal nome del package per evitare ambiguità.
-from speed_analyzer.analysis_modules import speed_script_events
-from speed_analyzer.analysis_modules import yolo_analyzer
-from speed_analyzer.analysis_modules import video_generator
+# Usiamo import relativi (con il punto davanti) che è lo standard per i package.
+# Questo dice a Python: "dalla cartella in cui mi trovo, importa il modulo analysis_modules".
+from .analysis_modules import speed_script_events
+from .analysis_modules import yolo_analyzer
+from .analysis_modules import video_generator
 
 # Esporta la funzione principale per renderla accessibile con "from speed_analyzer import run_full_analysis"
 __all__ = ["run_full_analysis"]
