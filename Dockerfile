@@ -7,8 +7,8 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # 3. Copia i file necessari per l'installazione del package
-# Copiamo prima i file di configurazione per sfruttare la cache di Docker
-COPY setup.py requirements.txt ./
+# --- ECCO LA CORREZIONE: Aggiunto README.md alla lista ---
+COPY setup.py requirements.txt README.md ./
 
 # 4. Installa le dipendenze definite nel requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt

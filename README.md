@@ -67,6 +67,44 @@ run_full_analysis(
 
 ---
 
+## 3. Docker Container (For Maximum Reproducibility)
+
+To ensure maximum scientific reproducibility and to eliminate any issues with installation or dependencies, we provide a pre-configured Docker image that contains the exact environment to run the `speed-analyzer` package.
+
+### Prerequisites
+You must have **Docker Desktop** installed on your computer. You can download it for free from the [official Docker website](https://www.docker.com/products/docker-desktop/).
+
+### How to Use the Docker Image
+
+1.  **Pull the Image (Download)**:
+    Open a terminal and run this command to download the latest version of the image from the GitHub Container Registry (GHCR).
+    ```bash
+    docker pull ghcr.io/danielelozzi/speed:latest
+    ```
+
+2.  **Run the Analysis**:
+    To launch an analysis, you need to use the `docker run` command. The most important part is to "mount" your local folders (containing the data and where to save the results) inside the container.
+
+    Here is a complete example. Replace the `/path/to/...` placeholders with the actual absolute paths on your computer.
+    ```bash
+    docker run --rm \
+      -v "/path/to/your/RAW/folder:/data/raw" \
+      -v "/path/to/your/un-enriched/folder:/data/unenriched" \
+      -v "/path/to/your/output/folder:/output" \
+      ghcr.io/danielelozzi/speed:latest \
+      python -c "from speed_analyzer import run_full_analysis; run_full_analysis(raw_data_path='/data/raw', unenriched_data_path='/data/unenriched', output_path='/output', subject_name='docker_test')"
+    ```
+    
+    **Command Explanation:**
+    * `docker run --rm`: Runs the container and automatically removes it when finished.
+    * `-v "/local/path:/container/path"`: The `-v` (volume) option creates a bridge between a folder on your computer and a folder inside the container. We are mapping your data folders into `/data/` and your output folder into `/output` inside the container.
+    * `ghcr.io/danielelozzi/speed:latest`: The name of the image to use.
+    * `python -c "..."`: The command that is executed inside the container. In this case, we launch a Python script that imports and runs your `run_full_analysis` function, using the paths *internal* to the container (`/data/`, `/output/`).
+
+This approach guarantees that your analysis is always executed in the same controlled environment, regardless of the host computer.
+
+---
+
 ## The Modular Workflow (GUI)
 SPEED v3.6 operates on a two-step workflow designed to save time and computational resources.
 
