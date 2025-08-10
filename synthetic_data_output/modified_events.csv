@@ -1,9 +1,0 @@
-timestamp [ns],name,recording id,source
-1754818100090179072,Edited_Event_A,rec_001,default
-1754818105790179072,Manually_Added_Event,rec_001,manual
-1754818111123512320,Event_C,rec_001,default
-1754818112073512448,Event_D,rec_001,default
-1754818115290179072,Event_E,rec_001,default
-1754818117073512448,Event_F,rec_001,default
-1754818120940178944,Event_G,rec_001,default
-1754818123856845824,Event_H,rec_001,default

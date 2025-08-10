@@ -1,2 +1,0 @@
-participant,event,n_fixation,fixation_avg_duration_ms,fixation_std_duration_ms,fixation_avg_x,fixation_std_x,fixation_avg_y,fixation_std_y,n_blink,blink_avg_duration_ms,n_saccade,saccade_avg_duration_ms,pupil_avg_mm,pupil_std_mm,fragmentation_avg_px_per_s,fragmentation_std_px_per_s
-synthetic_test_package,Conclusion_Start,31,1258.602165677419,373.27059860822914,0.5130796370967742,0.25466520925443176,0.45891577060931893,0.2753471840861093,4,225.0,31,153.22579406451612,4.027816028111019,0.5672903792149568,939.4619612726092,3295.9990347222492
