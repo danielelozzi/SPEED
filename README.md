@@ -1,15 +1,15 @@
-# SPEED v3.5 - labScoc Processing and Extraction of Eye tracking Data
+# SPEED v3.6 - labScoc Processing and Extraction of Eye tracking Data
 
 *An Advanced Eye-Tracking Data Analysis Software*
 
 SPEED is a Python-based tool with a graphical user interface (GUI) for processing, analyzing, and visualizing eye-tracking data from cognitive and behavioral experiments.
 This version also supports GPU acceleration.
 
-The release version is available for [MacOS and for Windows](https://github.com/danielelozzi/SPEED/releases/tag/v3.5)
+The release version is available for MacOS and for Windows
 
 ## The Modular Workflow
 
-SPEED v3.5 operates on a two-step workflow designed to save time and computational resources.
+SPEED v3.6 operates on a two-step workflow designed to save time and computational resources.
 
 **Step 1: Run Core Analysis**
 This is the main data processing stage. You run this step **only once** per participant for a given set of events. The software will:
