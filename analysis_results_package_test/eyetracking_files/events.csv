@@ -1,0 +1,4 @@
+name,timestamp [ns],recording id
+Intro_Start,1672531201000000000,rec_001
+Task_1_End,1672531215000000000,rec_001
+Conclusion_Start,1672531230000000000,rec_001
