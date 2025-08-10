@@ -5,8 +5,8 @@
 SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. Version 3.6 introduces a major restructuring, offering two distinct components:
 
 1.  **SPEED Desktop App**: A user-friendly GUI application for running a full analysis pipeline, designed for end-users and researchers.
-2.  **`speed-analyzer`**: A programmatic Python package for developers who want to integrate the analysis logic into their own scripts.
-   [![PyPI version](https://img.shields.io/pypi/v/speed-analyzer.svg)](https://pypi.org/project/speed-analyzer/)
+2.  **`speed-analyzer`**[![PyPI version](https://img.shields.io/pypi/v/speed-analyzer.svg)](https://pypi.org/project/speed-analyzer/): A programmatic Python package for developers who want to integrate the analysis logic into their own scripts.
+   
 
 
 This version also supports GPU acceleration for YOLO analysis.
