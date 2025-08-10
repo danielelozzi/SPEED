@@ -14,7 +14,7 @@ permissions:
 
 # Lavori da eseguire
 jobs:
-  # JOB 1: Build degli eseguibili per la release
+  # JOB 1: Build degli eseguibili (invariato)
   build_executables:
     name: Build Executable on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -62,7 +62,7 @@ jobs:
           name: ${{ matrix.asset_name }}
           path: ${{ matrix.asset_name }}
 
-  # JOB 2: Crea la Release su GitHub
+  # JOB 2: Crea la Release su GitHub (invariato)
   create_release:
     name: Create GitHub Release
     needs: build_executables
@@ -77,7 +77,7 @@ jobs:
         with:
           files: artifacts/**/*.zip
 
-  # JOB 3: Pubblica il Package su PyPI
+  # JOB 3: Pubblica il Package su PyPI (invariato)
   publish_package:
     name: Publish Python Package to PyPI
     runs-on: ubuntu-latest
@@ -118,6 +118,8 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          # --- ECCO LA CORREZIONE ---
+          # Forziamo il nome del repository in minuscolo.
           tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest
-            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/speed:latest
+            ghcr.io/${{ github.repository_owner }}/speed:${{ github.ref_name }}
