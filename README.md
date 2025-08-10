@@ -11,7 +11,7 @@ This version also supports GPU acceleration for YOLO analysis.
 
 ---
 
-## 1. SPEED Desktop Application (Per Utenti Finali)
+## 1. SPEED Desktop Application (For End Users)
 
 An application with a graphical user interface (GUI) for a complete, visually-driven analysis workflow.
 
@@ -22,7 +22,7 @@ An application with a graphical user interface (GUI) for a complete, visually-dr
 
 ---
 
-## 2. `speed-analyzer` (Package Python per Sviluppatori)
+## 2. `speed-analyzer` (Python Package for Developers)
 
 The core analysis engine of SPEED, now available as a reusable package. It's designed for automation and integration into custom data pipelines.
 
@@ -41,13 +41,13 @@ import pandas as pd
 from speed_analyzer import run_full_analysis
 
 # 1. Define paths and parameters
-raw_path = "./dati/raw"
-unenriched_path = "./dati/unenriched"
-output_path = "./risultati_analisi"
+raw_path = "./data/raw"
+unenriched_path = "./data/unenriched"
+output_path = "./analysis_results"
 
 # 2. Create an events DataFrame
 events_df = pd.DataFrame({
-    'name': ['Inizio_Task', 'Fine_Task'],
+    'name': ['Task_Start', 'Task_End'],
     'timestamp [ns]': [1672531201000000000, 1672531215000000000]
 })
 
@@ -89,7 +89,7 @@ After the core analysis is complete, you can use the dedicated tabs in the GUI t
 
 ---
 
-## Environment Setup (Per Sviluppo) ⚙️
+## Environment Setup (For Development) ⚙️
 To run the project from source or contribute to development, you'll need Python 3 and several libraries.
 
 1. **Install Anaconda**: [Link](https://www.anaconda.com/)
