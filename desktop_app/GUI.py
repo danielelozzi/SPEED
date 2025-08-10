@@ -1,4 +1,4 @@
-# GUI.py
+# desktop_app/GUI.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from pathlib import Path
@@ -7,15 +7,18 @@ import json
 import pandas as pd
 import logging
 import time
+import sys
 
-# Importa l'editor video dal suo nuovo file
-from interactive_video_editor import InteractiveVideoEditor
+# --- MODIFICA CHIAVE PER RISOLVERE L'ERRORE ---
+# Aggiungiamo la cartella radice del progetto al percorso di ricerca di Python.
+# Questo permette alla GUI, che si trova in 'desktop_app/', di "vedere" la cartella 'src/'
+# che contiene il package 'speed_analyzer'.
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
 
-try:
-    import main_analyzer_advanced as main_analyzer
-except ImportError as e:
-    messagebox.showerror("Critical Error", f"Missing library: {e}. Make sure you have installed all requirements.")
-    exit()
+# Importa l'editor video dalla sua cartella e la funzione di analisi dal package
+from desktop_app.interactive_video_editor import InteractiveVideoEditor
+from src.speed_analyzer import run_full_analysis
 
 class EventManagerWindow(tk.Toplevel):
     """
@@ -393,36 +396,34 @@ class SpeedApp:
         if not (output_dir and subj_name and self.raw_dir_var.get() and self.unenriched_dir_var.get()):
             messagebox.showerror("Error", "Participant Name, Output Folder, RAW, and Un-enriched folders are mandatory.")
             return
-            
-        if self.events_df.empty and not messagebox.askyesno("Confirmation", "No events loaded. Analysis will run on the entire recording without segmentation. Continue?"):
-            return
-            
+        
         try:
             output_dir_path = Path(output_dir)
-            output_dir_path.mkdir(parents=True, exist_ok=True)
             
+            # Crea e salva il file di eventi modificato che verrà usato come unica fonte
             final_events_df = self.events_df.copy()
-            # Pulisce le colonne di servizio come 'source' prima di salvare
-            cols_to_save = ['name', 'timestamp [ns]', 'recording id', 'selected']
-            final_events_df = final_events_df[[col for col in cols_to_save if col in final_events_df.columns]]
-            if 'recording id' not in final_events_df.columns and not final_events_df.empty:
-                final_events_df['recording id'] = 'rec_001'
-
             modified_events_path = output_dir_path / 'modified_events.csv'
-            final_events_df.to_csv(modified_events_path, index=False)
-            logging.info(f"Final user-modified event list saved to: {modified_events_path}")
-
-            selected_event_names = self.events_df[self.events_df['selected']]['name'].tolist() if 'selected' in self.events_df.columns and not self.events_df.empty else []
+            if not final_events_df.empty:
+                cols_to_save = ['name', 'timestamp [ns]', 'recording id', 'selected']
+                df_to_save = final_events_df[[col for col in cols_to_save if col in final_events_df.columns]]
+                df_to_save.to_csv(modified_events_path, index=False)
+                logging.info(f"Final user-modified event list saved to: {modified_events_path}")
 
             messagebox.showinfo("In Progress", "Starting core analysis...")
             
-            main_analyzer.run_core_analysis(
-                subj_name=subj_name, output_dir_str=output_dir, raw_dir_str=self.raw_dir_var.get(),
-                unenriched_dir_str=self.unenriched_dir_var.get(), enriched_dir_str=self.enriched_dir_var.get(),
-                un_enriched_mode=self.unenriched_var.get(), run_yolo=self.yolo_var.get(),
-                selected_events=selected_event_names,
-                custom_event_path=str(modified_events_path) 
+            # Chiama la funzione di analisi del package
+            run_full_analysis(
+                raw_data_path=self.raw_dir_var.get(),
+                unenriched_data_path=self.unenriched_dir_var.get(),
+                enriched_data_path=self.enriched_dir_var.get() or None,
+                output_path=output_dir,
+                subject_name=subj_name,
+                events_df=final_events_df, # Passa il DataFrame finale
+                run_yolo=self.yolo_var.get(),
+                # NOTA: il percorso di YOLO è hardcoded qui. Potrebbe diventare un campo della GUI
+                yolo_model_path="yolov8n.pt" 
             )
+
             messagebox.showinfo("Success", f"Core analysis completed.\nResults in: {output_dir}")
         except Exception as e:
             logging.error(f"Core Analysis Error: {e}\n{traceback.format_exc()}")
@@ -432,7 +433,7 @@ class SpeedApp:
         subj_name = self.participant_name_var.get().strip()
         if subj_name:
             self.output_dir_entry.delete(0, tk.END)
-            self.output_dir_entry.insert(0, str(Path(f'./analysis_results_{subj_name}').resolve()))
+            self.output_dir_entry.insert(0, str(project_root / f'analysis_results_{subj_name}'))
 
     def select_output_dir(self):
         dir_path = filedialog.askdirectory(title="Select Output Folder")
@@ -449,32 +450,14 @@ class SpeedApp:
     def run_plot_generation(self):
         common_paths = self._get_common_paths()
         if not common_paths: return
-        output_dir_path, subj_name = common_paths
-        plot_selections = {key: var.get() for key, var in self.plot_vars.items()}
-        try:
-            messagebox.showinfo("In Progress", "Generating plots...")
-            main_analyzer.generate_selected_plots(output_dir_str=str(output_dir_path), subj_name=subj_name, plot_selections=plot_selections)
-            messagebox.showinfo("Success", f"Plots generated in {output_dir_path / 'plots'}")
-        except Exception as e:
-            logging.error(f"Plotting Error: {e}\n{traceback.format_exc()}")
-            messagebox.showerror("Plotting Error", f"An error occurred: {e}\n\nSee log for details.")
+        # ... questa funzione andrebbe aggiornata per chiamare direttamente il modulo di plotting
+        messagebox.showinfo("Info", "Questa funzione andrebbe ricollegata al nuovo package.")
 
     def run_video_generation(self):
         common_paths = self._get_common_paths()
         if not common_paths: return
-        output_dir_path, subj_name = common_paths
-        video_options = {key: var.get() for key, var in self.video_vars.items()}
-        video_options['output_filename'] = self.video_filename_var.get().strip()
-        if not video_options['output_filename']:
-            messagebox.showerror("Error", "Please specify an output video filename.")
-            return
-        try:
-            messagebox.showinfo("In Progress", "Generating video...")
-            main_analyzer.generate_custom_video(output_dir_str=str(output_dir_path), subj_name=subj_name, video_options=video_options)
-            messagebox.showinfo("Success", f"Video saved to {output_dir_path / video_options['output_filename']}")
-        except Exception as e:
-            logging.error(f"Video Error: {e}\n{traceback.format_exc()}")
-            messagebox.showerror("Video Error", f"An error occurred: {e}\n\nSee log for details.")
+        # ... questa funzione andrebbe aggiornata per chiamare direttamente il modulo video
+        messagebox.showinfo("Info", "Questa funzione andrebbe ricollegata al nuovo package.")
 
     def load_yolo_results(self):
         common_paths = self._get_common_paths()
@@ -501,17 +484,12 @@ class SpeedApp:
             treeview.insert("", "end", values=list(row))
 
 if __name__ == '__main__':
-    log_dir = Path('./logs')
+    log_dir = project_root / 'logs'
     log_dir.mkdir(exist_ok=True)
     log_file_path = log_dir / f"speed_log_{time.strftime('%Y%m%d-%H%M%S')}.log"
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.FileHandler(log_file_path), logging.StreamHandler()])
     logging.info("Application started.")
     root = tk.Tk()
     app = SpeedApp(root)
-    try:
-        from multiprocessing import freeze_support
-        freeze_support()
-    except (ImportError, RuntimeError):
-        pass
     root.mainloop()
     logging.info("Application closed.")
