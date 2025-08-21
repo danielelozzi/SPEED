@@ -182,16 +182,16 @@ This tool is developed by the Cognitive and Behavioral Science Lab (LabSCoC), Un
 
 If you use this script in your research or work, please cite the following publications:
 
-- Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Ademaj, M.; Migliore, S.; Curcio, G. SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. NeuroSci 2025, 6, 35. https://doi.org/10.3390/neurosci6020035
-- Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Alemanno, M.; Krüger, M.; Curcio, G.; Migliore, S. AI-Powered Analysis of Eye Tracker Data in Basketball Game. Sensors 2025, 25, 3572. https://doi.org/10.3390/s25113572
+- Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Ademaj, M.; Migliore, S.; Curcio, G. SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. NeuroSci 2025, 6, 35. [https://doi.org/10.3390/neurosci6020035](https://doi.org/10.3390/neurosci6020035)
+- Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Alemanno, M.; Krüger, M.; Curcio, G.; Migliore, S. AI-Powered Analysis of Eye Tracker Data in Basketball Game. Sensors 2025, 25, 3572. [https://doi.org/10.3390/s25113572](https://doi.org/10.3390/s25113572)
 
-It is also requested to cite Pupil Labs publication, as requested on their website https://docs.pupil-labs.com/neon/data-collection/publication-and-citation/
+It is also requested to cite Pupil Labs publication, as requested on their website [https://docs.pupil-labs.com/neon/data-collection/publication-and-citation/](https://docs.pupil-labs.com/neon/data-collection/publication-and-citation/)
 
-- Baumann, C., & Dierkes, K. (2023). Neon accuracy test report. Pupil Labs, 10. https://doi.org/10.5281/zenodo.10420388
+- Baumann, C., & Dierkes, K. (2023). Neon accuracy test report. Pupil Labs, 10. [https://doi.org/10.5281/zenodo.10420388](https://doi.org/10.5281/zenodo.10420388)
 
 If you also use the Computer Vision YOLO-based feature, please cite the following publication:
 
-- Redmon, J., Divvala, S., Girshick, R., & Farhadi, A. (2016). You only look once: Unified, real-time object detection. In Proceedings of the IEEE conference on computer vision and pattern recognition (pp. 779-788). https://doi.org/10.1109/CVPR.2016.91
+- Redmon, J., Divvala, S., Girshick, R., & Farhadi, A. (2016). You only look once: Unified, real-time object detection. In Proceedings of the IEEE conference on computer vision and pattern recognition (pp. 779-788). [https://doi.org/10.1109/CVPR.2016.91](https://doi.org/10.1109/CVPR.2016.91)
 
 ---
 
