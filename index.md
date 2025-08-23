@@ -176,6 +176,7 @@ After the core analysis is complete, you can use the dedicated tabs in the GUI t
 - **Generate Plots**: Select which categories of plots you want to create.
 - **Generate Videos**: Compose highly customized videos with various overlays.
 - **View YOLO Results**: Load and view the quantitative results from the object detection.
+- **Normalized Switching Index (SI)**: Index for analyzing the switching component.
 - **Generate enriched data on-the-fly** if you defined a custom AOI.
 
 ---
