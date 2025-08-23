@@ -90,7 +90,7 @@ def _is_inside(px, py, x1, y1, x2, y2):
     """Checks if a point (px, py) is inside a bounding box (x1, y1, x2, y2)."""
     return x1 <= px <= x2 and y1 <= py <= y2
 
-def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str):
+def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str, model_path: str = 'yolov8n.pt'):
     """
     Runs YOLO object detection and tracking, correlates with gaze data, and saves statistics.
     MODIFIED: Also calculates and saves the Switching Index (SI) based on gaze transitions between tracked objects.
@@ -106,9 +106,9 @@ def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str):
 
     yolo_device = _get_yolo_device()
     try:
-        model = YOLO('yolov8n.pt')
+        model = YOLO(model_path)
     except Exception as e:
-        logging.error(f"Error loading YOLO model (yolov8n.pt): {e}. Skipping YOLO analysis.")
+        logging.error(f"Error loading YOLO model ({model_path}): {e}. Skipping YOLO analysis.")
         return
 
     try:

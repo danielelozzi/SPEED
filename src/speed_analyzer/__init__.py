@@ -165,7 +165,7 @@ def run_full_analysis(
     enriched_data_path: Optional[str] = None, events_df: Optional[pd.DataFrame] = None,
     run_yolo: bool = False, yolo_model_path: str = 'yolov8n.pt',
     generate_plots: bool = True, plot_selections: Optional[Dict[str, bool]] = None,
-    generate_video: bool = True, video_options: Optional[Dict] = None,
+    generate_video: bool = True, video_options: Optional[Dict[str, bool]] = None,
     aoi_coordinates: Optional[Dict[str, int]] = None,
     aoi_track_id: Optional[int] = None,
     aoi_keyframes: Optional[Dict[int, Any]] = None
