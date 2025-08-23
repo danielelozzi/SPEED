@@ -3,16 +3,13 @@ from setuptools import setup, find_packages
 
 setup(
     name="speed-analyzer",
-    version="3.6.0", # Ricorda di aggiornare la versione
+    version="3.7.0", # Versione aggiornata
     author="Daniele Lozzi, LabSCoC",
     description="A package for processing and extracting eye-tracking data.",
     long_description=open('README.md').read(),
     long_description_content_type="text/markdown",
 
-    # --- COLLEGAMENTO BASE ---
-    url="https://github.com/danielelozzi/SPEED", # URL principale del tuo repository
-
-    # --- COLLEGAMENTI AVANZATI (CONSIGLIATO) ---
+    url="https://github.com/danielelozzi/SPEED",
     project_urls={
         "Homepage": "https://github.com/danielelozzi/SPEED",
         "Source": "https://github.com/danielelozzi/SPEED",
@@ -29,6 +26,6 @@ setup(
     python_requires='>=3.10',
     install_requires=[
         "pandas", "numpy", "matplotlib", "opencv-python",
-        "scipy", "tqdm", "moviepy", "ultralytics"
+        "scipy", "tqdm", "moviepy", "ultralytics", "Pillow"
     ]
 )

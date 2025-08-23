@@ -1,15 +1,16 @@
-# SPEED v3.6 - Desktop App & Analysis Package
+# SPEED v3.7 - Desktop App & Analysis Package
 
 *An Advanced Eye-Tracking Data Analysis Software*
 
-SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. Version 3.6 introduces a major restructuring, offering two distinct components:
+SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. Version 3.7 introduces a major restructuring, offering two distinct components:
 
 1.  **SPEED Desktop App**: A user-friendly GUI application for running a full analysis pipeline, designed for end-users and researchers.
 2.  **`speed-analyzer`**[![PyPI version](https://img.shields.io/pypi/v/speed-analyzer.svg)](https://pypi.org/project/speed-analyzer/): A Python package for developers who want to integrate the analysis logic into their own scripts.
    
-
-
-This version also supports GPU acceleration for YOLO analysis.
+This version supports GPU acceleration for YOLO analysis and also offers three powerful AOI definition methods:
+1.  **Static AOI**: A fixed rectangle for stationary scenes.
+2.  **Dynamic AOI (Object Tracking)**: An AOI that automatically follows a selected object detected by YOLO.
+3.  **Dynamic AOI (Manual Keyframes)**: A user-defined AOI path created by setting its position and size at key moments in the video.
 
 ---
 
@@ -20,7 +21,12 @@ An application with a graphical user interface (GUI) for a complete, visually-dr
 ### How to Use the Application
 1.  **Download the latest version**: Go to the [Releases page](https://github.com/danielelozzi/SPEED/releases) and download the `.zip` file for your operating system (Windows or macOS).
 2.  **Extract and Run**: Unzip the file and run the `SpeedApp` executable.
-3.  **Follow the Instructions**: Use the interface to select your data folders (RAW, Un-enriched, etc.), manage events with the interactive editors, and run the analysis.
+3.  **Follow the Instructions**: 
+    - Use the interface to select your data folders (RAW, Un-enriched).
+    - If you do not provide an "Enriched" data folder, a **"Define AOI..."** button will become active.
+    - Click it to choose your preferred AOI method (Static, Dynamic Auto, or Dynamic Manual) and follow the on-screen instructions in the interactive editor.
+    - Manage events, run the analysis, and generate outputs as before.
+
 
 ---
 
@@ -31,7 +37,7 @@ The core analysis engine of SPEED, now available as a reusable package. It's des
 ### Installation from PyPI
 You can install the package directly from the Python Package Index (PyPI) using pip:
 ```bash
-pip install speed-analyzer
+pip install speed-analyzer==3.7.0
 ```
 ### How to Use the Package
 The package exposes a main function, `run_full_analysis`, that takes paths and options as arguments. See the `example_usage.py` file for a complete demonstration.
@@ -42,29 +48,50 @@ Here is a basic snippet:
 import pandas as pd
 from speed_analyzer import run_full_analysis
 
-# 1. Define paths and parameters
+ Define input and output paths
 raw_path = "./data/raw"
 unenriched_path = "./data/unenriched"
 output_path = "./analysis_results"
+subject_name = "participant_01"
+```
 
-# 2. Create an events DataFrame
-events_df = pd.DataFrame({
-    'name': ['Task_Start', 'Task_End'],
-    'timestamp [ns]': [1672531201000000000, 1672531215000000000]
-})
+**2. Choose Your AOI Strategy**
+The key step is to decide if you are using pre-existing enriched data or defining an AOI on-the-fly. If you don't provide an `enriched_data_path`, you can use one of the following programmatic options.
 
-# 3. Run the full analysis programmatically
+**Option A: Static AOI**
+For analyzing a fixed region in the video, define a dictionary with the rectangle's coordinates and pass it via the `aoi_coordinates` parameter.
+
+```python
+# Define a fixed rectangle (in pixels)
+static_aoi_coords = {'x1': 100, 'y1': 150, 'x2': 800, 'y2': 600}
+
+# Run the analysis
 run_full_analysis(
-    raw_data_path=raw_path,
-    unenriched_data_path=unenriched_path,
-    output_path=output_path,
-    subject_name="participant_01",
-    events_df=events_df,
-    run_yolo=True,
-    yolo_model_path="yolov8n.pt"
+    raw_data_path=str(raw_path),
+    unenriched_data_path=str(unenriched_path),
+    output_path=str(output_path),
+    subject_name=subject_name,
+    aoi_coordinates=static_aoi_coords
 )
 ```
 
+**Option B: Dynamic AOI with Object Tracking**
+To make the AOI follow a specific object, first run a YOLO analysis to identify the object's `track_id`. Then, pass this ID using the `aoi_track_id` parameter. This requires `run_yolo=True`.
+
+```python
+# Specify the track ID of the object to follow
+object_track_id = 1 
+
+# Run the analysis with YOLO tracking enabled
+run_full_analysis(
+    raw_data_path=str(raw_path),
+    unenriched_data_path=str(unenriched_path),
+    output_path=str(output_path),
+    subject_name=subject_name,
+    run_yolo=True,
+    aoi_track_id=object_track_id
+)
+```
 ---
 
 ## 3. Docker Container (For Maximum Reproducibility)
@@ -106,17 +133,19 @@ This approach guarantees that your analysis is always executed in the same contr
 ---
 
 ## The Modular Workflow (GUI)
-SPEED v3.6 operates on a two-step workflow designed to save time and computational resources.
+SPEED v3.7 operates on a two-step workflow designed to save time and computational resources.
 
 ### Step 1: Run Core Analysis
 This is the main data processing stage. You run this step only once per participant for a given set of events. The software will:
 
 - Load all necessary files from the specified input folders (RAW, Un-enriched, Enriched).
+- **If you don't have Enriched data**, use the **"Define AOI..."** feature to create it dynamically. This is the new, recommended workflow for analyzing specific parts of a video.
 - Dynamically load events from `events.csv` into the GUI, allowing you to select which events to analyze.
 - Segment the data based on your selection.
 - Calculate all relevant statistics for each selected segment.
 - Optionally run YOLO object detection on the video frames, saving the results to a cache to speed up future runs.
 - Save the processed data (e.g., filtered dataframes for each event) and summary statistics into the output folder.
+
 
 This step creates a `processed_data` directory containing intermediate files. Once this is complete, you do not need to run it again unless you want to analyze a different combination of events.
 
@@ -126,6 +155,7 @@ After the core analysis is complete, you can use the dedicated tabs in the GUI t
 - **Generate Plots**: Select which categories of plots you want to create.
 - **Generate Videos**: Compose highly customized videos with various overlays.
 - **View YOLO Results**: Load and view the quantitative results from the object detection.
+- **Generate enriched data on-the-fly** if you defined a custom AOI.
 
 ---
 

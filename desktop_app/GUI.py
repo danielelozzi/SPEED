@@ -11,13 +11,13 @@ import sys
 
 # --- MODIFICA CHIAVE PER RISOLVERE L'ERRORE ---
 # Aggiungiamo la cartella radice del progetto al percorso di ricerca di Python.
-# Questo permette alla GUI, che si trova in 'desktop_app/', di "vedere" la cartella 'src/'
-# che contiene il package 'speed_analyzer'.
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-# Importa l'editor video dalla sua cartella e la funzione di analisi dal package
+# Importa gli editor e la funzione di analisi
 from desktop_app.interactive_video_editor import InteractiveVideoEditor
+from desktop_app.aoi_editor import AoiEditor
+from desktop_app.manual_aoi_editor import ManualAoiEditor
 from src.speed_analyzer import run_full_analysis
 
 class EventManagerWindow(tk.Toplevel):
@@ -175,7 +175,7 @@ class EventManagerWindow(tk.Toplevel):
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v3.6")
+        self.root.title("SPEED v3.7")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
@@ -186,6 +186,11 @@ class SpeedApp:
         self.video_vars = {}
         self.events_df = pd.DataFrame()
         self.world_timestamps_df = pd.DataFrame()
+        
+        # --- NUOVO: Variabili per gestire l'AOI definita dall'utente ---
+        self.user_defined_aoi = None
+        self.user_defined_aoi_type = None
+
 
         self.canvas = tk.Canvas(root)
         self.scrollbar = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
@@ -214,18 +219,30 @@ class SpeedApp:
         folders_frame = tk.LabelFrame(main_frame, text="2. Input Folders", padx=10, pady=10)
         folders_frame.pack(fill=tk.X, pady=5, padx=10)
         self.unenriched_dir_var.trace_add("write", lambda *args: self.load_data_for_editors())
+        self.enriched_dir_var.trace_add("write", lambda *args: self.update_aoi_button_state())
+
         raw_frame = tk.Frame(folders_frame); raw_frame.pack(fill=tk.X, pady=2)
         tk.Label(raw_frame, text="RAW Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
         tk.Entry(raw_frame, textvariable=self.raw_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(raw_frame, text="Browse...", command=lambda: self.select_folder(self.raw_dir_var, "Select RAW Data Folder")).pack(side=tk.RIGHT)
+        
         unenriched_frame = tk.Frame(folders_frame); unenriched_frame.pack(fill=tk.X, pady=2)
         tk.Label(unenriched_frame, text="Un-enriched Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
         tk.Entry(unenriched_frame, textvariable=self.unenriched_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(unenriched_frame, text="Browse...", command=lambda: self.select_folder(self.unenriched_dir_var, "Select Un-enriched Data Folder")).pack(side=tk.RIGHT)
+        
         enriched_frame = tk.Frame(folders_frame); enriched_frame.pack(fill=tk.X, pady=2)
         tk.Label(enriched_frame, text="Enriched Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
         tk.Entry(enriched_frame, textvariable=self.enriched_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(enriched_frame, text="Browse...", command=lambda: self.select_folder(self.enriched_dir_var, "Select Enriched Data Folder")).pack(side=tk.RIGHT)
+        
+        # --- NUOVO: Sezione AOI ---
+        aoi_frame = tk.Frame(folders_frame)
+        aoi_frame.pack(fill=tk.X, pady=5)
+        self.aoi_status_label = tk.Label(aoi_frame, text="No Enriched data. You can define an AOI.", fg="blue")
+        self.aoi_status_label.pack(side=tk.LEFT, padx=5)
+        self.define_aoi_btn = tk.Button(aoi_frame, text="Define AOI...", command=self.open_aoi_editor, state=tk.DISABLED)
+        self.define_aoi_btn.pack(side=tk.RIGHT)
         
         # --- Sezione 2.5: Event Management ---
         event_frame = tk.LabelFrame(main_frame, text="2.5 Event Management", padx=10, pady=10)
@@ -246,13 +263,11 @@ class SpeedApp:
         self.edit_events_btn.pack(side=tk.RIGHT, padx=5)
 
         # --- Sezione 3: Analisi ---
-        analysis_frame = tk.LabelFrame(main_frame, text="3. Run Core Analysis", padx=10, pady=10)
+        analysis_frame = tk.LabelFrame(main_frame, text="3. Run Analysis", padx=10, pady=10)
         analysis_frame.pack(fill=tk.X, pady=5, padx=10)
-        self.unenriched_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(analysis_frame, text="Analyze un-enriched data only", variable=self.unenriched_var).pack(anchor='w')
         self.yolo_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (GPU Recommended)", variable=self.yolo_var).pack(anchor='w')
-        tk.Button(analysis_frame, text="RUN CORE ANALYSIS", command=self.run_core_analysis, font=('Helvetica', 10, 'bold'), bg='#c5e1a5').pack(pady=5)
+        tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (Required for Dynamic AOI, GPU Recommended)", variable=self.yolo_var).pack(anchor='w')
+        tk.Button(analysis_frame, text="RUN FULL ANALYSIS", command=self.run_full_analysis_wrapper, font=('Helvetica', 10, 'bold'), bg='#c5e1a5').pack(pady=5)
 
         # --- Sezioni 4, 5, 6 (Tabs) ---
         notebook = ttk.Notebook(main_frame)
@@ -263,6 +278,8 @@ class SpeedApp:
         self.setup_plot_tab(plot_tab)
         self.setup_video_tab(video_tab)
         self.setup_yolo_tab(yolo_tab)
+        
+        self.update_aoi_button_state()
         
     def _on_mousewheel(self, event):
         self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
@@ -304,6 +321,7 @@ class SpeedApp:
             self.external_event_file_var.set(filepath)
 
     def load_data_for_editors(self):
+        self.update_aoi_button_state()
         unenriched_path_str = self.unenriched_dir_var.get()
         ext_event_file_str = self.external_event_file_var.get()
         
@@ -390,7 +408,87 @@ class SpeedApp:
             self.update_event_summary_display()
             logging.info("Event list updated via video editor.")
 
-    def run_core_analysis(self):
+    def update_aoi_button_state(self):
+        unenriched_ok = Path(self.unenriched_dir_var.get()).is_dir()
+        enriched_present = Path(self.enriched_dir_var.get()).is_dir()
+        
+        if enriched_present:
+            self.define_aoi_btn.config(state=tk.DISABLED)
+            self.aoi_status_label.config(text="Enriched data folder provided.", fg="black")
+            self.user_defined_aoi = None # Reset if user selects an enriched folder
+            self.user_defined_aoi_type = None
+        elif unenriched_ok:
+            self.define_aoi_btn.config(state=tk.NORMAL)
+            if self.user_defined_aoi is not None:
+                if self.user_defined_aoi_type == 'static':
+                    self.aoi_status_label.config(text="Static AOI defined.", fg="green")
+                elif self.user_defined_aoi_type == 'dynamic_auto':
+                     self.aoi_status_label.config(text=f"Dynamic AOI (Track ID: {self.user_defined_aoi}) defined.", fg="green")
+                elif self.user_defined_aoi_type == 'dynamic_manual':
+                     self.aoi_status_label.config(text=f"Dynamic AOI ({len(self.user_defined_aoi)} Keyframes) defined.", fg="green")
+            else:
+                self.aoi_status_label.config(text="No Enriched data. You can define an AOI.", fg="blue")
+        else:
+            self.define_aoi_btn.config(state=tk.DISABLED)
+            self.aoi_status_label.config(text="Select Un-enriched folder to define an AOI.", fg="grey")
+
+    def open_aoi_editor(self):
+        # --- NUOVA FINESTRA DI SCELTA ---
+        choice_dialog = tk.Toplevel(self.root)
+        choice_dialog.title("Choose AOI Definition Method")
+        choice_dialog.geometry("450x200")
+        choice_dialog.transient(self.root)
+        choice_dialog.grab_set()
+        
+        tk.Label(choice_dialog, text="How would you like to define the Area of Interest?", pady=10).pack()
+        
+        aoi_mode = tk.StringVar(value="static")
+        
+        ttk.Radiobutton(choice_dialog, text="Static AOI (Fixed Rectangle)", variable=aoi_mode, value="static").pack(anchor='w', padx=20)
+        ttk.Radiobutton(choice_dialog, text="Dynamic AOI (Automatic Object Tracking)", variable=aoi_mode, value="dynamic_auto").pack(anchor='w', padx=20)
+        ttk.Radiobutton(choice_dialog, text="Dynamic AOI (Manual Keyframes)", variable=aoi_mode, value="dynamic_manual").pack(anchor='w', padx=20)
+
+        def on_proceed():
+            mode = aoi_mode.get()
+            choice_dialog.destroy()
+            self.launch_specific_aoi_editor(mode)
+
+        tk.Button(choice_dialog, text="Proceed", command=on_proceed, font=('Helvetica', 10, 'bold')).pack(pady=20)
+
+    def launch_specific_aoi_editor(self, mode):
+        try:
+            video_path = next(Path(self.unenriched_dir_var.get()).glob('*.mp4'))
+        except StopIteration:
+            messagebox.showerror("Error", "No .mp4 video file found in the Un-enriched folder.")
+            return
+
+        editor = None
+        if mode == 'static' or mode == 'dynamic_auto':
+            editor = AoiEditor(self.root, video_path)
+            # Pre-seleziona la modalità corretta
+            editor.mode_var.set(mode)
+            editor.update_ui_for_mode()
+        elif mode == 'dynamic_manual':
+            editor = ManualAoiEditor(self.root, video_path)
+
+        if editor:
+            self.root.wait_window(editor)
+            
+            if mode == 'static' or mode == 'dynamic_auto':
+                if editor.result is not None:
+                    self.user_defined_aoi = editor.result
+                    self.user_defined_aoi_type = editor.result_type
+                    logging.info(f"AOI defined: type='{self.user_defined_aoi_type}', data='{self.user_defined_aoi}'")
+            elif mode == 'dynamic_manual':
+                 if editor.saved_keyframes:
+                    self.user_defined_aoi = editor.saved_keyframes
+                    self.user_defined_aoi_type = 'dynamic_manual'
+                    logging.info(f"Manual AOI defined with {len(self.user_defined_aoi)} keyframes.")
+
+            self.update_aoi_button_state()
+
+
+    def run_full_analysis_wrapper(self):
         output_dir = self.output_dir_entry.get().strip()
         subj_name = self.participant_name_var.get().strip()
         if not (output_dir and subj_name and self.raw_dir_var.get() and self.unenriched_dir_var.get()):
@@ -399,34 +497,40 @@ class SpeedApp:
         
         try:
             output_dir_path = Path(output_dir)
-            
-            # Crea e salva il file di eventi modificato che verrà usato come unica fonte
             final_events_df = self.events_df.copy()
-            modified_events_path = output_dir_path / 'modified_events.csv'
             if not final_events_df.empty:
                 cols_to_save = ['name', 'timestamp [ns]', 'recording id', 'selected']
                 df_to_save = final_events_df[[col for col in cols_to_save if col in final_events_df.columns]]
+                modified_events_path = output_dir_path / 'modified_events.csv'
                 df_to_save.to_csv(modified_events_path, index=False)
                 logging.info(f"Final user-modified event list saved to: {modified_events_path}")
 
-            messagebox.showinfo("In Progress", "Starting core analysis...")
+            messagebox.showinfo("In Progress", "Starting full analysis...")
             
-            # Chiama la funzione di analisi del package
+            # --- NUOVO: Passa i parametri AOI alla funzione di analisi ---
+            aoi_params = {}
+            if self.user_defined_aoi_type == 'static':
+                aoi_params['aoi_coordinates'] = self.user_defined_aoi
+            elif self.user_defined_aoi_type == 'dynamic_auto':
+                aoi_params['aoi_track_id'] = self.user_defined_aoi
+            elif self.user_defined_aoi_type == 'dynamic_manual':
+                aoi_params['aoi_keyframes'] = self.user_defined_aoi
+
             run_full_analysis(
                 raw_data_path=self.raw_dir_var.get(),
                 unenriched_data_path=self.unenriched_dir_var.get(),
                 enriched_data_path=self.enriched_dir_var.get() or None,
                 output_path=output_dir,
                 subject_name=subj_name,
-                events_df=final_events_df, # Passa il DataFrame finale
+                events_df=final_events_df,
                 run_yolo=self.yolo_var.get(),
-                # NOTA: il percorso di YOLO è hardcoded qui. Potrebbe diventare un campo della GUI
-                yolo_model_path="yolov8n.pt" 
+                yolo_model_path="yolov8n.pt",
+                **aoi_params # Passa i parametri AOI
             )
 
-            messagebox.showinfo("Success", f"Core analysis completed.\nResults in: {output_dir}")
+            messagebox.showinfo("Success", f"Full analysis completed.\nResults in: {output_dir}")
         except Exception as e:
-            logging.error(f"Core Analysis Error: {e}\n{traceback.format_exc()}")
+            logging.error(f"Full Analysis Error: {e}\n{traceback.format_exc()}")
             messagebox.showerror("Analysis Error", f"An error occurred: {e}\n\nSee log for details.")
 
     def update_output_dir_default(self, *args):
@@ -450,13 +554,11 @@ class SpeedApp:
     def run_plot_generation(self):
         common_paths = self._get_common_paths()
         if not common_paths: return
-        # ... questa funzione andrebbe aggiornata per chiamare direttamente il modulo di plotting
         messagebox.showinfo("Info", "Questa funzione andrebbe ricollegata al nuovo package.")
 
     def run_video_generation(self):
         common_paths = self._get_common_paths()
         if not common_paths: return
-        # ... questa funzione andrebbe aggiornata per chiamare direttamente il modulo video
         messagebox.showinfo("Info", "Questa funzione andrebbe ricollegata al nuovo package.")
 
     def load_yolo_results(self):
@@ -466,10 +568,10 @@ class SpeedApp:
         try:
             class_csv = output_dir_path / 'stats_per_class.csv'
             if class_csv.exists(): self._populate_treeview(self.class_treeview, pd.read_csv(class_csv))
-            else: messagebox.showinfo("Info", "stats_per_class.csv not found. Run Core Analysis with YOLO enabled.")
+            else: messagebox.showinfo("Info", "stats_per_class.csv not found. Run Analysis with YOLO enabled.")
             instance_csv = output_dir_path / 'stats_per_instance.csv'
             if instance_csv.exists(): self._populate_treeview(self.instance_treeview, pd.read_csv(instance_csv))
-            else: messagebox.showinfo("Info", "stats_per_instance.csv not found. Run Core Analysis with YOLO enabled.")
+            else: messagebox.showinfo("Info", "stats_per_instance.csv not found. Run Analysis with YOLO enabled.")
         except Exception as e:
             logging.error(f"Could not read YOLO results: {e}")
             messagebox.showerror("Read Error", f"Could not read YOLO results: {e}")
