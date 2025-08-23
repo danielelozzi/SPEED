@@ -8,6 +8,7 @@ import pandas as pd
 import logging
 import time
 import sys
+import webbrowser # Aggiunto per aprire il link
 
 # --- MODIFICA CHIAVE PER RISOLVERE L'ERRORE ---
 # Aggiungiamo la cartella radice del progetto al percorso di ricerca di Python.
@@ -191,16 +192,26 @@ class SpeedApp:
         self.user_defined_aoi = None
         self.user_defined_aoi_type = None
 
+        # --- MODIFICATO: Setup della scrollbar ---
+        main_container = tk.Frame(root)
+        main_container.pack(fill=tk.BOTH, expand=True)
 
-        self.canvas = tk.Canvas(root)
-        self.scrollbar = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
+        self.canvas = tk.Canvas(main_container)
+        self.v_scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=self.canvas.yview)
+        self.h_scrollbar = ttk.Scrollbar(main_container, orient="horizontal", command=self.canvas.xview)
         self.scrollable_frame = ttk.Frame(self.canvas)
+
         self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        
+        self.canvas.configure(yscrollcommand=self.v_scrollbar.set, xscrollcommand=self.h_scrollbar.set)
+        
+        self.v_scrollbar.pack(side="right", fill="y")
+        self.h_scrollbar.pack(side="bottom", fill="x")
         self.canvas.pack(side="left", fill="both", expand=True)
-        self.scrollbar.pack(side="right", fill="y")
+
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        
         main_frame = self.scrollable_frame
 
         # --- Sezione 1: Setup ---
@@ -279,7 +290,24 @@ class SpeedApp:
         self.setup_video_tab(video_tab)
         self.setup_yolo_tab(yolo_tab)
         
+        # --- MODIFICATO: Aggiunta del footer ---
+        footer_frame = tk.Frame(root, pady=5)
+        footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        footer_label_part1 = tk.Label(footer_frame, text="Developed by Dr. Daniele Lozzi & the ", font=('Helvetica', 9))
+        footer_label_part1.pack(side=tk.LEFT, padx=(10, 0))
+
+        footer_link = tk.Label(footer_frame, text="LabSCoC team", font=('Helvetica', 9, 'underline'), fg="blue", cursor="hand2")
+        footer_link.pack(side=tk.LEFT)
+        footer_link.bind("<Button-1>", lambda e: self.open_github())
+        
+        footer_label_part2 = tk.Label(footer_frame, text=" at the University of L'Aquila.", font=('Helvetica', 9))
+        footer_label_part2.pack(side=tk.LEFT)
+        
         self.update_aoi_button_state()
+
+    def open_github(self):
+        webbrowser.open_new(r"https://github.com/danielelozzi/SPEED")
         
     def _on_mousewheel(self, event):
         self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
