@@ -1,0 +1,1 @@
+aggiugnere scan path dynamics yolo e per le definizioni di multiple aoi statiche e dinamiche
