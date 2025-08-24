@@ -1,211 +1,227 @@
-# desktop_app/manual_aoi_editor.py
-import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
-import cv2
-from PIL import Image, ImageTk
+import pandas as pd
+from pathlib import Path
+import json
+import shutil
+import logging
 import numpy as np
+from typing import Optional, Dict, Any, List
 
-class ManualAoiEditor(tk.Toplevel):
+from .analysis_modules import speed_script_events
+from .analysis_modules import yolo_analyzer
+from .analysis_modules import video_generator
+
+__all__ = ["run_full_analysis"]
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- NUOVA SEZIONE: Logica per la generazione di dati Enriched da AOI Multiple ---
+
+def _generate_enriched_from_multiple_aois(
+    unenriched_dir: Path,
+    new_enriched_dir: Path,
+    aois: List[Dict[str, Any]],
+    analysis_output_dir: Path
+):
     """
-    Una finestra di editor avanzata per definire un'AOI dinamica
-    impostando manualmente dei keyframe sulla timeline del video.
+    Genera file enriched mappando i dati di sguardo su una lista di AOI definite.
+    Crea una colonna 'aoi_name' che identifica in quale AOI si trova lo sguardo.
     """
-    def __init__(self, parent, video_path):
-        super().__init__(parent)
-        self.title("Manual Dynamic AOI Editor (Keyframes)")
-        self.geometry("1000x800")
-        self.transient(parent)
-        self.grab_set()
+    logging.info(f"Generating enriched data from {len(aois)} user-defined AOIs.")
 
-        if not video_path or not video_path.exists():
-            messagebox.showerror("Error", f"Video file not found:\n{video_path}", parent=self)
-            self.destroy()
-            return
+    # Carica i dati base
+    gaze_df = pd.read_csv(unenriched_dir / 'gaze.csv')
+    fixations_df = pd.read_csv(unenriched_dir / 'fixations.csv')
+    world_ts = pd.read_csv(unenriched_dir / 'world_timestamps.csv')
+    world_ts['frame_idx'] = world_ts.index
 
-        self.cap = cv2.VideoCapture(str(video_path))
-        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS) if self.cap.get(cv2.CAP_PROP_FPS) > 0 else 30
-        
-        self.video_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.video_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
-        # Store keyframes: {frame_index: (x1, y1, x2, y2)}
-        self.keyframes = {}
-        self.saved_keyframes = None
-        self.aoi_name = None # NUOVO: Nome per l'AOI
+    yolo_detections = pd.DataFrame()
+    yolo_cache_path = analysis_output_dir / 'yolo_detections_cache.csv'
+    if yolo_cache_path.exists():
+        yolo_detections = pd.read_csv(yolo_cache_path)
 
-        # Drawing state
-        self.rect = None
-        self.start_x = None
-        self.start_y = None
-        self.current_frame_idx = 0
-        self.is_updating = False
+    # Pre-calcola le posizioni di tutte le AOI per ogni frame
+    aoi_positions_per_frame = {}
+    for i, aoi in enumerate(aois):
+        aoi_name = aoi['name']
+        aoi_type = aoi['type']
+        aoi_data = aoi['data']
 
-        # --- GUI Setup ---
-        main_frame = tk.Frame(self)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        if aoi_type == 'static':
+            coords = aoi_data
+            aoi_positions_per_frame[aoi_name] = pd.DataFrame({
+                'frame_idx': world_ts['frame_idx'],
+                'x1': coords['x1'], 'y1': coords['y1'], 'x2': coords['x2'], 'y2': coords['y2']
+            }).set_index('frame_idx')
 
-        self.video_canvas = tk.Canvas(main_frame)
-        self.video_canvas.pack(pady=10)
-        self.video_canvas.bind("<ButtonPress-1>", self.on_button_press)
-        self.video_canvas.bind("<B1-Motion>", self.on_mouse_drag)
-        self.video_canvas.bind("<ButtonRelease-1>", self.on_button_release)
+        elif aoi_type == 'dynamic_auto':
+            track_id = aoi_data
+            if yolo_detections.empty:
+                raise FileNotFoundError("YOLO cache not found, cannot process dynamic AOI.")
 
-        self.timeline_canvas = tk.Canvas(main_frame, height=60, bg='lightgrey')
-        self.timeline_canvas.pack(fill=tk.X, padx=10, side=tk.BOTTOM)
-        self.timeline_canvas.bind("<Button-1>", self.handle_timeline_click)
+            tracked_obj = yolo_detections[yolo_detections['track_id'] == track_id].set_index('frame_idx')
+            if tracked_obj.empty:
+                raise ValueError(f"Track ID {track_id} for AOI '{aoi_name}' not found in detections.")
 
-        controls_frame = tk.Frame(main_frame)
-        controls_frame.pack(fill=tk.X, padx=10, side=tk.BOTTOM)
-        
-        self.frame_scale = ttk.Scale(controls_frame, from_=0, to=self.total_frames - 1, orient=tk.HORIZONTAL, command=self.seek_frame)
-        self.frame_scale.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=5)
-        self.time_label = tk.Label(controls_frame, text="Frame: 0 / 0", width=20)
-        self.time_label.pack(side=tk.RIGHT, padx=5)
+            # Unisci con world_timestamps per avere una riga per ogni frame, riempiendo i vuoti
+            full_track = world_ts.join(tracked_obj, on='frame_idx').fillna(method='ffill')
+            aoi_positions_per_frame[aoi_name] = full_track[['x1', 'y1', 'x2', 'y2']]
 
-        action_frame = tk.Frame(main_frame)
-        action_frame.pack(side=tk.BOTTOM, pady=10)
-        tk.Button(action_frame, text="Set/Update Keyframe", command=self.set_keyframe, bg='#c8e6c9').pack(side=tk.LEFT, padx=10)
-        tk.Button(action_frame, text="Remove Keyframe", command=self.remove_keyframe, bg='#ffcdd2').pack(side=tk.LEFT, padx=10)
-        tk.Button(action_frame, text="Save & Close", command=self.save_and_close, font=('Helvetica', 10, 'bold')).pack(side=tk.RIGHT, padx=10)
-        
-        self.update_frame(0)
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        elif aoi_type == 'dynamic_manual':
+            keyframes = aoi_data
+            kf_frames = np.array(list(keyframes.keys()))
+            kf_coords = np.array(list(keyframes.values()))
+            all_frames = np.arange(len(world_ts))
+            interp_coords = np.zeros((len(world_ts), 4))
+            for j in range(4):
+                interp_coords[:, j] = np.interp(all_frames, kf_frames, kf_coords[:, j])
 
-    def on_close(self):
-        self.cap.release()
-        self.destroy()
+            aoi_positions_per_frame[aoi_name] = pd.DataFrame(interp_coords, columns=['x1', 'y1', 'x2', 'y2'])
 
-    def seek_frame(self, frame_idx_str):
-        if self.is_updating: return
-        self.update_frame(int(float(frame_idx_str)))
-
-    def update_frame(self, frame_idx):
-        if self.is_updating: return
-        self.is_updating = True
-
-        self.current_frame_idx = max(0, min(int(frame_idx), self.total_frames - 1))
-        self.frame_scale.set(self.current_frame_idx)
-        self.time_label.config(text=f"Frame: {self.current_frame_idx} / {self.total_frames}")
-
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame_idx)
-        ret, frame = self.cap.read()
-        if ret:
-            self.display_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            self.display_image.thumbnail((900, 650))
-            
-            self.img_display_width, self.img_display_height = self.display_image.size
-            self.scale_x = self.video_width / self.img_display_width
-            self.scale_y = self.video_height / self.img_display_height
-
-            self.photo = ImageTk.PhotoImage(image=self.display_image)
-            self.video_canvas.config(width=self.img_display_width, height=self.img_display_height)
-            self.video_canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
-            
-            self.draw_current_rect()
-            self.draw_timeline()
-
-        self.is_updating = False
-
-    def draw_current_rect(self):
-        self.video_canvas.delete("rect")
-        
-        if self.current_frame_idx in self.keyframes:
-            coords = self.keyframes[self.current_frame_idx]
-            display_coords = (coords[0] / self.scale_x, coords[1] / self.scale_y, 
-                              coords[2] / self.scale_x, coords[3] / self.scale_y)
-            self.video_canvas.create_rectangle(display_coords, outline='green', width=2, tags="rect")
-        else:
-            prev_frames = [f for f in self.keyframes if f < self.current_frame_idx]
-            next_frames = [f for f in self.keyframes if f > self.current_frame_idx]
-            
-            if prev_frames and next_frames:
-                prev_f = max(prev_frames)
-                next_f = min(next_frames)
-                
-                factor = (self.current_frame_idx - prev_f) / (next_f - prev_f)
-                
-                prev_coords = np.array(self.keyframes[prev_f])
-                next_coords = np.array(self.keyframes[next_f])
-                
-                interp_coords = prev_coords + (next_coords - prev_coords) * factor
-                
-                display_coords = (interp_coords[0] / self.scale_x, interp_coords[1] / self.scale_y,
-                                  interp_coords[2] / self.scale_x, interp_coords[3] / self.scale_y)
-                self.video_canvas.create_rectangle(display_coords, outline='yellow', dash=(4, 2), width=2, tags="rect")
-
-    def draw_timeline(self):
-        self.timeline_canvas.delete("all")
-        canvas_width = self.timeline_canvas.winfo_width()
-        if canvas_width <= 1: return
-
-        for frame_idx in self.keyframes:
-            x_pos = (frame_idx / self.total_frames) * canvas_width
-            self.timeline_canvas.create_line(x_pos, 10, x_pos, 40, fill='green', width=2)
-            self.timeline_canvas.create_text(x_pos, 45, text=str(frame_idx), anchor=tk.N)
-
-        cursor_x = (self.current_frame_idx / self.total_frames) * canvas_width
-        self.timeline_canvas.create_line(cursor_x, 0, cursor_x, 60, fill='red', width=2)
-
-    def handle_timeline_click(self, event):
-        new_frame = int((event.x / self.timeline_canvas.winfo_width()) * self.total_frames)
-        self.update_frame(new_frame)
-
-    def on_button_press(self, event):
-        self.start_x = event.x
-        self.start_y = event.y
-        if self.rect:
-            self.video_canvas.delete(self.rect)
-        self.rect = self.video_canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline='red', width=2)
-
-    def on_mouse_drag(self, event):
-        cur_x, cur_y = (event.x, event.y)
-        self.video_canvas.coords(self.rect, self.start_x, self.start_y, cur_x, cur_y)
-
-    def on_button_release(self, event):
-        pass
-
-    def set_keyframe(self):
-        if not self.rect:
-            messagebox.showwarning("Warning", "Please draw a rectangle on the video first.", parent=self)
-            return
-        
-        coords = self.video_canvas.coords(self.rect)
-        original_coords = (
-            int(coords[0] * self.scale_x), int(coords[1] * self.scale_y),
-            int(coords[2] * self.scale_x), int(coords[3] * self.scale_y)
+    # Ora mappa ogni punto di sguardo/fissazione all'AOI corrispondente
+    def map_points_to_aois(points_df, timestamp_col):
+        points_df = pd.merge_asof(
+            points_df.sort_values(timestamp_col),
+            world_ts.sort_values('timestamp [ns]'),
+            left_on=timestamp_col,
+            right_on='timestamp [ns]'
         )
-        
-        x1 = min(original_coords[0], original_coords[2])
-        y1 = min(original_coords[1], original_coords[3])
-        x2 = max(original_coords[0], original_coords[2])
-        y2 = max(original_coords[1], original_coords[3])
 
-        self.keyframes[self.current_frame_idx] = (x1, y1, x2, y2)
-        self.video_canvas.delete(self.rect)
-        self.rect = None
-        self.draw_current_rect()
-        self.draw_timeline()
+        def find_aoi(row):
+            for aoi_name, positions in aoi_positions_per_frame.items():
+                try:
+                    aoi_pos = positions.loc[row['frame_idx']]
+                    x, y = row[f'{points_df.prefix} x [px]'], row[f'{points_df.prefix} y [px]']
+                    if pd.notna(x) and aoi_pos['x1'] <= x <= aoi_pos['x2'] and aoi_pos['y1'] <= y <= aoi_pos['y2']:
+                        return aoi_name
+                except (KeyError, IndexError):
+                    continue
+            return None
 
-    def remove_keyframe(self):
-        if self.current_frame_idx in self.keyframes:
-            if messagebox.askyesno("Confirm", f"Remove keyframe at frame {self.current_frame_idx}?", parent=self):
-                del self.keyframes[self.current_frame_idx]
-                self.draw_current_rect()
-                self.draw_timeline()
+        points_df.prefix = 'gaze' if 'gaze' in points_df.columns[1] else 'fixation'
+        points_df['aoi_name'] = points_df.apply(find_aoi, axis=1)
+        return points_df
+
+    enriched_gaze = map_points_to_aois(gaze_df.copy(), 'timestamp [ns]')
+    enriched_fixations = map_points_to_aois(fixations_df.copy(), 'start timestamp [ns]')
+
+    # Salva i file enriched
+    enriched_gaze.to_csv(new_enriched_dir / 'gaze_enriched.csv', index=False)
+    enriched_fixations.to_csv(new_enriched_dir / 'fixations_enriched.csv', index=False)
+    logging.info("Enriched data generation from multiple AOIs complete.")
+
+    return enriched_gaze # Restituisce per il calcolo SI
+
+def _prepare_working_directory(output_dir: Path, raw_dir: Path, unenriched_dir: Path, enriched_dir: Optional[Path], events_df: pd.DataFrame):
+    working_dir = output_dir / 'eyetracking_files'
+    working_dir.mkdir(parents=True, exist_ok=True)
+    logging.info(f"Preparing working directory at: {working_dir}")
+    try:
+        external_video_path = next(unenriched_dir.glob('*.mp4'))
+    except StopIteration:
+        raise FileNotFoundError(f"No .mp4 file found in {unenriched_dir}")
+    file_map = {
+        'internal.mp4': raw_dir / 'Neon Sensor Module v1 ps1.mp4',
+        'external.mp4': external_video_path,
+        'fixations.csv': unenriched_dir / 'fixations.csv',
+        'gaze.csv': unenriched_dir / 'gaze.csv',
+        'blinks.csv': unenriched_dir / 'blinks.csv',
+        'saccades.csv': unenriched_dir / 'saccades.csv',
+        '3d_eye_states.csv': unenriched_dir / '3d_eye_states.csv',
+        'world_timestamps.csv': unenriched_dir / 'world_timestamps.csv',
+    }
+    if enriched_dir:
+        # Per le AOI multiple, i file enriched ora sono diversi
+        if (enriched_dir / 'gaze_enriched.csv').exists():
+            file_map['gaze_enriched.csv'] = enriched_dir / 'gaze_enriched.csv'
+        if (enriched_dir / 'fixations_enriched.csv').exists():
+            file_map['fixations_enriched.csv'] = enriched_dir / 'fixations_enriched.csv'
+
+    for dest, source in file_map.items():
+        if source and source.exists():
+            shutil.copy(source, working_dir / dest)
         else:
-            messagebox.showinfo("Info", "The current frame is not a keyframe.", parent=self)
+            logging.warning(f"Optional file not found and not copied: {source}")
+    if not events_df.empty:
+        events_df.to_csv(working_dir / 'events.csv', index=False)
+    return working_dir
 
-    def save_and_close(self):
-        if len(self.keyframes) < 2:
-            messagebox.showerror("Error", "You must define at least two keyframes to create a dynamic AOI.", parent=self)
-            return
-            
-        # --- MODIFICATO: Chiedi il nome dell'AOI ---
-        aoi_name = simpledialog.askstring("AOI Name", "Enter a unique name for this AOI:", parent=self)
-        if not aoi_name:
-            return
+def run_full_analysis(
+    raw_data_path: str, unenriched_data_path: str, output_path: str, subject_name: str,
+    enriched_data_path: Optional[str] = None, events_df: Optional[pd.DataFrame] = None,
+    run_yolo: bool = False, yolo_model_path: str = 'yolov8n.pt',
+    generate_plots: bool = True, plot_selections: Optional[Dict[str, bool]] = None,
+    generate_video: bool = True, video_options: Optional[Dict[str, bool]] = None,
+    defined_aois: Optional[List[Dict[str, Any]]] = None
+) -> Path:
+    raw_dir = Path(raw_data_path)
+    unenriched_dir = Path(unenriched_data_path)
+    output_dir = Path(output_path)
+    enriched_dir = Path(enriched_data_path) if enriched_data_path else None
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.aoi_name = aoi_name
-        self.saved_keyframes = dict(sorted(self.keyframes.items()))
-        self.on_close()
+    un_enriched_mode = not bool(enriched_dir) and not bool(defined_aois)
+    enriched_gaze_df = pd.DataFrame()
+
+    if events_df is None:
+        logging.info("No events DataFrame provided, loading 'events.csv' from un-enriched folder.")
+        events_file = unenriched_dir / 'events.csv'
+        events_df = pd.read_csv(events_file) if events_file.exists() else pd.DataFrame()
+
+    # Esegui YOLO prima se necessario per le AOI dinamiche
+    if run_yolo or (defined_aois and any(aoi['type'] == 'dynamic_auto' for aoi in defined_aois)):
+        logging.info("--- STARTING YOLO ANALYSIS ---")
+        yolo_analyzer.run_yolo_analysis(
+            data_dir=unenriched_dir, output_dir=output_dir, subj_name=subject_name
+        )
+        logging.info("--- YOLO ANALYSIS COMPLETE ---")
+
+    if defined_aois:
+        un_enriched_mode = False
+        enriched_dir = output_dir / 'enriched_from_AOIs'
+        enriched_dir.mkdir(exist_ok=True)
+        enriched_gaze_df = _generate_enriched_from_multiple_aois(unenriched_dir, enriched_dir, defined_aois, output_dir)
+
+    working_dir = _prepare_working_directory(output_dir, raw_dir, unenriched_dir, enriched_dir, events_df)
+    selected_event_names = events_df['name'].tolist() if not events_df.empty else []
+
+    # --- NUOVO: Calcolo Switching Index ---
+    if defined_aois and len(defined_aois) >= 2 and not enriched_gaze_df.empty:
+        logging.info("--- CALCULATING SWITCHING INDEX ---")
+        yolo_analyzer.calculate_switching_index_from_gaze(
+            enriched_gaze_df, output_dir, subject_name
+        )
+        logging.info("--- SWITCHING INDEX CALCULATION COMPLETE ---")
+
+
+    logging.info(f"--- STARTING CORE ANALYSIS FOR {subject_name} ---")
+    speed_script_events.run_analysis(
+        subj_name=subject_name, data_dir_str=str(working_dir), output_dir_str=str(output_dir),
+        un_enriched_mode=un_enriched_mode, selected_events=selected_event_names
+    )
+    logging.info("--- CORE ANALYSIS COMPLETE ---")
+
+    if generate_plots:
+        logging.info("--- STARTING PLOT GENERATION ---")
+        if plot_selections is None:
+            plot_selections = { "path_plots": True, "heatmaps": True, "histograms": True, "pupillometry": True, "advanced_timeseries": True, "fragmentation": True }
+        config = {"unenriched_mode": un_enriched_mode, "source_folders": {"unenriched": str(unenriched_dir)}}
+        with open(output_dir / 'config.json', 'w') as f: json.dump(config, f)
+        speed_script_events.generate_plots_on_demand(
+            output_dir_str=str(output_dir), subj_name=subject_name,
+            plot_selections=plot_selections, un_enriched_mode=un_enriched_mode
+        )
+        logging.info("--- PLOT GENERATION COMPLETE ---")
+
+    if generate_video:
+        logging.info("--- STARTING VIDEO GENERATION ---")
+        if video_options is None:
+            video_options = { "output_filename": f"video_output_{subject_name}.mp4", "overlay_gaze": True, "overlay_event_text": True }
+        video_generator.create_custom_video(
+            data_dir=working_dir, output_dir=output_dir, subj_name=subject_name,
+            options=video_options, un_enriched_mode=un_enriched_mode,
+            selected_events=selected_event_names
+        )
+        logging.info("--- VIDEO GENERATION COMPLETE ---")
+
+    logging.info(f"Analysis complete. Results saved in: {output_dir.resolve()}")
+    return output_dir

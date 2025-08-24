@@ -44,22 +44,28 @@ def _calculate_switching_index(v_sequence_len: int, total_gaze_points: int) -> f
 def calculate_switching_index_from_gaze(enriched_gaze_df: pd.DataFrame, output_dir: Path, subj_name: str):
     """
     Funzione principale per calcolare lo SI da un dataframe di sguardi già mappato su AOI.
+    MODIFIED: Always creates the output file, even if no gaze is mapped to AOIs.
     """
-    if 'aoi_name' not in enriched_gaze_df.columns or enriched_gaze_df['aoi_name'].dropna().empty:
-        logging.warning("No gaze points were mapped to any AOI. Skipping Switching Index calculation.")
-        return
-
     logging.info("Calculating AOI sequence (V_G) and Switching Index (SI_G)...")
     
-    # 1. Calcola la sequenza V (V_Gaze)
-    v_gaze_sequence = _calculate_aoi_sequence(enriched_gaze_df['aoi_name'])
-    
-    # 2. Calcola lo Switching Index (SI_Gaze)
-    k_gaze = len(v_gaze_sequence)
+    # Initialize default values
+    v_gaze_sequence = []
+    k_gaze = 0
     l_in_gaze = len(enriched_gaze_df.dropna(subset=['gaze x [px]']))
-    si_gaze = _calculate_switching_index(k_gaze, l_in_gaze)
-    
-    # 3. Salva i risultati
+    si_gaze = 0.0
+
+    if 'aoi_name' in enriched_gaze_df.columns and not enriched_gaze_df['aoi_name'].dropna().empty:
+        # 1. Calcola la sequenza V (V_Gaze)
+        v_gaze_sequence = _calculate_aoi_sequence(enriched_gaze_df['aoi_name'])
+        
+        # 2. Calcola lo Switching Index (SI_Gaze)
+        k_gaze = len(v_gaze_sequence)
+        si_gaze = _calculate_switching_index(k_gaze, l_in_gaze)
+        logging.info(f"Switching Index analysis complete. SI_G = {si_gaze:.4f}")
+    else:
+        logging.warning("No gaze points were mapped to any manually defined AOI. Switching Index is 0.")
+
+    # 3. Salva i risultati, SEMPRE
     si_results = {
         'participant': subj_name,
         'total_gaze_points_analyzed (L_in)': l_in_gaze,
@@ -69,8 +75,7 @@ def calculate_switching_index_from_gaze(enriched_gaze_df: pd.DataFrame, output_d
     }
     pd.DataFrame([si_results]).to_csv(output_dir / 'switching_index_results.csv', index=False)
     
-    logging.info(f"Switching Index analysis complete. SI_G = {si_gaze:.4f}")
-    logging.info(f"Results saved to: {output_dir / 'switching_index_results.csv'}")
+    logging.info(f"Results for manually defined AOIs saved to: {output_dir / 'switching_index_results.csv'}")
 
 
 # --- FUNZIONI DI ANALISI YOLO ---
@@ -118,6 +123,7 @@ def _is_inside(px, py, x1, y1, x2, y2):
 def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str):
     """
     Runs YOLO object detection, correlates with fixations, and saves statistics.
+    MODIFIED: Always calculates Switching Index based on detected objects as AOIs.
     """
     if YOLO is None:
         logging.warning("Skipping YOLO analysis because Ultralytics is not installed.")
@@ -136,7 +142,7 @@ def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str):
         return
 
     try:
-        synced_et_data_fix, _ = _load_and_sync_data(data_dir)
+        synced_et_data_fix, synced_et_data_gaze = _load_and_sync_data(data_dir)
     except Exception as e:
         logging.error(f"Error loading/syncing eye-tracking data for YOLO: {e}. Skipping YOLO analysis.")
         return
@@ -183,43 +189,85 @@ def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str):
         cap.release()
         pbar.close()
         
-        if not detections:
-            logging.warning("No objects detected by YOLO. Skipping correlation.")
-            return
-
         detections_df = pd.DataFrame(detections)
         logging.info(f"Saving YOLO detections to cache at: {yolo_cache_path}")
         detections_df.to_csv(yolo_cache_path, index=False)
 
-    logging.info("Correlating detections with fixations...")
-    merged_df_fix = pd.merge(detections_df, synced_et_data_fix, left_on='frame_idx', right_on='frame', how='inner')
-    fixation_hits = [row for _, row in merged_df_fix.iterrows() if pd.notna(row['fixation x [px]']) and _is_inside(row['fixation x [px]'], row['fixation y [px]'], row['x1'], row['y1'], row['x2'], row['y2'])]
+    # --- INIZIA LA LOGICA DI ANALISI ---
+    # Crea sempre i file di output, anche se vuoti.
+    stats_instance_df = pd.DataFrame(columns=['instance', 'n_fixations', 'normalized_fixation_count', 'avg_pupil_diameter_mm', 'total_frames_detected'])
+    stats_class_df = pd.DataFrame(columns=['class', 'n_fixations', 'normalized_fixation_count', 'avg_pupil_diameter_mm', 'total_frames_detected'])
+    id_map_df = pd.DataFrame(columns=['track_id', 'class_id', 'class_name', 'instance_name'])
+
+    if not detections_df.empty:
+        logging.info("Correlating detections with fixations...")
+        merged_df_fix = pd.merge(detections_df, synced_et_data_fix, left_on='frame_idx', right_on='frame', how='inner')
+        fixation_hits = [row for _, row in merged_df_fix.iterrows() if pd.notna(row['fixation x [px]']) and _is_inside(row['fixation x [px]'], row['fixation y [px]'], row['x1'], row['y1'], row['x2'], row['y2'])]
+        
+        if fixation_hits:
+            hits_df = pd.DataFrame(fixation_hits)
+            logging.info("Calculating statistics for fixations...")
+            class_map = {int(k): v for k, v in model.names.items()}
+            hits_df['class_name'] = hits_df['class_id'].map(class_map)
+            
+            stats_instance = hits_df.groupby('instance_name').agg(
+                n_fixations=('fixation id', 'nunique'),
+                avg_pupil_diameter_mm=('pupil diameter left [mm]', 'mean')
+            ).reset_index()
+            
+            total_detections_instance = detections_df.groupby('instance_name').size().reset_index(name='total_frames_detected')
+            stats_instance = pd.merge(stats_instance, total_detections_instance, on='instance_name')
+            stats_instance['normalized_fixation_count'] = stats_instance['n_fixations'] / stats_instance['total_frames_detected']
+            
+            stats_class = hits_df.groupby('class_name').agg(
+                n_fixations=('fixation id', 'nunique'),
+                avg_pupil_diameter_mm=('pupil diameter left [mm]', 'mean')
+            ).reset_index()
+
+            total_detections_class = detections_df.groupby('class_name').size().reset_index(name='total_frames_detected')
+            stats_class = pd.merge(stats_class, total_detections_class, on='class_name')
+            stats_class['normalized_fixation_count'] = stats_class['n_fixations'] / stats_class['total_frames_detected']
+            
+            id_map_df = hits_df[['track_id', 'class_id', 'class_name', 'instance_name']].drop_duplicates()
+            logging.info("Fixation-based statistics calculated.")
+        else:
+            logging.warning("No fixations were found inside any detected object bounding boxes.")
+    else:
+        logging.warning("No objects were detected by YOLO.")
+
+    stats_instance_df.to_csv(output_dir / 'stats_per_instance.csv', index=False)
+    stats_class_df.to_csv(output_dir / 'stats_per_class.csv', index=False)
+    id_map_df.to_csv(output_dir / 'class_id_map.csv', index=False)
+
+    # --- CALCOLO DELLO SWITCHING INDEX (SEMPRE ESEGUITO CON YOLO) ---
+    logging.info("Correlating detections with gaze data for Switching Index calculation...")
+    merged_df_gaze = pd.merge(detections_df, synced_et_data_gaze, left_on='frame_idx', right_on='frame', how='inner')
     
-    if fixation_hits:
-        hits_df = pd.DataFrame(fixation_hits)
-        logging.info("Calculating statistics for fixations...")
-        class_map = {int(k): v for k, v in model.names.items()}
-        hits_df['class_name'] = hits_df['class_id'].map(class_map)
-        detections_df['class_name'] = detections_df['class_id'].map(class_map)
-        hits_df['instance_name'] = hits_df['class_name'] + '_' + hits_df['track_id'].astype(str)
-        detections_df['instance_name'] = detections_df['class_name'] + '_' + detections_df['track_id'].astype(str)
+    # Mappa ogni punto di sguardo a un track_id
+    mapped_gaze_to_tid = []
+    if not merged_df_gaze.empty:
+        merged_df_gaze['mapped_track_id'] = merged_df_gaze.apply(
+            lambda row: row['track_id'] if pd.notna(row['gaze x [px]']) and _is_inside(row['gaze x [px]'], row['gaze y [px]'], row['x1'], row['y1'], row['x2'], row['y2']) else None,
+            axis=1
+        )
+        final_gaze_mapping = merged_df_gaze.groupby('timestamp [ns]')['mapped_track_id'].first() # Prendi il primo oggetto se ci sono sovrapposizioni
+    else:
+        final_gaze_mapping = pd.Series([])
 
-        stats_instance = []
-        for instance_name, group in hits_df.groupby('instance_name'):
-            total_detections = len(detections_df[detections_df['instance_name'] == instance_name])
-            n_fixations = group['fixation id'].nunique()
-            stats_instance.append({'instance': instance_name, 'n_fixations': n_fixations, 'normalized_fixation_count': n_fixations / total_detections if total_detections > 0 else 0, 'avg_pupil_diameter_mm': group['pupil diameter left [mm]'].mean(), 'total_frames_detected': total_detections})
-
-        stats_class = []
-        for class_name, group in hits_df.groupby('class_name'):
-            total_detections = len(detections_df[detections_df['class_name'] == class_name]['frame_idx'].unique())
-            n_fixations = group['fixation id'].nunique()
-            stats_class.append({'class': class_name, 'n_fixations': n_fixations, 'normalized_fixation_count': n_fixations / total_detections if total_detections > 0 else 0, 'avg_pupil_diameter_mm': group['pupil diameter left [mm]'].mean(), 'total_frames_detected': total_detections})
-
-        pd.DataFrame(stats_instance).to_csv(output_dir / 'stats_per_instance.csv', index=False)
-        pd.DataFrame(stats_class).to_csv(output_dir / 'stats_per_class.csv', index=False)
-        id_map = hits_df[['track_id', 'class_id', 'class_name', 'instance_name']].drop_duplicates()
-        id_map.to_csv(output_dir / 'class_id_map.csv', index=False)
-        logging.info("Fixation-based statistics saved.")
+    # Calcola e salva SI
+    v_gaze_sequence = _calculate_aoi_sequence(final_gaze_mapping)
+    k_gaze = len(v_gaze_sequence)
+    l_in_gaze = len(synced_et_data_gaze.dropna(subset=['gaze x [px]']))
+    si_gaze = _calculate_switching_index(k_gaze, l_in_gaze)
+    
+    si_results = {
+        'participant': subj_name,
+        'total_gaze_points_analyzed (L_in)': l_in_gaze,
+        'aoi_sequence_length (K)': k_gaze,
+        'gaze_switching_index (SI_G)': si_gaze,
+        'aoi_sequence (V_G)': v_gaze_sequence
+    }
+    pd.DataFrame([si_results]).to_csv(output_dir / 'switching_index_yolo_results.csv', index=False)
+    logging.info(f"YOLO-based Switching Index calculated and saved. SI_G = {si_gaze:.4f}")
 
     logging.info("YOLO analysis part completed.")
