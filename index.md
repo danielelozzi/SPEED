@@ -77,7 +77,7 @@ subject_name = "participant_01"
 ```
 
 **2. Choose Your AOI Strategy**
-The key step is to decide if you are using pre-existing enriched data or defining an AOI on-the-fly. If you don't provide an `enriched_data_path`, you can use one of the following programmatic options.
+The key step is to decide if you are using pre-existing enriched data or defining an AOI on-the-fly. If you don't provide an `enriched_data_path`, you can use one of the following programmatic options for defining single or multiple AOI.
 
 **Option A: Static AOI**
 For analyzing a fixed region in the video, define a dictionary with the rectangle's coordinates and pass it via the `aoi_coordinates` parameter.
