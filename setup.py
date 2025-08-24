@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="speed-analyzer",
-    version="3.7.0", # Versione aggiornata
+    version="3.7.1", # Versione aggiornata
     author="Daniele Lozzi, LabSCoC",
     description="A package for processing and extracting eye-tracking data.",
     long_description=open('README.md').read(),
