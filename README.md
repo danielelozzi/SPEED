@@ -146,6 +146,16 @@ This is the main data processing stage. You run this step only once per particip
 - Optionally run YOLO object detection on the video frames, saving the results to a cache to speed up future runs.
 - Save the processed data (e.g., filtered dataframes for each event) and summary statistics into the output folder.
 
+![GUI 1](images/gui1.png)
+
+![GUI event 1](images/gui_event.png)
+
+![GUI event 2](images/gui_event2.png)
+
+![GUI aoi 1](images/gui_aoi.png)
+
+![GUI aoi 2](images/gui_aoi2.png)
+
 
 This step creates a `processed_data` directory containing intermediate files. Once this is complete, you do not need to run it again unless you want to analyze a different combination of events.
 
@@ -157,6 +167,12 @@ After the core analysis is complete, you can use the dedicated tabs in the GUI t
 - **View YOLO Results**: Load and view the quantitative results from the object detection.
 - **Normalized Switching Index (SI)**: Index for analyzing the switching component.
 - **Generate enriched data on-the-fly** if you defined a custom AOI.
+
+![GUI 2](images/gui2.png)
+
+![GUI 3](images/gui3.png)
+
+![GUI 4](images/gui4.png)
 
 ---
 
