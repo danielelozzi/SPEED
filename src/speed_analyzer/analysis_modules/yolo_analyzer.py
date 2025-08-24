@@ -13,20 +13,17 @@ except ImportError:
     logging.error("Ultralytics (YOLO) not installed. Cannot run object detection.")
     YOLO = None
 
-# --- NUOVE FUNZIONI PER LO SWITCHING INDEX ---
+# --- FUNZIONI PER LO SWITCHING INDEX (ORA PIÙ GENERICHE) ---
 
-def _calculate_aoi_sequence(mapped_gaze_series: pd.Series) -> list:
+def _calculate_aoi_sequence(mapped_aoi_series: pd.Series) -> list:
     """
-    Calcola la sequenza di AOI visitate (V) come descritto nell'Algorithm 1 del paper.
-    L'input è una serie di ID di AOI (o track_id di YOLO) mappati per ogni punto di sguardo.
+    Calcola la sequenza di AOI visitate (V).
+    L'input è una serie di nomi/ID di AOI mappati per ogni punto di sguardo.
     """
     v_sequence = []
-    last_aoi = 0
-    for curr_aoi in mapped_gaze_series:
-        # Assicura che curr_aoi sia un intero, gestendo possibili NaN
-        curr_aoi = int(curr_aoi) if pd.notna(curr_aoi) else 0
-        
-        if curr_aoi != 0 and curr_aoi != last_aoi:
+    last_aoi = None
+    for curr_aoi in mapped_aoi_series.dropna():
+        if curr_aoi != last_aoi:
             v_sequence.append(curr_aoi)
             last_aoi = curr_aoi
     return v_sequence
@@ -44,8 +41,39 @@ def _calculate_switching_index(v_sequence_len: int, total_gaze_points: int) -> f
     si = max(0, k - 1) / (l_in - 1)
     return si
 
-# --- FINE NUOVE FUNZIONI ---
+def calculate_switching_index_from_gaze(enriched_gaze_df: pd.DataFrame, output_dir: Path, subj_name: str):
+    """
+    Funzione principale per calcolare lo SI da un dataframe di sguardi già mappato su AOI.
+    """
+    if 'aoi_name' not in enriched_gaze_df.columns or enriched_gaze_df['aoi_name'].dropna().empty:
+        logging.warning("No gaze points were mapped to any AOI. Skipping Switching Index calculation.")
+        return
 
+    logging.info("Calculating AOI sequence (V_G) and Switching Index (SI_G)...")
+    
+    # 1. Calcola la sequenza V (V_Gaze)
+    v_gaze_sequence = _calculate_aoi_sequence(enriched_gaze_df['aoi_name'])
+    
+    # 2. Calcola lo Switching Index (SI_Gaze)
+    k_gaze = len(v_gaze_sequence)
+    l_in_gaze = len(enriched_gaze_df.dropna(subset=['gaze x [px]']))
+    si_gaze = _calculate_switching_index(k_gaze, l_in_gaze)
+    
+    # 3. Salva i risultati
+    si_results = {
+        'participant': subj_name,
+        'total_gaze_points_analyzed (L_in)': l_in_gaze,
+        'aoi_sequence_length (K)': k_gaze,
+        'gaze_switching_index (SI_G)': si_gaze,
+        'aoi_sequence (V_G)': v_gaze_sequence
+    }
+    pd.DataFrame([si_results]).to_csv(output_dir / 'switching_index_results.csv', index=False)
+    
+    logging.info(f"Switching Index analysis complete. SI_G = {si_gaze:.4f}")
+    logging.info(f"Results saved to: {output_dir / 'switching_index_results.csv'}")
+
+
+# --- FUNZIONI DI ANALISI YOLO ---
 
 def _get_yolo_device():
     """Determines the optimal device for YOLO inference (CUDA, MPS, or CPU)."""
@@ -67,12 +95,10 @@ def _load_and_sync_data(data_dir: Path):
         world_ts.sort_values('timestamp [ns]', inplace=True)
         fixations = pd.read_csv(data_dir / 'fixations.csv').sort_values('start timestamp [ns]')
         pupil = pd.read_csv(data_dir / '3d_eye_states.csv').sort_values('timestamp [ns]')
-        # NUOVO: Carica anche il file gaze.csv per l'analisi SI basata sullo sguardo
         gaze = pd.read_csv(data_dir / 'gaze.csv').sort_values('timestamp [ns]')
     except FileNotFoundError as e:
         raise FileNotFoundError(f"Missing required file for YOLO analysis: {e}")
 
-    # Sincronizzazione per le fissazioni (invariata)
     merged_fix = pd.merge_asof(world_ts, fixations, left_on='timestamp [ns]', right_on='start timestamp [ns]', direction='backward', suffixes=('', '_fix'))
     merged_fix['duration_s'] = merged_fix['duration [ms]'] / 1000.0
     duration_ns = (merged_fix['duration_s'] * 1e9).round()
@@ -80,7 +106,6 @@ def _load_and_sync_data(data_dir: Path):
     synced_data_fixations = merged_fix[merged_fix['timestamp [ns]'] <= merged_fix['end_ts_ns']].copy()
     synced_data_fixations = pd.merge_asof(synced_data_fixations, pupil[['timestamp [ns]', 'pupil diameter left [mm]']], left_on='timestamp [ns]', right_on='timestamp [ns]', direction='nearest', suffixes=('', '_pupil'))
     
-    # NUOVO: Sincronizzazione per i punti di sguardo (per SI_G)
     synced_data_gaze = pd.merge_asof(world_ts, gaze[['timestamp [ns]', 'gaze x [px]', 'gaze y [px]']], on='timestamp [ns]', direction='nearest')
 
     return synced_data_fixations, synced_data_gaze
@@ -90,30 +115,28 @@ def _is_inside(px, py, x1, y1, x2, y2):
     """Checks if a point (px, py) is inside a bounding box (x1, y1, x2, y2)."""
     return x1 <= px <= x2 and y1 <= py <= y2
 
-def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str, model_path: str = 'yolov8n.pt'):
+def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str):
     """
-    Runs YOLO object detection and tracking, correlates with gaze data, and saves statistics.
-    MODIFIED: Also calculates and saves the Switching Index (SI) based on gaze transitions between tracked objects.
+    Runs YOLO object detection, correlates with fixations, and saves statistics.
     """
     if YOLO is None:
         logging.warning("Skipping YOLO analysis because Ultralytics is not installed.")
         return
 
-    video_path = data_dir / 'external.mp4'
-    if not video_path.exists():
-        logging.warning("Skipping YOLO analysis: external.mp4 not found.")
+    video_path = next(data_dir.glob('*.mp4'), None)
+    if not video_path:
+        logging.warning(f"Skipping YOLO analysis: no .mp4 file found in {data_dir}.")
         return
 
     yolo_device = _get_yolo_device()
     try:
-        model = YOLO(model_path)
+        model = YOLO('yolov8n.pt')
     except Exception as e:
-        logging.error(f"Error loading YOLO model ({model_path}): {e}. Skipping YOLO analysis.")
+        logging.error(f"Error loading YOLO model (yolov8n.pt): {e}. Skipping YOLO analysis.")
         return
 
     try:
-        # MODIFICA: Carica entrambi i dataframe sincronizzati
-        synced_et_data_fix, synced_et_data_gaze = _load_and_sync_data(data_dir)
+        synced_et_data_fix, _ = _load_and_sync_data(data_dir)
     except Exception as e:
         logging.error(f"Error loading/syncing eye-tracking data for YOLO: {e}. Skipping YOLO analysis.")
         return
@@ -140,8 +163,7 @@ def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str, model_pa
                 results = model.track(frame, persist=True, verbose=False, device=effective_device)
             except NotImplementedError as e:
                 if "torchvision::nms" in str(e) and effective_device != 'cpu':
-                    logging.warning(f"GPU operation failed: {e}")
-                    logging.warning("Falling back to CPU for the rest of the YOLO analysis. This will be slower.")
+                    logging.warning(f"GPU operation failed: {e}. Falling back to CPU.")
                     effective_device = 'cpu'
                     pbar.set_description(f"YOLO Tracking on {effective_device.upper()} (Fallback)")
                     results = model.track(frame, persist=True, verbose=False, device=effective_device)
@@ -169,7 +191,6 @@ def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str, model_pa
         logging.info(f"Saving YOLO detections to cache at: {yolo_cache_path}")
         detections_df.to_csv(yolo_cache_path, index=False)
 
-    # --- ANALISI DELLE FISSAZIONI (INVARIATA) ---
     logging.info("Correlating detections with fixations...")
     merged_df_fix = pd.merge(detections_df, synced_et_data_fix, left_on='frame_idx', right_on='frame', how='inner')
     fixation_hits = [row for _, row in merged_df_fix.iterrows() if pd.notna(row['fixation x [px]']) and _is_inside(row['fixation x [px]'], row['fixation y [px]'], row['x1'], row['y1'], row['x2'], row['y2'])]
@@ -201,51 +222,4 @@ def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str, model_pa
         id_map.to_csv(output_dir / 'class_id_map.csv', index=False)
         logging.info("Fixation-based statistics saved.")
 
-    # --- NUOVA SEZIONE: CALCOLO DELLO SWITCHING INDEX SULLO SGUARDO (GAZE) ---
-    logging.info("Correlating detections with gaze data for Switching Index calculation...")
-    merged_df_gaze = pd.merge(detections_df, synced_et_data_gaze, left_on='frame_idx', right_on='frame', how='inner')
-
-    # Mappa ogni punto di sguardo a un track_id di YOLO
-    mapped_gaze_to_tid = []
-    for _, row in merged_df_gaze.iterrows():
-        gaze_x, gaze_y = row['gaze x [px]'], row['gaze y [px]']
-        track_id = 0 # Default: fuori da ogni AOI
-        if pd.notna(gaze_x):
-            # Controlla se il punto di sguardo è dentro la bounding box di questo oggetto
-            if _is_inside(gaze_x, gaze_y, row['x1'], row['y1'], row['x2'], row['y2']):
-                track_id = row['track_id']
-        mapped_gaze_to_tid.append(track_id)
-    
-    # Aggiunge la serie di track_id mappati al dataframe
-    merged_df_gaze['mapped_track_id'] = mapped_gaze_to_tid
-    
-    # Raggruppa per frame per avere un solo track_id per timestamp (il primo trovato)
-    final_gaze_mapping = merged_df_gaze.groupby('timestamp [ns]')['mapped_track_id'].max()
-
-    if not final_gaze_mapping.empty:
-        logging.info("Calculating AOI sequence (V_G) and Switching Index (SI_G)...")
-        
-        # 1. Calcola la sequenza V (V_Gaze)
-        v_gaze_sequence = _calculate_aoi_sequence(final_gaze_mapping)
-        
-        # 2. Calcola lo Switching Index (SI_Gaze)
-        k_gaze = len(v_gaze_sequence)
-        l_in_gaze = len(final_gaze_mapping)
-        si_gaze = _calculate_switching_index(k_gaze, l_in_gaze)
-        
-        # 3. Salva i risultati
-        si_results = {
-            'participant': subj_name,
-            'total_gaze_points_analyzed (L_in)': l_in_gaze,
-            'aoi_sequence_length (K)': k_gaze,
-            'gaze_switching_index (SI_G)': si_gaze,
-            'aoi_sequence (V_G)': v_gaze_sequence
-        }
-        pd.DataFrame([si_results]).to_csv(output_dir / 'switching_index_results.csv', index=False)
-        
-        logging.info(f"Switching Index analysis complete. SI_G = {si_gaze:.4f}")
-        logging.info(f"Results saved to: {output_dir / 'switching_index_results.csv'}")
-    else:
-        logging.warning("No gaze points could be mapped to YOLO objects. Skipping Switching Index calculation.")
-
-    logging.info("YOLO analysis completed.")
+    logging.info("YOLO analysis part completed.")

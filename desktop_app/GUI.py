@@ -8,7 +8,7 @@ import pandas as pd
 import logging
 import time
 import sys
-import webbrowser # Aggiunto per aprire il link
+import webbrowser
 
 # --- MODIFICA CHIAVE PER RISOLVERE L'ERRORE ---
 # Aggiungiamo la cartella radice del progetto al percorso di ricerca di Python.
@@ -188,9 +188,8 @@ class SpeedApp:
         self.events_df = pd.DataFrame()
         self.world_timestamps_df = pd.DataFrame()
         
-        # --- NUOVO: Variabili per gestire l'AOI definita dall'utente ---
-        self.user_defined_aoi = None
-        self.user_defined_aoi_type = None
+        # --- MODIFICATO: Lista per le AOI ---
+        self.user_defined_aois = []
 
         # --- MODIFICATO: Setup della scrollbar ---
         main_container = tk.Frame(root)
@@ -230,7 +229,7 @@ class SpeedApp:
         folders_frame = tk.LabelFrame(main_frame, text="2. Input Folders", padx=10, pady=10)
         folders_frame.pack(fill=tk.X, pady=5, padx=10)
         self.unenriched_dir_var.trace_add("write", lambda *args: self.load_data_for_editors())
-        self.enriched_dir_var.trace_add("write", lambda *args: self.update_aoi_button_state())
+        self.enriched_dir_var.trace_add("write", lambda *args: self.update_aoi_list_display())
 
         raw_frame = tk.Frame(folders_frame); raw_frame.pack(fill=tk.X, pady=2)
         tk.Label(raw_frame, text="RAW Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
@@ -243,18 +242,25 @@ class SpeedApp:
         tk.Button(unenriched_frame, text="Browse...", command=lambda: self.select_folder(self.unenriched_dir_var, "Select Un-enriched Data Folder")).pack(side=tk.RIGHT)
         
         enriched_frame = tk.Frame(folders_frame); enriched_frame.pack(fill=tk.X, pady=2)
-        tk.Label(enriched_frame, text="Enriched Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
+        tk.Label(enriched_frame, text="Enriched Data Folder (Optional):", width=25, anchor='w').pack(side=tk.LEFT)
         tk.Entry(enriched_frame, textvariable=self.enriched_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(enriched_frame, text="Browse...", command=lambda: self.select_folder(self.enriched_dir_var, "Select Enriched Data Folder")).pack(side=tk.RIGHT)
         
-        # --- NUOVO: Sezione AOI ---
-        aoi_frame = tk.Frame(folders_frame)
-        aoi_frame.pack(fill=tk.X, pady=5)
-        self.aoi_status_label = tk.Label(aoi_frame, text="Select Un-enriched folder to define an AOI.", fg="grey")
-        self.aoi_status_label.pack(side=tk.LEFT, padx=5)
-        self.define_aoi_btn = tk.Button(aoi_frame, text="Define AOI...", command=self.open_aoi_editor, state=tk.DISABLED)
-        self.define_aoi_btn.pack(side=tk.RIGHT)
+        # --- MODIFICATO: Sezione Gestione AOI ---
+        aoi_frame = tk.LabelFrame(main_frame, text="2.1 Area of Interest (AOI) Management", padx=10, pady=10)
+        aoi_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        self.aoi_listbox = tk.Listbox(aoi_frame, height=4)
+        self.aoi_listbox.pack(fill=tk.X, expand=True, pady=5)
         
+        aoi_button_frame = tk.Frame(aoi_frame)
+        aoi_button_frame.pack(fill=tk.X)
+        self.add_aoi_btn = tk.Button(aoi_button_frame, text="Add New AOI...", command=self.open_aoi_editor, state=tk.DISABLED)
+        self.add_aoi_btn.pack(side=tk.LEFT)
+        self.remove_aoi_btn = tk.Button(aoi_button_frame, text="Remove Selected AOI", command=self.remove_selected_aoi, state=tk.DISABLED)
+        self.remove_aoi_btn.pack(side=tk.LEFT, padx=10)
+        self.aoi_listbox.bind('<<ListboxSelect>>', self.on_aoi_select)
+
         # --- Sezione 2.5: Event Management ---
         event_frame = tk.LabelFrame(main_frame, text="2.5 Event Management", padx=10, pady=10)
         event_frame.pack(fill=tk.X, pady=5, padx=10)
@@ -304,7 +310,7 @@ class SpeedApp:
         footer_label_part2 = tk.Label(footer_frame, text=" at the University of L'Aquila.", font=('Helvetica', 9))
         footer_label_part2.pack(side=tk.LEFT)
         
-        self.update_aoi_button_state()
+        self.update_aoi_list_display()
 
     def open_github(self):
         webbrowser.open_new(r"https://github.com/danielelozzi/SPEED")
@@ -349,7 +355,7 @@ class SpeedApp:
             self.external_event_file_var.set(filepath)
 
     def load_data_for_editors(self):
-        self.update_aoi_button_state()
+        self.update_aoi_list_display()
         unenriched_path_str = self.unenriched_dir_var.get()
         ext_event_file_str = self.external_event_file_var.get()
         
@@ -436,35 +442,31 @@ class SpeedApp:
             self.update_event_summary_display()
             logging.info("Event list updated via video editor.")
 
-    ## MODIFICATO: Logica di attivazione del pulsante AOI
-    def update_aoi_button_state(self):
+    # --- MODIFICATO: Logica di aggiornamento della lista AOI ---
+    def update_aoi_list_display(self):
+        self.aoi_listbox.delete(0, tk.END)
+        for aoi in self.user_defined_aois:
+            self.aoi_listbox.insert(tk.END, f"{aoi['name']} ({aoi['type']})")
+        
         unenriched_ok = Path(self.unenriched_dir_var.get()).is_dir()
-        enriched_present = Path(self.enriched_dir_var.get()).is_dir()
+        self.add_aoi_btn.config(state=tk.NORMAL if unenriched_ok else tk.DISABLED)
+        self.on_aoi_select(None) # Aggiorna lo stato del pulsante remove
 
-        if not unenriched_ok:
-            self.define_aoi_btn.config(state=tk.DISABLED)
-            self.aoi_status_label.config(text="Select Un-enriched folder to define an AOI.", fg="grey")
+    def on_aoi_select(self, event):
+        self.remove_aoi_btn.config(state=tk.NORMAL if self.aoi_listbox.curselection() else tk.DISABLED)
+
+    def remove_selected_aoi(self):
+        selected_indices = self.aoi_listbox.curselection()
+        if not selected_indices:
             return
-
-        # Se la cartella un-enriched è selezionata, il pulsante è sempre attivo
-        self.define_aoi_btn.config(state=tk.NORMAL)
-
-        # Aggiorna il testo dell'etichetta in base allo stato
-        if self.user_defined_aoi is not None:
-            if self.user_defined_aoi_type == 'static':
-                self.aoi_status_label.config(text="Static AOI defined (will be used for analysis).", fg="green")
-            elif self.user_defined_aoi_type == 'dynamic_auto':
-                self.aoi_status_label.config(text=f"Dynamic AOI (Track ID: {self.user_defined_aoi}) defined.", fg="green")
-            elif self.user_defined_aoi_type == 'dynamic_manual':
-                self.aoi_status_label.config(text=f"Dynamic AOI ({len(self.user_defined_aoi)} Keyframes) defined.", fg="green")
-        elif enriched_present:
-            self.aoi_status_label.config(text="Enriched folder found. Defining a new AOI will override it.", fg="orange")
-        else:
-            self.aoi_status_label.config(text="You can define a new Area of Interest (AOI).", fg="blue")
-
+        
+        if messagebox.askyesno("Confirm", "Are you sure you want to remove the selected AOI?"):
+            # Rimuovi dalla lista in ordine inverso per evitare problemi di indicizzazione
+            for index in sorted(selected_indices, reverse=True):
+                del self.user_defined_aois[index]
+            self.update_aoi_list_display()
 
     def open_aoi_editor(self):
-        # --- NUOVA FINESTRA DI SCELTA ---
         choice_dialog = tk.Toplevel(self.root)
         choice_dialog.title("Choose AOI Definition Method")
         choice_dialog.geometry("450x200")
@@ -496,7 +498,6 @@ class SpeedApp:
         editor = None
         if mode == 'static' or mode == 'dynamic_auto':
             editor = AoiEditor(self.root, video_path)
-            # Pre-seleziona la modalità corretta
             editor.mode_var.set(mode)
             editor.update_ui_for_mode()
         elif mode == 'dynamic_manual':
@@ -505,21 +506,21 @@ class SpeedApp:
         if editor:
             self.root.wait_window(editor)
             
+            new_aoi = None
             if mode == 'static' or mode == 'dynamic_auto':
                 if editor.result is not None:
-                    self.user_defined_aoi = editor.result
-                    self.user_defined_aoi_type = editor.result_type
-                    logging.info(f"AOI defined: type='{self.user_defined_aoi_type}', data='{self.user_defined_aoi}'")
+                    new_aoi = {'name': editor.aoi_name, 'type': editor.result_type, 'data': editor.result}
             elif mode == 'dynamic_manual':
                  if editor.saved_keyframes:
-                    self.user_defined_aoi = editor.saved_keyframes
-                    self.user_defined_aoi_type = 'dynamic_manual'
-                    logging.info(f"Manual AOI defined with {len(self.user_defined_aoi)} keyframes.")
+                    new_aoi = {'name': editor.aoi_name, 'type': 'dynamic_manual', 'data': editor.saved_keyframes}
 
-            self.update_aoi_button_state()
+            if new_aoi:
+                self.user_defined_aois.append(new_aoi)
+                logging.info(f"Added new AOI: {new_aoi}")
+            
+            self.update_aoi_list_display()
 
 
-    ## MODIFICATO: Logica di override dell'AOI prima dell'analisi
     def run_full_analysis_wrapper(self):
         output_dir = self.output_dir_entry.get().strip()
         subj_name = self.participant_name_var.get().strip()
@@ -539,32 +540,22 @@ class SpeedApp:
 
             messagebox.showinfo("In Progress", "Starting full analysis...")
             
-            # --- NUOVA LOGICA DI OVERRIDE ---
-            # Decidi quale percorso 'enriched' usare
+            # Se ci sono AOI definite dall'utente, ignora la cartella enriched
             enriched_path_to_use = self.enriched_dir_var.get() or None
-            if self.user_defined_aoi is not None:
-                # Se l'utente ha definito una nuova AOI, ignora la cartella enriched
+            if self.user_defined_aois:
                 enriched_path_to_use = None
-                logging.info("User-defined AOI is present. Ignoring 'Enriched Data Folder' and generating new enriched data.")
-
-            aoi_params = {}
-            if self.user_defined_aoi_type == 'static':
-                aoi_params['aoi_coordinates'] = self.user_defined_aoi
-            elif self.user_defined_aoi_type == 'dynamic_auto':
-                aoi_params['aoi_track_id'] = self.user_defined_aoi
-            elif self.user_defined_aoi_type == 'dynamic_manual':
-                aoi_params['aoi_keyframes'] = self.user_defined_aoi
+                logging.info("User-defined AOIs are present. Ignoring 'Enriched Data Folder' and generating new enriched data.")
 
             run_full_analysis(
                 raw_data_path=self.raw_dir_var.get(),
                 unenriched_data_path=self.unenriched_dir_var.get(),
-                enriched_data_path=enriched_path_to_use, # Usa il percorso deciso dalla logica di override
+                enriched_data_path=enriched_path_to_use,
                 output_path=output_dir,
                 subject_name=subj_name,
                 events_df=final_events_df,
                 run_yolo=self.yolo_var.get(),
                 yolo_model_path="yolov8n.pt",
-                **aoi_params
+                defined_aois=self.user_defined_aois # Passa la lista di AOI
             )
 
             messagebox.showinfo("Success", f"Full analysis completed.\nResults in: {output_dir}")

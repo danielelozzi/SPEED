@@ -1,6 +1,6 @@
 # desktop_app/aoi_editor.py
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 import cv2
 from PIL import Image, ImageTk
 import logging
@@ -15,7 +15,6 @@ class AoiEditor(tk.Toplevel):
     Una finestra per definire un'Area di Interesse (AOI) in tre modalità:
     1. Statica: Un rettangolo fisso.
     2. Dinamica (Auto): Tracciando un oggetto rilevato da YOLO.
-    3. Dinamica (Manuale): Impostando keyframe manualmente.
     """
     def __init__(self, parent, video_path):
         super().__init__(parent)
@@ -36,6 +35,7 @@ class AoiEditor(tk.Toplevel):
         # Risultati
         self.result = None 
         self.result_type = None
+        self.aoi_name = None # NUOVO: Nome per l'AOI
 
         # Stato del disegno/selezione
         self.rect = None
@@ -162,10 +162,9 @@ class AoiEditor(tk.Toplevel):
             self.video_canvas.coords(self.rect, self.start_x, self.start_y, cur_x, cur_y)
 
     def on_button_release(self, event):
-        pass # Azione gestita al click o alla selezione
+        pass
 
     def select_object_at(self, x, y):
-        # Converte le coordinate del click in coordinate del video originale
         click_x_orig = x * self.scale_x
         click_y_orig = y * self.scale_y
 
@@ -177,7 +176,6 @@ class AoiEditor(tk.Toplevel):
                 self.selected_track_id = obj["track_id"]
                 break
         
-        # Evidenzia l'oggetto selezionato
         self.video_canvas.delete("object_box")
         for obj in self.detected_objects:
             display_box = (obj["box"][0] / self.scale_x, obj["box"][1] / self.scale_y,
@@ -194,9 +192,16 @@ class AoiEditor(tk.Toplevel):
             self.status_label.config(text="Click on an object to select it for tracking.")
             self.save_button.config(state=tk.DISABLED)
 
-
     def save_and_close(self):
         mode = self.mode_var.get()
+        
+        # --- MODIFICATO: Chiedi il nome dell'AOI ---
+        aoi_name = simpledialog.askstring("AOI Name", "Enter a unique name for this AOI:", parent=self)
+        if not aoi_name:
+            return # L'utente ha annullato
+
+        self.aoi_name = aoi_name
+        
         if mode == "static":
             if not self.rect:
                 messagebox.showwarning("Warning", "Please draw a rectangle on the video first.", parent=self)

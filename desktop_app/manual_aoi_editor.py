@@ -1,6 +1,6 @@
 # desktop_app/manual_aoi_editor.py
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 import cv2
 from PIL import Image, ImageTk
 import numpy as np
@@ -32,6 +32,7 @@ class ManualAoiEditor(tk.Toplevel):
         # Store keyframes: {frame_index: (x1, y1, x2, y2)}
         self.keyframes = {}
         self.saved_keyframes = None
+        self.aoi_name = None # NUOVO: Nome per l'AOI
 
         # Drawing state
         self.rect = None
@@ -107,17 +108,14 @@ class ManualAoiEditor(tk.Toplevel):
         self.is_updating = False
 
     def draw_current_rect(self):
-        # Clear previous rectangles
         self.video_canvas.delete("rect")
         
-        # Check if current frame is a keyframe
         if self.current_frame_idx in self.keyframes:
             coords = self.keyframes[self.current_frame_idx]
-            # Scale from original video coords to display coords
             display_coords = (coords[0] / self.scale_x, coords[1] / self.scale_y, 
                               coords[2] / self.scale_x, coords[3] / self.scale_y)
             self.video_canvas.create_rectangle(display_coords, outline='green', width=2, tags="rect")
-        else: # Interpolate
+        else:
             prev_frames = [f for f in self.keyframes if f < self.current_frame_idx]
             next_frames = [f for f in self.keyframes if f > self.current_frame_idx]
             
@@ -125,7 +123,6 @@ class ManualAoiEditor(tk.Toplevel):
                 prev_f = max(prev_frames)
                 next_f = min(next_frames)
                 
-                # Interpolation factor
                 factor = (self.current_frame_idx - prev_f) / (next_f - prev_f)
                 
                 prev_coords = np.array(self.keyframes[prev_f])
@@ -142,13 +139,11 @@ class ManualAoiEditor(tk.Toplevel):
         canvas_width = self.timeline_canvas.winfo_width()
         if canvas_width <= 1: return
 
-        # Draw keyframes
         for frame_idx in self.keyframes:
             x_pos = (frame_idx / self.total_frames) * canvas_width
             self.timeline_canvas.create_line(x_pos, 10, x_pos, 40, fill='green', width=2)
             self.timeline_canvas.create_text(x_pos, 45, text=str(frame_idx), anchor=tk.N)
 
-        # Draw current position cursor
         cursor_x = (self.current_frame_idx / self.total_frames) * canvas_width
         self.timeline_canvas.create_line(cursor_x, 0, cursor_x, 60, fill='red', width=2)
 
@@ -168,7 +163,7 @@ class ManualAoiEditor(tk.Toplevel):
         self.video_canvas.coords(self.rect, self.start_x, self.start_y, cur_x, cur_y)
 
     def on_button_release(self, event):
-        pass # The rectangle is temporary until "Set Keyframe" is clicked
+        pass
 
     def set_keyframe(self):
         if not self.rect:
@@ -176,13 +171,11 @@ class ManualAoiEditor(tk.Toplevel):
             return
         
         coords = self.video_canvas.coords(self.rect)
-        # Scale back to original video dimensions
         original_coords = (
             int(coords[0] * self.scale_x), int(coords[1] * self.scale_y),
             int(coords[2] * self.scale_x), int(coords[3] * self.scale_y)
         )
         
-        # Ensure x1 < x2 and y1 < y2
         x1 = min(original_coords[0], original_coords[2])
         y1 = min(original_coords[1], original_coords[3])
         x2 = max(original_coords[0], original_coords[2])
@@ -207,7 +200,12 @@ class ManualAoiEditor(tk.Toplevel):
         if len(self.keyframes) < 2:
             messagebox.showerror("Error", "You must define at least two keyframes to create a dynamic AOI.", parent=self)
             return
-        
-        # Sort keyframes by frame number and save
+            
+        # --- MODIFICATO: Chiedi il nome dell'AOI ---
+        aoi_name = simpledialog.askstring("AOI Name", "Enter a unique name for this AOI:", parent=self)
+        if not aoi_name:
+            return
+
+        self.aoi_name = aoi_name
         self.saved_keyframes = dict(sorted(self.keyframes.items()))
         self.on_close()
