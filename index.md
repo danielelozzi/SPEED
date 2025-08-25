@@ -30,6 +30,8 @@ SPEED is designed for cognitive and behavioral experiments, providing a modular 
 * **Advanced Event Editors**: Manage experimental events in a table or directly on an interactive video timeline.
 * **Computer Vision Integration**: Leverage YOLO object detection to correlate gaze with objects in the scene.
 * **Rich Visual Outputs**: Create heatmaps, gaze paths, pupillometry plots, and highly customized video overlays.
+* **Realtime usage**: SPEED allow to use eyetracker in real-time modality, combined with YOLO powerfull. 
+
 
 ## Getting Started
 

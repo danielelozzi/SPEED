@@ -11,6 +11,7 @@ This version supports GPU acceleration for YOLO analysis and also offers three p
 1.  **Static AOI**: A fixed rectangle for stationary scenes.
 2.  **Dynamic AOI (Object Tracking)**: An AOI that automatically follows a selected object detected by YOLO.
 3.  **Dynamic AOI (Manual Keyframes)**: A user-defined AOI path created by setting its position and size at key moments in the video.
+4.  **Realtime usage**: SPEED allow to use eyetracker in real-time modality, combined with YOLO powerfull. 
 
 ---
 
