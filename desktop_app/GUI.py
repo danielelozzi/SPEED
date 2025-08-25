@@ -318,7 +318,7 @@ class EventManagerWindow(tk.Toplevel):
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v4")
+        self.root.title("SPEED v4.0.1")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
