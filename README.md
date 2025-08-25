@@ -72,7 +72,7 @@ my_aois = [
 ]
 ```
 
-### AOI Type 1: Static AOI
+#### AOI Type 1: Static AOI
 
 Use this for a fixed rectangular region that does not move throughout the video. The data is a dictionary containing the pixel coordinates of the rectangle's corners.
 
@@ -84,7 +84,7 @@ static_aoi = {
 }
 ```
 
-### AOI Type 2: Dynamic AOI (Automatic Object Tracking)
+#### AOI Type 2: Dynamic AOI (Automatic Object Tracking)
 
 Use this to have an AOI automatically follow an object detected by YOLO. This requires setting run_yolo=True. The data is the integer track_id of the object you want to follow. You would typically get the track_id from a preliminary YOLO analysis
 
@@ -98,7 +98,7 @@ dynamic_auto_aoi = {
 }
 ```
 
-### AOI Type 3: Dynamic AOI (Manual Keyframes)
+#### AOI Type 3: Dynamic AOI (Manual Keyframes)
 
 Use this to define a custom path for a moving and resizing AOI. You set the AOI's position and size at specific frames (keyframes), and the software will interpolate its position for all frames in between. The data is a dictionary where keys are frame indices and values are tuples of coordinates (x1, y1, x2, y2).
 
@@ -114,7 +114,7 @@ manual_keyframes_aoi = {
 }
 ```
 
-### Putting It All Together: Example with Multiple AOIs
+#### Putting It All Together: Example with Multiple AOIs
 
 You can combine any number of AOIs of any type into a single list and pass it to the analysis function.
 
