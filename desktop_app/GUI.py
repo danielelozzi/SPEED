@@ -1,4 +1,3 @@
-# desktop_app/GUI.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from pathlib import Path
@@ -10,69 +9,159 @@ import logging
 import time
 import sys
 import webbrowser
+import threading
+from PIL import Image, ImageTk
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-# Importa gli editor e la funzione di analisi
 from desktop_app.interactive_video_editor import InteractiveVideoEditor
 from desktop_app.aoi_editor import AoiEditor
 from desktop_app.manual_aoi_editor import ManualAoiEditor
 from src.speed_analyzer import run_full_analysis
-# CORREZIONE: Importa RealtimeNeonAnalyzer qui se non è già importato correttamente
 from src.speed_analyzer.analysis_modules.realtime_analyzer import RealtimeNeonAnalyzer
 
 class RealtimeDisplayWindow(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Real-time Neon Stream")
-        self.geometry("1280x800")
+        self.geometry("1280x950")
 
         self.analyzer = RealtimeNeonAnalyzer()
         self.is_running = False
+        self.is_paused_for_drawing = False # Flag per il disegno AOI
 
-        self.canvas = tk.Canvas(self, width=1280, height=720)
+        self.canvas = tk.Canvas(self, width=1280, height=720, cursor="crosshair")
         self.canvas.pack()
+        self.canvas.bind("<ButtonPress-1>", self.on_canvas_press)
+        self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
+        self.temp_rect_id = None
+        
+        main_control_frame = tk.Frame(self, pady=10)
+        main_control_frame.pack(fill=tk.X, padx=10)
 
-        self.status_label = tk.Label(self, text="Connecting to device...")
-        self.status_label.pack()
+        # Frame per controlli di registrazione
+        record_frame = tk.LabelFrame(main_control_frame, text="Recording Controls", padx=10, pady=10)
+        record_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
+        self.record_button = tk.Button(record_frame, text="Start Recording", command=self.toggle_recording, font=('Helvetica', 10, 'bold'), bg='#c8e6c9', state=tk.DISABLED)
+        self.record_button.pack(pady=(0,5))
+        self.event_name_entry = tk.Entry(record_frame, width=25); self.event_name_entry.pack(pady=5); self.event_name_entry.insert(0, "New Event")
+        self.add_event_button = tk.Button(record_frame, text="Add Event", command=self.add_event, state=tk.DISABLED); self.add_event_button.pack(pady=5)
+
+        # --- NOVITÀ: Frame per gestione AOI ---
+        aoi_frame = tk.LabelFrame(main_control_frame, text="AOI Management", padx=10, pady=10)
+        aoi_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
+        self.aoi_listbox = tk.Listbox(aoi_frame, height=4)
+        self.aoi_listbox.pack(side=tk.LEFT, fill=tk.Y)
+        aoi_btn_frame = tk.Frame(aoi_frame)
+        aoi_btn_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        tk.Button(aoi_btn_frame, text="Add AOI", command=self.prepare_to_draw_aoi).pack()
+        tk.Button(aoi_btn_frame, text="Remove", command=self.remove_selected_aoi).pack()
+        
+        # Frame per opzioni di visualizzazione
+        vis_options_frame = tk.LabelFrame(main_control_frame, text="Visual Options", padx=10, pady=10)
+        vis_options_frame.pack(side=tk.LEFT, fill=tk.Y)
+        self.overlay_vars = {"show_yolo": tk.BooleanVar(value=True), "show_pupil": tk.BooleanVar(value=True), "show_frag": tk.BooleanVar(value=True), "show_blink": tk.BooleanVar(value=True), "show_aois": tk.BooleanVar(value=True)}
+        tk.Checkbutton(vis_options_frame, text="YOLO", variable=self.overlay_vars["show_yolo"]).pack(anchor='w')
+        tk.Checkbutton(vis_options_frame, text="Pupil Plot", variable=self.overlay_vars["show_pupil"]).pack(anchor='w')
+        tk.Checkbutton(vis_options_frame, text="Frag. Plot", variable=self.overlay_vars["show_frag"]).pack(anchor='w')
+        tk.Checkbutton(vis_options_frame, text="Blink", variable=self.overlay_vars["show_blink"]).pack(anchor='w')
+        tk.Checkbutton(vis_options_frame, text="AOIs", variable=self.overlay_vars["show_aois"]).pack(anchor='w')
+
+        self.status_label = tk.Label(main_control_frame, text="Connecting to device...", font=('Helvetica', 10))
+        self.status_label.pack(side=tk.LEFT, padx=20, fill=tk.BOTH, expand=True)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
-
-        # Avvia la connessione e lo streaming in un thread separato
         self.thread = threading.Thread(target=self.stream_loop, daemon=True)
         self.thread.start()
 
     def stream_loop(self):
         if self.analyzer.connect():
-            self.is_running = True
-            self.status_label.config(text="Streaming...")
+            self.is_running = True; self.status_label.config(text="Streaming..."); self.record_button.config(state=tk.NORMAL)
         else:
-            self.status_label.config(text="Failed to connect. Please check device.")
-            return
+            self.status_label.config(text="Failed to connect. Please check device."); return
 
         while self.is_running:
-            frame = self.analyzer.process_and_visualize()
+            if not self.is_paused_for_drawing:
+                overlay_settings = {key: var.get() for key, var in self.overlay_vars.items()}
+                frame = self.analyzer.process_and_visualize(**overlay_settings)
+                img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(img)
+                self.photo = ImageTk.PhotoImage(image=img)
+                self.canvas.after(0, self.update_canvas)
+            time.sleep(1/60)
 
-            # Converte l'immagine per Tkinter
-            img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(img)
-            self.photo = ImageTk.PhotoImage(image=img)
+    def update_canvas(self): self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
 
-            # Aggiorna il canvas (deve essere fatto nel thread principale)
-            self.canvas.after(0, self.update_canvas)
+    def toggle_recording(self):
+        if not self.analyzer.is_recording:
+            folder_path = filedialog.askdirectory(title="Select Folder for Real-time Recording")
+            if not folder_path: return
+            if self.analyzer.start_recording(folder_path):
+                self.record_button.config(text="Stop Recording", bg='#ffcdd2'); self.add_event_button.config(state=tk.NORMAL)
+                self.status_label.config(text=f"REC ● | Saving to: {folder_path}")
+        else:
+            self.analyzer.stop_recording()
+            self.record_button.config(text="Start Recording", bg='#c8e6c9'); self.add_event_button.config(state=tk.DISABLED)
+            self.status_label.config(text="Streaming...")
 
-            time.sleep(1/60) # Limita il frame rate
+    def add_event(self):
+        event_name = self.event_name_entry.get()
+        if event_name:
+            self.analyzer.add_event(event_name)
+            self.event_name_entry.delete(0, tk.END); self.event_name_entry.insert(0, "New Event")
+        else:
+            messagebox.showwarning("Input Error", "Please enter an event name.", parent=self)
+    
+    # --- NOVITÀ: Metodi per disegnare e gestire le AOI ---
+    def prepare_to_draw_aoi(self):
+        self.is_paused_for_drawing = True
+        self.status_label.config(text="DRAW AOI: Click and drag on the video to define the area.")
+        
+    def on_canvas_press(self, event):
+        if not self.is_paused_for_drawing: return
+        self.start_x, self.start_y = event.x, event.y
+        self.temp_rect_id = self.canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline='magenta', width=2)
 
-    def update_canvas(self):
-        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
+    def on_canvas_drag(self, event):
+        if not self.is_paused_for_drawing or not self.temp_rect_id: return
+        self.canvas.coords(self.temp_rect_id, self.start_x, self.start_y, event.x, event.y)
 
+    def on_canvas_release(self, event):
+        if not self.is_paused_for_drawing or not self.temp_rect_id: return
+        
+        x1 = min(self.start_x, event.x)
+        y1 = min(self.start_y, event.y)
+        x2 = max(self.start_x, event.x)
+        y2 = max(self.start_y, event.y)
+        
+        aoi_name = simpledialog.askstring("AOI Name", "Enter a unique name for this AOI:", parent=self)
+        if aoi_name:
+            self.analyzer.add_static_aoi(aoi_name, [x1, y1, x2, y2])
+            self.update_aoi_listbox()
+
+        self.canvas.delete(self.temp_rect_id)
+        self.temp_rect_id = None
+        self.is_paused_for_drawing = False
+        self.status_label.config(text="Streaming...") # Ripristina lo stato
+
+    def update_aoi_listbox(self):
+        self.aoi_listbox.delete(0, tk.END)
+        for aoi in self.analyzer.static_aois:
+            self.aoi_listbox.insert(tk.END, aoi['name'])
+            
+    def remove_selected_aoi(self):
+        selected_indices = self.aoi_listbox.curselection()
+        if not selected_indices: return
+        aoi_name = self.aoi_listbox.get(selected_indices[0])
+        self.analyzer.remove_static_aoi(aoi_name)
+        self.update_aoi_listbox()
+            
     def on_close(self):
         self.is_running = False
-        if self.analyzer:
-            self.analyzer.close()
+        if self.analyzer: self.analyzer.close()
         self.destroy()
-
 
 class EventManagerWindow(tk.Toplevel):
     """
@@ -229,7 +318,7 @@ class EventManagerWindow(tk.Toplevel):
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v3.7.1")
+        self.root.title("SPEED v4")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()

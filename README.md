@@ -299,4 +299,5 @@ If you also use the Computer Vision YOLO-based feature, please cite the followin
 ---
 
 ## 💻 Artificial Intelligence disclosure
-This code is partially written using Google Gemini 2.5 Pro
+
+This code is written in Vibe Coding using Google Gemini 2.5 Pro
