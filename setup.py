@@ -26,6 +26,6 @@ setup(
     python_requires='>=3.10',
     install_requires=[
         "pandas", "numpy", "matplotlib", "opencv-python",
-        "scipy", "tqdm", "moviepy", "ultralytics", "Pillow", "pupil-labs-real-time-api"
+        "scipy", "tqdm", "moviepy", "ultralytics", "Pillow", "pupil-labs-realtime-api"
     ]
 )
