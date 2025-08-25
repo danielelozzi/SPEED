@@ -7,7 +7,17 @@ from pathlib import Path
 import threading
 from pupil_labs.realtime_api.simple import discover_one_device
 from ultralytics import YOLO
-from .video_generator import _draw_pupil_plot, _draw_generic_plot, FRAG_PLOT_WIDTH, FRAG_PLOT_HEIGHT, FRAG_LINE_COLOR, FRAG_BG_COLOR, BLINK_TEXT_COLOR, EVENT_TEXT_COLOR, EVENT_BG_COLOR
+# --- MODIFICA QUI: Aggiunto FRAG_PLOT_HISTORY all'import ---
+from .video_generator import (_draw_pupil_plot, _draw_generic_plot, 
+                               FRAG_PLOT_WIDTH, FRAG_PLOT_HEIGHT, FRAG_LINE_COLOR, FRAG_BG_COLOR, 
+                               BLINK_TEXT_COLOR, EVENT_TEXT_COLOR, EVENT_BG_COLOR, FRAG_PLOT_HISTORY)
+
+# --- NUOVE COSTANTI PER IL GRAFICO DEI BLINK ---
+BLINK_PLOT_HISTORY = 200
+BLINK_PLOT_WIDTH = 350
+BLINK_PLOT_HEIGHT = 100 # Altezza ridotta per un grafico binario
+BLINK_PLOT_BG_COLOR = (80, 80, 80)
+BLINK_PLOT_LINE_COLOR = (255, 100, 255) # Lilla
 
 class RealtimeNeonAnalyzer:
     """
@@ -31,15 +41,17 @@ class RealtimeNeonAnalyzer:
         # Dati per grafici e overlay
         self.pupil_data = {"Left": [], "Right": [], "Mean": []}
         self.fragmentation_data = []
+        self.blink_data = [] # NUOVO: Lista per i dati dei blink
         self.gaze_history = []
         self.is_blinking = False
         self.blink_off_counter = 0
         self.last_gazed_object = "N/A"
+        self.last_gazed_aoi = "N/A" # NUOVO: Per tracciare l'AOI osservata
         self.last_event_name = ""
 
-        # --- NOVITÀ: Gestione AOI ---
-        self.static_aois = [] # Lista di dizionari {'name': str, 'rect': [x1, y1, x2, y2]}
-        self.aoi_colors = {} # Per assegnare un colore unico a ogni AOI
+        # Gestione AOI
+        self.static_aois = []
+        self.aoi_colors = {}
 
         # Attributi di registrazione
         self.is_recording = False
@@ -125,7 +137,6 @@ class RealtimeNeonAnalyzer:
         
         if self.events_list: pd.DataFrame(self.events_list).to_csv(self.output_folder / 'events.csv', index=False)
 
-        # --- NOVITÀ: Analisi AOI al termine della registrazione ---
         if self.static_aois:
             self._analyze_gaze_in_aois(gaze_df)
 
@@ -153,30 +164,23 @@ class RealtimeNeonAnalyzer:
             })
             time.sleep(1/60)
 
-    # --- NOVITÀ: Metodi per gestire le AOI ---
     def add_static_aoi(self, name, rect):
-        """Aggiunge o aggiorna una AOI statica."""
-        # Se esiste già un'AOI con lo stesso nome, la aggiorniamo
         for aoi in self.static_aois:
             if aoi['name'] == name:
                 aoi['rect'] = rect
                 print(f"AOI '{name}' updated.")
                 return
-        # Altrimenti, ne aggiungiamo una nuova
         self.static_aois.append({'name': name, 'rect': rect})
-        # Assegna un colore casuale per la visualizzazione
         self.aoi_colors[name] = tuple(np.random.randint(100, 256, 3).tolist())
         print(f"AOI '{name}' added.")
 
     def remove_static_aoi(self, name):
-        """Rimuove una AOI dal suo nome."""
         self.static_aois = [aoi for aoi in self.static_aois if aoi['name'] != name]
         if name in self.aoi_colors:
             del self.aoi_colors[name]
         print(f"AOI '{name}' removed.")
         
     def _analyze_gaze_in_aois(self, gaze_df):
-        """Processa il dataframe degli sguardi per calcolare le statistiche sulle AOI."""
         if gaze_df.empty or not self.static_aois:
             return
             
@@ -209,6 +213,14 @@ class RealtimeNeonAnalyzer:
 
         scene_img, scene_ts = self.last_scene_frame
         
+        self.last_gazed_aoi = "N/A"
+        if self.last_gaze and show_aois:
+            for aoi in self.static_aois:
+                name, (x1, y1, x2, y2) = aoi['name'], aoi['rect']
+                if x1 <= self.last_gaze.x <= x2 and y1 <= self.last_gaze.y <= y2:
+                    self.last_gazed_aoi = name
+                    break
+        
         if show_yolo and self.last_gaze:
             self.last_gazed_object, scene_img = self.get_gazed_object(scene_img.copy(), self.last_gaze)
         
@@ -217,11 +229,15 @@ class RealtimeNeonAnalyzer:
             cv2.circle(scene_img, (int(gaze.x), int(gaze.y)), 20, (0, 0, 255), 2)
             pupil_val = gaze.pupil_diameter_mm if hasattr(gaze, 'pupil_diameter_mm') and gaze.pupil_diameter_mm > 0 else None
             if pupil_val:
-                self.pupil_data["Left"].append(pupil_val); self.pupil_data["Right"].append(pupil_val); self.pupil_data["Mean"].append(pupil_val)
-                self.is_blinking = False; self.blink_off_counter = 0
+                self.pupil_data["Mean"].append(pupil_val)
+                self.is_blinking = False
+                self.blink_off_counter = 0
             else:
                 self.blink_off_counter += 1
                 if self.blink_off_counter > 3: self.is_blinking = True
+            
+            self.blink_data.append(1 if self.is_blinking else 0)
+
             self.gaze_history.append({'ts': scene_ts, 'pos': (gaze.x, gaze.y)})
             if len(self.gaze_history) > 1:
                 p1, p2 = self.gaze_history[-2], self.gaze_history[-1]
@@ -229,19 +245,29 @@ class RealtimeNeonAnalyzer:
                 time_delta = p2['ts'] - p1['ts']
                 self.fragmentation_data.append(dist / time_delta if time_delta > 0 else 0)
 
-        for key in self.pupil_data:
-            if len(self.pupil_data[key]) > 200: self.pupil_data[key].pop(0)
-        if len(self.fragmentation_data) > 200: self.fragmentation_data.pop(0)
+        if len(self.pupil_data["Mean"]) > BLINK_PLOT_HISTORY: self.pupil_data["Mean"].pop(0)
+        if len(self.fragmentation_data) > FRAG_PLOT_HISTORY: self.fragmentation_data.pop(0)
+        if len(self.blink_data) > BLINK_PLOT_HISTORY: self.blink_data.pop(0)
         if len(self.gaze_history) > 10: self.gaze_history.pop(0)
 
-        if show_pupil: _draw_pupil_plot(scene_img, self.pupil_data, 2, 8, 350, 150, (scene_img.shape[1] - 360, 10))
+        y_pos = 10
+        if show_pupil: 
+            _draw_pupil_plot(scene_img, {"Mean": self.pupil_data["Mean"]}, 2, 8, 350, 150, (scene_img.shape[1] - 360, y_pos))
+            y_pos += 150 + 10
         if show_frag:
-            y_pos = (150 + 20) if show_pupil else 10
             _draw_generic_plot(scene_img, self.fragmentation_data, 0, 3000, FRAG_PLOT_WIDTH, FRAG_PLOT_HEIGHT, (scene_img.shape[1] - 360, y_pos), "Fragmentation (px/s)", FRAG_LINE_COLOR, FRAG_BG_COLOR)
-        if show_blink and self.is_blinking: cv2.putText(scene_img, "BLINK", (scene_img.shape[1] - 150, scene_img.shape[0] - 20), cv2.FONT_HERSHEY_TRIPLEX, 1.5, BLINK_TEXT_COLOR, 2)
-        if show_yolo: cv2.putText(scene_img, f"Gazing at: {self.last_gazed_object}", (20, scene_img.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            y_pos += FRAG_PLOT_HEIGHT + 10
+        
+        if show_blink:
+            _draw_generic_plot(scene_img, self.blink_data, 0, 1.1, BLINK_PLOT_WIDTH, BLINK_PLOT_HEIGHT, (scene_img.shape[1] - 360, y_pos), "Blink Detection", BLINK_PLOT_LINE_COLOR, BLINK_PLOT_BG_COLOR)
+            y_pos += BLINK_PLOT_HEIGHT + 10
 
-        # --- NOVITÀ: Disegna le AOI definite ---
+        if show_aois:
+            cv2.putText(scene_img, f"Gazing at AOI: {self.last_gazed_aoi}", (scene_img.shape[1] - 360, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        
+        if show_blink and self.is_blinking: cv2.putText(scene_img, "BLINK", (scene_img.shape[1] - 150, scene_img.shape[0] - 20), cv2.FONT_HERSHEY_TRIPLEX, 1.5, BLINK_TEXT_COLOR, 2)
+        if show_yolo: cv2.putText(scene_img, f"Gazing at Object: {self.last_gazed_object}", (20, scene_img.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
         if show_aois:
             for aoi in self.static_aois:
                 name, (x1, y1, x2, y2) = aoi['name'], aoi['rect']

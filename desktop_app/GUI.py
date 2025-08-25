@@ -29,7 +29,7 @@ class RealtimeDisplayWindow(tk.Toplevel):
 
         self.analyzer = RealtimeNeonAnalyzer()
         self.is_running = False
-        self.is_paused_for_drawing = False # Flag per il disegno AOI
+        self.is_paused_for_drawing = False
 
         self.canvas = tk.Canvas(self, width=1280, height=720, cursor="crosshair")
         self.canvas.pack()
@@ -41,7 +41,6 @@ class RealtimeDisplayWindow(tk.Toplevel):
         main_control_frame = tk.Frame(self, pady=10)
         main_control_frame.pack(fill=tk.X, padx=10)
 
-        # Frame per controlli di registrazione
         record_frame = tk.LabelFrame(main_control_frame, text="Recording Controls", padx=10, pady=10)
         record_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
         self.record_button = tk.Button(record_frame, text="Start Recording", command=self.toggle_recording, font=('Helvetica', 10, 'bold'), bg='#c8e6c9', state=tk.DISABLED)
@@ -49,7 +48,6 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.event_name_entry = tk.Entry(record_frame, width=25); self.event_name_entry.pack(pady=5); self.event_name_entry.insert(0, "New Event")
         self.add_event_button = tk.Button(record_frame, text="Add Event", command=self.add_event, state=tk.DISABLED); self.add_event_button.pack(pady=5)
 
-        # --- NOVITÀ: Frame per gestione AOI ---
         aoi_frame = tk.LabelFrame(main_control_frame, text="AOI Management", padx=10, pady=10)
         aoi_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
         self.aoi_listbox = tk.Listbox(aoi_frame, height=4)
@@ -59,7 +57,6 @@ class RealtimeDisplayWindow(tk.Toplevel):
         tk.Button(aoi_btn_frame, text="Add AOI", command=self.prepare_to_draw_aoi).pack()
         tk.Button(aoi_btn_frame, text="Remove", command=self.remove_selected_aoi).pack()
         
-        # Frame per opzioni di visualizzazione
         vis_options_frame = tk.LabelFrame(main_control_frame, text="Visual Options", padx=10, pady=10)
         vis_options_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.overlay_vars = {"show_yolo": tk.BooleanVar(value=True), "show_pupil": tk.BooleanVar(value=True), "show_frag": tk.BooleanVar(value=True), "show_blink": tk.BooleanVar(value=True), "show_aois": tk.BooleanVar(value=True)}
@@ -92,7 +89,14 @@ class RealtimeDisplayWindow(tk.Toplevel):
                 self.canvas.after(0, self.update_canvas)
             time.sleep(1/60)
 
-    def update_canvas(self): self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
+    # --- MODIFICA QUI: Aggiunto try-except per TclError ---
+    def update_canvas(self):
+        try:
+            self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
+        except tk.TclError:
+            # Questa eccezione viene sollevata se il canvas è stato distrutto
+            # mentre questo aggiornamento era in coda. È sicuro ignorarla.
+            pass
 
     def toggle_recording(self):
         if not self.analyzer.is_recording:
@@ -114,7 +118,6 @@ class RealtimeDisplayWindow(tk.Toplevel):
         else:
             messagebox.showwarning("Input Error", "Please enter an event name.", parent=self)
     
-    # --- NOVITÀ: Metodi per disegnare e gestire le AOI ---
     def prepare_to_draw_aoi(self):
         self.is_paused_for_drawing = True
         self.status_label.config(text="DRAW AOI: Click and drag on the video to define the area.")
@@ -144,7 +147,7 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.canvas.delete(self.temp_rect_id)
         self.temp_rect_id = None
         self.is_paused_for_drawing = False
-        self.status_label.config(text="Streaming...") # Ripristina lo stato
+        self.status_label.config(text="Streaming...")
 
     def update_aoi_listbox(self):
         self.aoi_listbox.delete(0, tk.END)
@@ -318,7 +321,7 @@ class EventManagerWindow(tk.Toplevel):
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v4.0.1")
+        self.root.title("SPEED v4.0.3")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
