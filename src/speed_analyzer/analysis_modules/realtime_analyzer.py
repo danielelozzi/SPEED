@@ -7,7 +7,6 @@ from pathlib import Path
 import threading
 from pupil_labs.realtime_api.simple import discover_one_device
 from ultralytics import YOLO
-# --- MODIFICA QUI: Aggiunto FRAG_PLOT_HISTORY all'import ---
 from .video_generator import (_draw_pupil_plot, _draw_generic_plot, 
                                FRAG_PLOT_WIDTH, FRAG_PLOT_HEIGHT, FRAG_LINE_COLOR, FRAG_BG_COLOR, 
                                BLINK_TEXT_COLOR, EVENT_TEXT_COLOR, EVENT_BG_COLOR, FRAG_PLOT_HISTORY)
@@ -41,12 +40,12 @@ class RealtimeNeonAnalyzer:
         # Dati per grafici e overlay
         self.pupil_data = {"Left": [], "Right": [], "Mean": []}
         self.fragmentation_data = []
-        self.blink_data = [] # NUOVO: Lista per i dati dei blink
+        self.blink_data = []
         self.gaze_history = []
         self.is_blinking = False
         self.blink_off_counter = 0
         self.last_gazed_object = "N/A"
-        self.last_gazed_aoi = "N/A" # NUOVO: Per tracciare l'AOI osservata
+        self.last_gazed_aoi = "N/A"
         self.last_event_name = ""
 
         # Gestione AOI
@@ -265,7 +264,7 @@ class RealtimeNeonAnalyzer:
         if show_aois:
             cv2.putText(scene_img, f"Gazing at AOI: {self.last_gazed_aoi}", (scene_img.shape[1] - 360, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
-        if show_blink and self.is_blinking: cv2.putText(scene_img, "BLINK", (scene_img.shape[1] - 150, scene_img.shape[0] - 20), cv2.FONT_HERSHEY_TRIPLEX, 1.5, BLINK_TEXT_COLOR, 2)
+        if show_blink and self.is_blinking: cv2.putText(scene_img, "BLINK", (scene_img.shape[1] - 150, scene_img.shape[0] - 50), cv2.FONT_HERSHEY_TRIPLEX, 1.5, BLINK_TEXT_COLOR, 2)
         if show_yolo: cv2.putText(scene_img, f"Gazing at Object: {self.last_gazed_object}", (20, scene_img.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
         if show_aois:
@@ -275,13 +274,25 @@ class RealtimeNeonAnalyzer:
                 cv2.rectangle(scene_img, (x1, y1), (x2, y2), color, 2)
                 cv2.putText(scene_img, name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
+        # --- MODIFICA: Sposta il nome dell'evento in basso a destra ---
         if self.last_event_name:
-            (w, h), _ = cv2.getTextSize(self.last_event_name, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)
-            cv2.rectangle(scene_img, (10, 10), (20 + w, 20 + h), EVENT_BG_COLOR, -1)
-            cv2.putText(scene_img, self.last_event_name, (15, 15 + h), cv2.FONT_HERSHEY_SIMPLEX, 1, EVENT_TEXT_COLOR, 2)
+            font_scale = 1.0
+            font_thickness = 2
+            (text_w, text_h), baseline = cv2.getTextSize(self.last_event_name, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+            
+            img_h, img_w, _ = scene_img.shape
+            padding = 15
+            
+            rect_start = (img_w - text_w - padding * 2, img_h - text_h - padding * 2 - baseline)
+            rect_end = (img_w - padding, img_h - padding)
+            text_pos = (img_w - text_w - int(padding*1.5), img_h - int(padding*1.5) - baseline//2)
+
+            cv2.rectangle(scene_img, rect_start, rect_end, EVENT_BG_COLOR, -1)
+            cv2.putText(scene_img, self.last_event_name, text_pos, cv2.FONT_HERSHEY_SIMPLEX, font_scale, EVENT_TEXT_COLOR, font_thickness)
 
         if self.last_eye_frame:
             eye_img, _ = self.last_eye_frame
+            # Questo disegna la camera oculare in alto a sinistra
             cv2.rectangle(scene_img, (10, 10), (410, 210), (0,0,0), -1)
             scene_img[10:210, 10:410] = cv2.resize(eye_img, (400, 200))
 
