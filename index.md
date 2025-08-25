@@ -370,4 +370,4 @@ If you also use the Computer Vision YOLO-based feature, please cite the followin
 
 ## 💻 Artificial Intelligence disclosure
 
-This code is written in Vibe Coding Google Gemini 2.5 Pro
+This code is written in Vibe Coding with Google Gemini 2.5 Pro
