@@ -1,12 +1,9 @@
-# src/speed_analyzer/analysis_modules/realtime_analyzer.py
 import cv2
 import numpy as np
 import time
-from pupil_labs.real_time_api import Device, Network, receive_gaze_data
+from pupil_labs.realtime_api.simple import discover_one_device
 from ultralytics import YOLO
-
-# Importa le funzioni di disegno che possiamo riutilizzare
-from .video_generator import _draw_pupil_plot, _draw_generic_plot, PUPIL_COLORS, FRAG_LINE_COLOR, FRAG_BG_COLOR
+from .video_generator import _draw_pupil_plot
 
 class RealtimeNeonAnalyzer:
     """
@@ -20,7 +17,6 @@ class RealtimeNeonAnalyzer:
         self.last_scene_frame = None
         self.last_eye_frame = None
         
-        # Inizializza YOLO
         try:
             self.yolo_model = YOLO(model_path)
             print("YOLO model loaded successfully.")
@@ -28,9 +24,7 @@ class RealtimeNeonAnalyzer:
             print(f"Error loading YOLO model: {e}")
             self.yolo_model = None
 
-        # Dati per i plot
         self.pupil_data = {"Left": [], "Right": []}
-        self.gaze_speed_data = []
 
     def connect(self, mock_device=None):
         """
@@ -42,10 +36,10 @@ class RealtimeNeonAnalyzer:
             self.device = mock_device
             return True
 
-        """Cerca e si connette al primo dispositivo Neon disponibile sulla rete."""
         try:
             print("Searching for Neon device on the network...")
-            self.device = Device.discover()
+            # CORREZIONE 2: Usa discover_one_device per una connessione più stabile
+            self.device = discover_one_device(max_search_duration_seconds=10)
             if self.device:
                 print(f"Connected to device: {self.device.phone_name} @ {self.device.ip_address}")
                 return True
@@ -55,14 +49,13 @@ class RealtimeNeonAnalyzer:
         except Exception as e:
             print(f"Failed to connect to device: {e}")
             return False
-        
-
 
     def get_latest_frames_and_gaze(self):
         """Ottiene i frame più recenti e i dati dello sguardo."""
         if not self.device:
             return None, None, None
 
+        # I metodi per ricevere i dati sono corretti
         self.last_scene_frame = self.device.receive_scene_video_frame()
         self.last_eye_frame = self.device.receive_eyes_video_frame()
         self.last_gaze = self.device.receive_gaze_datum()
@@ -76,14 +69,14 @@ class RealtimeNeonAnalyzer:
         if self.yolo_model is None or self.last_scene_frame is None or self.last_gaze is None:
             return "N/A"
 
+        # L'unpacking della tupla è corretto
         scene_img, _ = self.last_scene_frame
         gaze = self.last_gaze
         
-        # Esegui YOLO sul frame
         results = self.yolo_model.track(scene_img, persist=True, verbose=False)
-        
         gaze_point = (int(gaze.x), int(gaze.y))
 
+        # La logica di hit-testing è corretta
         for box in results[0].boxes:
             x1, y1, x2, y2 = [int(i) for i in box.xyxy[0]]
             if x1 <= gaze_point[0] <= x2 and y1 <= gaze_point[1] <= y2:
@@ -99,31 +92,30 @@ class RealtimeNeonAnalyzer:
         scene_frame, eye_frame, gaze = self.get_latest_frames_and_gaze()
 
         if scene_frame is None:
-            # Ritorna un'immagine nera se non c'è connessione
             return np.zeros((720, 1280, 3), dtype=np.uint8)
 
-        scene_img, scene_ts = scene_frame
+        scene_img, _ = scene_frame
         
-        # Esegui YOLO
         if self.yolo_model:
             results = self.yolo_model.track(scene_img, persist=True, verbose=False)
-            scene_img = results[0].plot() # YOLO disegna i bounding box
+            scene_img = results[0].plot()
 
-        # Disegna il punto di sguardo
         if gaze:
             gaze_point = (int(gaze.x), int(gaze.y))
             cv2.circle(scene_img, gaze_point, 20, (0, 0, 255), 2)
             
-            # Aggiorna dati per i grafici
-            if 'pupil_diameter_mm' in gaze:
-                # Nota: l'API v3 unifica i diametri, qui simuliamo una divisione
+            # CORREZIONE 3: Controlla se l'attributo esiste con hasattr()
+            if hasattr(gaze, 'pupil_diameter_mm'):
                 self.pupil_data["Left"].append(gaze.pupil_diameter_mm)
-                if len(self.pupil_data["Left"]) > 200: self.pupil_data["Left"].pop(0)
+                # NOTA: L'API non distingue più tra occhio destro e sinistro per il diametro.
+                # Per semplicità, inseriamo lo stesso dato in entrambi per il grafico.
+                self.pupil_data["Right"].append(gaze.pupil_diameter_mm) 
+                if len(self.pupil_data["Left"]) > 200:
+                    self.pupil_data["Left"].pop(0)
+                    self.pupil_data["Right"].pop(0)
 
-        # Disegna i grafici (riutilizzando la logica esistente)
         _draw_pupil_plot(scene_img, self.pupil_data, 2, 8, 350, 150, (scene_img.shape[1] - 360, 10))
 
-        # Aggiungi il video dell'occhio (PiP)
         if eye_frame:
             eye_img, _ = eye_frame
             pip_h, pip_w = 200, 400

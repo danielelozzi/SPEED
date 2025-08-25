@@ -5,16 +5,12 @@ from pathlib import Path
 import traceback
 import json
 import pandas as pd
+import cv2  
 import logging
 import time
 import sys
 import webbrowser
-from src.speed_analyzer.analysis_modules.realtime_analyzer import RealtimeNeonAnalyzer
-from PIL import Image, ImageTk
-import threading
 
-# --- MODIFICA CHIAVE PER RISOLVERE L'ERRORE ---
-# Aggiungiamo la cartella radice del progetto al percorso di ricerca di Python.
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -23,6 +19,8 @@ from desktop_app.interactive_video_editor import InteractiveVideoEditor
 from desktop_app.aoi_editor import AoiEditor
 from desktop_app.manual_aoi_editor import ManualAoiEditor
 from src.speed_analyzer import run_full_analysis
+# CORREZIONE: Importa RealtimeNeonAnalyzer qui se non è già importato correttamente
+from src.speed_analyzer.analysis_modules.realtime_analyzer import RealtimeNeonAnalyzer
 
 class RealtimeDisplayWindow(tk.Toplevel):
     def __init__(self, parent):
@@ -74,6 +72,7 @@ class RealtimeDisplayWindow(tk.Toplevel):
         if self.analyzer:
             self.analyzer.close()
         self.destroy()
+
 
 class EventManagerWindow(tk.Toplevel):
     """
@@ -230,7 +229,7 @@ class EventManagerWindow(tk.Toplevel):
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v3.7")
+        self.root.title("SPEED v3.7.1")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
@@ -339,16 +338,11 @@ class SpeedApp:
         self.yolo_var = tk.BooleanVar(value=True)
         tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (Required for Dynamic AOI, GPU Recommended)", variable=self.yolo_var).pack(anchor='w')
         tk.Button(analysis_frame, text="RUN FULL ANALYSIS", command=self.run_full_analysis_wrapper, font=('Helvetica', 10, 'bold'), bg='#c5e1a5').pack(pady=5)
-
+        
         # --- Sezione 3.5: Analisi Real-time ---
         realtime_frame = tk.LabelFrame(main_frame, text="3.5 Real-time Analysis", padx=10, pady=10)
         realtime_frame.pack(fill=tk.X, pady=5, padx=10)
         tk.Button(realtime_frame, text="START REAL-TIME STREAM", command=self.start_realtime_stream, font=('Helvetica', 10, 'bold'), bg='#a5d6a7').pack(pady=5)
-
-        # Aggiungi questo nuovo metodo alla classe SpeedApp:
-        def start_realtime_stream(self):
-            """Apre la finestra per lo streaming in tempo reale."""
-            RealtimeDisplayWindow(self.root)
 
         # --- Sezioni 4, 5, 6 (Tabs) ---
         notebook = ttk.Notebook(main_frame)
@@ -375,6 +369,11 @@ class SpeedApp:
         footer_label_part2.pack(side=tk.LEFT)
         
         self.update_aoi_list_display()
+
+    # Aggiungi questo nuovo metodo alla classe SpeedApp:
+    def start_realtime_stream(self):
+        """Apre la finestra per lo streaming in tempo reale."""
+        RealtimeDisplayWindow(self.root)
 
     def open_github(self):
         webbrowser.open_new(r"https://github.com/danielelozzi/SPEED")
@@ -571,16 +570,29 @@ class SpeedApp:
             self.root.wait_window(editor)
             
             new_aoi = None
-            if mode == 'static' or mode == 'dynamic_auto':
+            # Controlla il tipo di editor per accedere agli attributi corretti
+            if isinstance(editor, AoiEditor):
                 if editor.result is not None:
-                    new_aoi = {'name': editor.aoi_name, 'type': editor.result_type, 'data': editor.result}
-            elif mode == 'dynamic_manual':
+                    new_aoi = {
+                        'name': editor.aoi_name, 
+                        'type': editor.result_type, 
+                        'data': editor.result
+                    }
+            elif isinstance(editor, ManualAoiEditor):
                  if editor.saved_keyframes:
-                    new_aoi = {'name': editor.aoi_name, 'type': 'dynamic_manual', 'data': editor.saved_keyframes}
+                    new_aoi = {
+                        'name': editor.aoi_name, 
+                        'type': 'dynamic_manual', 
+                        'data': editor.saved_keyframes
+                    }
 
             if new_aoi:
-                self.user_defined_aois.append(new_aoi)
-                logging.info(f"Added new AOI: {new_aoi}")
+                # Controlla unicità del nome
+                if any(aoi['name'] == new_aoi['name'] for aoi in self.user_defined_aois):
+                    messagebox.showerror("Error", f"An AOI with the name '{new_aoi['name']}' already exists. Please use a unique name.")
+                else:
+                    self.user_defined_aois.append(new_aoi)
+                    logging.info(f"Added new AOI: {new_aoi}")
             
             self.update_aoi_list_display()
 
