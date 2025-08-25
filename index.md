@@ -165,7 +165,38 @@ run_full_analysis(
 
 ### Real-time
 
-Trough the button in the GUI, is possible to visualize in real-time the data streamed by the device, managing events, pupillometry, fragmentation and the object detected by YOLO. 
+The real-time window provides a suite of interactive tools:
+
+* **Live Data Overlays**: Toggle various visualizations on the fly:
+    * **YOLO Detections**: See what objects the system is identifying in real-time.
+    * **Gaze Point**: A circle indicating the current gaze position.
+    * **Pupil & Fragmentation Plots**: Live graphs showing pupillometry and gaze speed.
+    * **Blink Detector**: An on-screen indicator that appears during a blink.
+    * **AOIs**: View your defined Areas of Interest overlaid on the video.
+* **Recording**:
+    * Start and stop recordings directly from the interface.
+    * Data (gaze, events, video) is saved into a selected folder.
+* **Event Management**:
+    * Add timestamped events during a live recording by typing a name and clicking "Add Event".
+* **On-the-fly AOI Definition**:
+    * Pause the stream to draw, name, and add static rectangular AOIs directly on the video feed.
+    * These AOIs are visualized instantly and used for analysis when the recording is stopped. At the end of the recording, a `gaze_in_aoi_results.csv` file is automatically generated.
+
+#### Command-Line Interface (for Developers)
+
+For more advanced use cases and automation, a command-line interface is also available.
+
+```bash
+# Example: Run real-time analysis with a specific YOLO model and define two static AOIs
+python realtime_cli.py --model yolov8n.pt --record --aoi "Screen,100,100,800,600" --aoi "Panel,850,300,1200,500"
+```
+
+You can also use a simulated data stream for testing without a physical device:
+
+```bash
+# Run with a mock device for testing purposes
+python realtime_cli.py --use-mock
+```
 
 ---
 
