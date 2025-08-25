@@ -76,43 +76,99 @@ output_path = "./analysis_results"
 subject_name = "participant_01"
 ```
 
-**2. Choose Your AOI Strategy**
-The key step is to decide if you are using pre-existing enriched data or defining an AOI on-the-fly. If you don't provide an `enriched_data_path`, you can use one of the following programmatic options for defining single or multiple AOI.
 
-**Option A: Static AOI**
-For analyzing a fixed region in the video, define a dictionary with the rectangle's coordinates and pass it via the `aoi_coordinates` parameter.
+## Choose Your AOI Strategy
+
+The speed-analyzer package allows you to define Areas of Interest (AOIs) on-the-fly, directly in your code. This is the recommended workflow when you do not have a pre-existing enriched_data_path. The system is designed to handle a list of multiple, mixed-type AOIs in a single analysis run.
+When you provide the defined_aois parameter, the software will automatically generate new enriched data files (gaze_enriched.csv, fixations_enriched.csv) where each gaze point and fixation is mapped to the name of the AOI it falls into. It will also compute the Normalized Switching Index (SI) based on the sequence of transitions between these AOIs.
+You define AOIs by creating a list of Python dictionaries. Each dictionary must have three keys: name, type, and data.
+
+# General structure for defining AOIs
 
 ```python
-# Define a fixed rectangle (in pixels)
-static_aoi_coords = {'x1': 100, 'y1': 150, 'x2': 800, 'y2': 600}
+my_aois = [
+    { "name": "AOI_Name_1", "type": "...", "data": ... },
+    { "name": "AOI_Name_2", "type": "...", "data": ... },
+]
+```
 
-# Run the analysis
+# AOI Type 1: Static AOI
+
+Use this for a fixed rectangular region that does not move throughout the video. The data is a dictionary containing the pixel coordinates of the rectangle's corners.
+
+```python
+static_aoi = {
+    "name": "Control_Panel",
+    "type": "static",
+    "data": {'x1': 100, 'y1': 150, 'x2': 800, 'y2': 600}
+}
+```
+
+# AOI Type 2: Dynamic AOI (Automatic Object Tracking)
+
+Use this to have an AOI automatically follow an object detected by YOLO. This requires setting run_yolo=True. The data is the integer track_id of the object you want to follow.
+
+# You would typically get the track_id from a preliminary YOLO analysis
+
+```python
+object_id_to_track = 1 
+
+dynamic_auto_aoi = {
+    "name": "Tracked_Ball",
+    "type": "dynamic_auto",
+    "data": object_id_to_track
+}
+```
+
+# AOI Type 3: Dynamic AOI (Manual Keyframes)
+
+Use this to define a custom path for a moving and resizing AOI. You set the AOI's position and size at specific frames (keyframes), and the software will interpolate its position for all frames in between. The data is a dictionary where keys are frame indices and values are tuples of coordinates (x1, y1, x2, y2).
+
+```python
+manual_keyframes_aoi = {
+    "name": "Animated_Focus_Area",
+    "type": "dynamic_manual",
+    "data": {
+        0: (50, 50, 250, 250),      # Position at the start (frame 0)
+        1000: (400, 300, 600, 500), # Position at frame 1000
+        2000: (50, 50, 250, 250)     # Return to the start position at frame 2000
+    }
+}
+```
+
+# Putting It All Together: Example with Multiple AOIs
+
+You can combine any number of AOIs of any type into a single list and pass it to the analysis function.
+
+```python
+import pandas as pd
+from speed_analyzer import run_full_analysis
+
+# 1. Define paths
+raw_path = "./data/raw"
+unenriched_path = "./data/unenriched"
+output_path = "./analysis_results_multi_aoi"
+subject_name = "participant_02"
+
+# 2. Define multiple, mixed-type AOIs
+my_aois = [
+    { "name": "Left_Monitor", "type": "static", "data": {'x1': 0, 'y1': 0, 'x2': 960, 'y2': 1080}},
+    { "name": "Right_Monitor", "type": "static", "data": {'x1': 961, 'y1': 0, 'x2': 1920, 'y2': 1080}},
+    { "name": "Moving_Target", "type": "dynamic_auto", "data": 3 }
+]
+
+# 3. Run the analysis
 run_full_analysis(
-    raw_data_path=str(raw_path),
-    unenriched_data_path=str(unenriched_path),
-    output_path=str(output_path),
+    raw_data_path=raw_path,
+    unenriched_data_path=unenriched_path,
+    output_path=output_path,
     subject_name=subject_name,
-    aoi_coordinates=static_aoi_coords
+    run_yolo=True, # Required for the 'dynamic_auto' AOI
+    defined_aois=my_aois # Pass the complete list of AOIs
 )
 ```
 
-**Option B: Dynamic AOI with Object Tracking**
-To make the AOI follow a specific object, first run a YOLO analysis to identify the object's `track_id`. Then, pass this ID using the `aoi_track_id` parameter. This requires `run_yolo=True`.
 
-```python
-# Specify the track ID of the object to follow
-object_track_id = 1 
-
-# Run the analysis with YOLO tracking enabled
-run_full_analysis(
-    raw_data_path=str(raw_path),
-    unenriched_data_path=str(unenriched_path),
-    output_path=str(output_path),
-    subject_name=subject_name,
-    run_yolo=True,
-    aoi_track_id=object_track_id
-)
-```
 ---
 
 ## 3. Docker Container (For Maximum Reproducibility)
