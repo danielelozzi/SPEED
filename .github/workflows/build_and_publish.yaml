@@ -6,6 +6,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 # Permessi di scrittura per creare la release e pubblicare i package
 permissions:
