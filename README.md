@@ -56,17 +56,14 @@ output_path = "./analysis_results"
 subject_name = "participant_01"
 ```
 
-**2. Choose Your AOI Strategy**
+### Choose Your AOI Strategy
 
 The speed-analyzer package allows you to define Areas of Interest (AOIs) on-the-fly, directly in your code. This is the recommended workflow when you do not have a pre-existing enriched_data_path. The system is designed to handle a list of multiple, mixed-type AOIs in a single analysis run.
 
 When you provide the defined_aois parameter, the software will automatically generate new enriched data files (gaze_enriched.csv, fixations_enriched.csv) where each gaze point and fixation is mapped to the name of the AOI it falls into. It will also compute the Normalized Switching Index (SI) based on the sequence of transitions between these AOIs.
 
-## General Structure
-
 You define AOIs by creating a list of Python dictionaries. Each dictionary must have three keys: name, type, and data.
 
-# General structure for defining AOIs
 
 ```python
 my_aois = [
@@ -75,7 +72,7 @@ my_aois = [
 ]
 ```
 
-**AOI Type 1: Static AOI**
+### AOI Type 1: Static AOI
 
 Use this for a fixed rectangular region that does not move throughout the video. The data is a dictionary containing the pixel coordinates of the rectangle's corners.
 
@@ -87,11 +84,9 @@ static_aoi = {
 }
 ```
 
-**AOI Type 2: Dynamic AOI (Automatic Object Tracking)**
+### AOI Type 2: Dynamic AOI (Automatic Object Tracking)
 
-Use this to have an AOI automatically follow an object detected by YOLO. This requires setting run_yolo=True. The data is the integer track_id of the object you want to follow.
-
-# You would typically get the track_id from a preliminary YOLO analysis
+Use this to have an AOI automatically follow an object detected by YOLO. This requires setting run_yolo=True. The data is the integer track_id of the object you want to follow. You would typically get the track_id from a preliminary YOLO analysis
 
 ```python
 object_id_to_track = 1 
@@ -103,7 +98,7 @@ dynamic_auto_aoi = {
 }
 ```
 
-**AOI Type 3: Dynamic AOI (Manual Keyframes)**
+### AOI Type 3: Dynamic AOI (Manual Keyframes)
 
 Use this to define a custom path for a moving and resizing AOI. You set the AOI's position and size at specific frames (keyframes), and the software will interpolate its position for all frames in between. The data is a dictionary where keys are frame indices and values are tuples of coordinates (x1, y1, x2, y2).
 
@@ -119,7 +114,7 @@ manual_keyframes_aoi = {
 }
 ```
 
-**Putting It All Together: Example with Multiple AOIs**
+### Putting It All Together: Example with Multiple AOIs
 
 You can combine any number of AOIs of any type into a single list and pass it to the analysis function.
 
@@ -151,7 +146,7 @@ run_full_analysis(
 )
 ```
 
-# Real-time
+### Real-time
 
 Trough the button in the GUI, is possible to visualize in real-time the data streamed by the device, managing events, pupillometry, fragmentation and the object detected by YOLO. 
 
@@ -209,17 +204,6 @@ This is the main data processing stage. You run this step only once per particip
 - Optionally run YOLO object detection on the video frames, saving the results to a cache to speed up future runs.
 - Save the processed data (e.g., filtered dataframes for each event) and summary statistics into the output folder.
 
-![GUI 1](images/gui1.png)
-
-![GUI event 1](images/gui_event.png)
-
-![GUI event 2](images/gui_event2.png)
-
-![GUI aoi 1](images/gui_aoi.png)
-
-![GUI aoi 2](images/gui_aoi2.png)
-
-
 This step creates a `processed_data` directory containing intermediate files. Once this is complete, you do not need to run it again unless you want to analyze a different combination of events.
 
 ### Step 2: Generate Outputs On-Demand
@@ -231,11 +215,6 @@ After the core analysis is complete, you can use the dedicated tabs in the GUI t
 - **Normalized Switching Index (SI)**: Index for analyzing the switching component.
 - **Generate enriched data on-the-fly** if you defined a custom AOI.
 
-![GUI 2](images/gui2.png)
-
-![GUI 3](images/gui3.png)
-
-![GUI 4](images/gui4.png)
 
 ---
 
