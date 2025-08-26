@@ -503,6 +503,11 @@ class SpeedApp:
 
         folders_frame = tk.LabelFrame(main_frame, text="2. Input Folders", padx=10, pady=10)
         folders_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        bids_load_frame = tk.Frame(folders_frame)
+        bids_load_frame.pack(fill=tk.X, pady=5, side=tk.TOP)
+        tk.Button(bids_load_frame, text="Load from BIDS Directory...", command=self.load_bids_data, bg="#E0E0E0").pack(fill=tk.X)
+        
         self.unenriched_dir_var.trace_add("write", lambda *args: self.load_data_for_editors())
         self.enriched_dir_var.trace_add("write", lambda *args: self.update_aoi_list_display())
 
@@ -964,6 +969,65 @@ class SpeedApp:
             treeview.column(col, width=120, anchor='center')
         for index, row in dataframe.iterrows():
             treeview.insert("", "end", values=list(row))
+
+    def load_bids_data(self):
+        bids_root_path = filedialog.askdirectory(title="Select the root BIDS directory (containing sub-...)")
+        if not bids_root_path:
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("BIDS Data Selection")
+        dialog.geometry("400x250")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="Specify the data to load from BIDS:", pady=10).pack()
+
+        tk.Label(dialog, text="Subject ID (es. 01):").pack()
+        subject_entry = tk.Entry(dialog)
+        subject_entry.pack(padx=20, fill=tk.X)
+
+        tk.Label(dialog, text="Session ID (es. 01):").pack()
+        session_entry = tk.Entry(dialog)
+        session_entry.pack(padx=20, fill=tk.X)
+
+        tk.Label(dialog, text="Task Name (es. reading):").pack()
+        task_entry = tk.Entry(dialog)
+        task_entry.pack(padx=20, fill=tk.X)
+        
+        def on_load():
+            subject_id = subject_entry.get().strip()
+            session_id = session_entry.get().strip()
+            task_name = task_entry.get().strip()
+
+            if not all([subject_id, session_id, task_name]):
+                messagebox.showwarning("Input Missing", "All fields are required.", parent=dialog)
+                return
+            
+            dialog.destroy()
+            
+            try:
+                messagebox.showinfo("In Progress", "Loading and converting BIDS data...")
+                temp_unenriched_path = load_from_bids(
+                    bids_dir=Path(bids_root_path),
+                    subject_id=subject_id,
+                    session_id=session_id,
+                    task_name=task_name
+                )
+                
+                # Popola automaticamente il campo "Un-enriched" con la cartella temporanea
+                self.unenriched_dir_var.set(str(temp_unenriched_path))
+                # Imposta anche il nome del partecipante e la cartella di output di default
+                self.participant_name_var.set(f"sub-{subject_id}_ses-{session_id}")
+                
+                messagebox.showinfo("Success", "BIDS data loaded successfully and converted for SPEED analysis.\nThe 'Un-enriched' path has been set automatically.")
+
+            except Exception as e:
+                logging.error(f"Error loading from BIDS: {e}\n{traceback.format_exc()}")
+                messagebox.showerror("Loading Error", f"An error occurred: {e}\n\nCheck logs for details.")
+
+        tk.Button(dialog, text="Load Data", command=on_load, font=('Helvetica', 10, 'bold')).pack(pady=20)
+        
 
 if __name__ == '__main__':
     log_dir = project_root / 'logs'

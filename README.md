@@ -382,6 +382,56 @@ task_name=task
 )
 ```
 
+### Loading data in BIDS format
+
+SPEED can also load and analyze eye-tracking datasets already structured according to the BIDS standard.
+
+#### Using the Desktop App
+
+1. In the "2. Input Folders" section, click the new "Load from BIDS Directory..." button.
+2. Select the root folder of your BIDS dataset (the one containing the `sub-...` folders).
+3. Enter the `Subject`, `Session`, and `Task` identifiers you want to load.
+4. SPEED will convert the BIDS files (`_eyetrack.tsv.gz`, `_events.tsv`, etc.) into a temporary folder in the "un-enriched" format that the software can analyze.
+5. The path to this temporary folder will be automatically inserted into the "Un-enriched Data Folder" field.
+6. At this point, you can proceed with the analysis as you would with a normal dataset.
+
+#### Using the Python `speed-analyzer` package
+
+The `load_from_bids` function converts a BIDS dataset and returns the path to a temporary "un-enriched" folder.
+
+```python
+from pathlib import Path
+from speed_analyzer import load_from_bids, run_full_analysis
+
+
+# 1. Define the BIDS dataset path and metadata
+
+bids_input_path = Path("./bids_dataset")
+subject = "01"
+session = "01"
+task = "visualsearch"
+
+# 2. Run the conversion to obtain an "un-enriched" folder
+
+temp_unenriched_path = load_from_bids(
+bids_dir=bids_input_path,
+subject_id=subject,
+session_id=session,
+task_name=task
+)
+
+print(f"BIDS data ready for analysis in: {temp_unenriched_path}")
+
+# 3. You can now use this folder for full analysis with SPEED
+# (Note: A RAW folder is not needed in this case)
+run_full_analysis( 
+raw_data_path=str(temp_unenriched_path), # Use the same folder for simplicity 
+unenriched_data_path=str(temp_unenriched_path), 
+output_path="./analysis_from_bids", 
+subject_name=f"sub-{subject}_ses-{session}"
+)
+```
+
 
 ---
 
