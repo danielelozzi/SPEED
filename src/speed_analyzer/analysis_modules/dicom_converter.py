@@ -28,7 +28,6 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     pupil_df = pd.read_csv(pupil_file)
     events_df = pd.read_csv(events_file) if events_file.exists() else pd.DataFrame()
 
-    # Unisci gaze e pupil per avere un unico dataset temporale
     merged_df = pd.merge_asof(
         gaze_df.sort_values('timestamp [ns]'),
         pupil_df[['timestamp [ns]', 'pupil diameter left [mm]']].sort_values('timestamp [ns]'),
@@ -40,7 +39,7 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
 
     # 2. Imposta i metadati del file DICOM
     file_meta = Dataset()
-    file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.9.1.1'  # Waveform Storage SOP Class
+    file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.9.1.1'
     file_meta.MediaStorageSOPInstanceUID = generate_uid()
     file_meta.ImplementationClassUID = generate_uid()
     file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian 
@@ -60,14 +59,11 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     ds.StudyTime = now.strftime('%H%M%S')
     ds.ContentDate = ds.StudyDate
     ds.ContentTime = ds.StudyTime
-    
     ds.Modality = 'WAV'
 
     # 4. Crea la Waveform Sequence
-    ds.WaveformSequence = Sequence()
     waveform = Dataset()
-    ds.WaveformSequence.append(waveform)
-
+    
     waveform.add_new((0x003A, 0x0005), 'US', 3)
     waveform.add_new((0x003A, 0x0010), 'UL', len(merged_df))
     sampling_freq = 1 / merged_df['time_sec'].diff().mean()
@@ -75,8 +71,8 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     waveform.add_new((0x5400, 0x1004), 'US', 16)
     waveform.add_new((0x003A, 0x0200), 'DS', f"{merged_df['time_sec'].iloc[0]:.6f}")
 
-    # --- CORREZIONE FINALE: Costruisci le sequenze interne in modo esplicito ---
-    channel_definition_sequence = Sequence()
+    # --- CORREZIONE FINALE: Costruzione esplicita della lista prima dell'assegnazione ---
+    channel_definition_list = []
     channel_defs = [
         ("Gaze X", "pixels"),
         ("Gaze Y", "pixels"),
@@ -85,31 +81,22 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     for i, (name, units) in enumerate(channel_defs):
         ch_def = Dataset()
         
-        # Crea la ChannelSourceSequence
-        source_seq = Sequence()
         source_ds = Dataset()
         source_ds.CodeValue = str(i)
         source_ds.CodingSchemeDesignator = "L"
         source_ds.CodeMeaning = name
-        source_seq.append(source_ds)
-        ch_def.ChannelSourceSequence = source_seq
+        ch_def.ChannelSourceSequence = Sequence([source_ds])
 
-        # Crea la UnitsCodeSequence
-        units_seq = Sequence()
         units_ds = Dataset()
         units_ds.CodeValue = "1"
         units_ds.CodingSchemeDesignator = "UCUM"
         units_ds.CodeMeaning = units
-        units_seq.append(units_ds)
+        # Il tag per Units Code Sequence è (003A,021A) e ha VR 'SQ'
+        ch_def.add_new((0x003A, 0x021A), 'SQ', Sequence([units_ds]))
         
-        # Aggiungi la sequenza delle unità al dataset del canale
-        ch_def.add_new((0x003A, 0x021A), 'SQ', units_seq)
-        
-        # Aggiungi il dataset del canale completo alla sequenza principale dei canali
-        channel_definition_sequence.append(ch_def)
+        channel_definition_list.append(ch_def)
 
-    # Assegna la sequenza completa al waveform dataset
-    waveform.ChannelDefinitionSequence = channel_definition_sequence
+    waveform.ChannelDefinitionSequence = Sequence(channel_definition_list)
     # --- FINE CORREZIONE ---
         
     gaze_x_int = (merged_df['gaze x [px]'] * 100).astype(np.int16)
@@ -121,23 +108,25 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     waveform_data[1::3] = gaze_y_int
     waveform_data[2::3] = pupil_int
     
-    waveform.add_new((0x5400, 0x0112), 'US', 0) # WaveformPaddingValue
+    waveform.WaveformPaddingValue = 0
     waveform.WaveformData = waveform_data.tobytes()
+    
+    ds.WaveformSequence = Sequence([waveform])
 
     # 5. Aggiungi gli eventi come Annotation Sequence
     if not events_df.empty:
-        ds.AnnotationSequence = Sequence()
+        annotation_list = []
         for _, event in events_df.iterrows():
             annotation = Dataset()
             event_time_sec = (event['timestamp [ns]'] - start_time_ns) / 1e9
             
-            # Formatta il tempo correttamente per il tipo TM (Time)
-            time_obj = datetime.datetime.utcfromtimestamp(event_time_sec)
+            time_obj = datetime.datetime.utcfromtimestamp(0) + datetime.timedelta(seconds=event_time_sec)
             time_str = time_obj.strftime('%H%M%S.%f')
             
             annotation.add_new('AnnotationTime', 'TM', time_str)
             annotation.add_new('AnnotationText', 'CS', event['name'])
-            ds.AnnotationSequence.append(annotation)
+            annotation_list.append(annotation)
+        ds.AnnotationSequence = Sequence(annotation_list)
 
     # 6. Salva il file DICOM
     ds.is_little_endian = True
@@ -147,9 +136,6 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
 
 
 def load_from_dicom(dicom_path: Path) -> Path:
-    """
-    Carica un file DICOM Waveform e lo converte in una cartella temporanea "un-enriched".
-    """
     logging.info(f"--- CARICAMENTO DATI DICOM da: {dicom_path} ---")
     ds = pydicom.dcmread(dicom_path, force=True)
 
@@ -172,16 +158,8 @@ def load_from_dicom(dicom_path: Path) -> Path:
         time_sec = np.arange(num_samples) / sampling_freq
         timestamps_ns = (time_sec * 1e9).astype('int64')
 
-        gaze_df = pd.DataFrame({
-            'timestamp [ns]': timestamps_ns,
-            'gaze x [px]': gaze_x,
-            'gaze y [px]': gaze_y
-        })
-        pupil_df = pd.DataFrame({
-            'timestamp [ns]': timestamps_ns,
-            'pupil diameter left [mm]': pupil,
-            'pupil diameter right [mm]': pupil
-        })
+        gaze_df = pd.DataFrame({'timestamp [ns]': timestamps_ns, 'gaze x [px]': gaze_x, 'gaze y [px]': gaze_y})
+        pupil_df = pd.DataFrame({'timestamp [ns]': timestamps_ns, 'pupil diameter left [mm]': pupil, 'pupil diameter right [mm]': pupil})
         
         gaze_df.to_csv(temp_unenriched_dir / "gaze.csv", index=False)
         pupil_df.to_csv(temp_unenriched_dir / "3d_eye_states.csv", index=False)
@@ -192,13 +170,10 @@ def load_from_dicom(dicom_path: Path) -> Path:
         start_ts = timestamps_ns[0] if 'timestamps_ns' in locals() else 0
         for annotation in ds.AnnotationSequence:
             time_val = annotation.AnnotationTime
-            # Gestisce sia stringhe che oggetti pydicom.valuerep.TM
             time_str = str(time_val) if time_val else "000000"
             try:
-                # Prova a parsare il formato HHMMSS.FFFFFF
                 dt_obj = datetime.datetime.strptime(time_str, '%H%M%S.%f')
             except ValueError:
-                # Prova a parsare il formato HHMMSS
                 dt_obj = datetime.datetime.strptime(time_str, '%H%M%S')
             
             total_seconds = dt_obj.hour * 3600 + dt_obj.minute * 60 + dt_obj.second + dt_obj.microsecond / 1e6

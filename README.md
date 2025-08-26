@@ -303,8 +303,8 @@ pip install -r requirements.txt
 ### Launch the GUI:
 ```bash
 # Navigate to the desktop_app folder
-cd desktop_app
-python GUI.py
+cd SPEED
+python -m desktop_app.GUI
 ```
 ### Setup and Analysis:
 - Fill in the Participant Name and select the Output Folder.
