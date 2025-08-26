@@ -327,9 +327,15 @@ The script will create a new folder named `synthetic_data_output` in the current
 
 This folder will contain all the necessary files (`gaze.csv`, `fixations.csv`, `external.mp4`, etc.), ready to be used as input for the GUI application or the `speed-analyzer` package.
 
-It is also possible to generate a synthetic stream using:
+It is also possible to generate a synthetic streaming for realtime with GUI using:
 ```bash
 python generate_synthetic_stream.py
+```
+
+or for LSL testing:
+
+```bash
+python lsl_stream_simulator.py
 ```
 
 

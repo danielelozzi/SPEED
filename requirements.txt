@@ -1,5 +1,6 @@
 ultralytics
 pandas
+numpy
 seaborn
 matplotlib
 opencv-python
@@ -8,3 +9,4 @@ tqdm
 pyinstaller
 moviepy
 pupil-labs-realtime-api
+pylsl
