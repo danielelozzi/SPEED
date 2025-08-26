@@ -100,6 +100,8 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     # --- FINE CORREZIONE ---
         
     gaze_x_int = (merged_df['gaze x [px]'] * 100).astype(np.int16)
+
+
     gaze_y_int = (merged_df['gaze y [px]'] * 100).astype(np.int16)
     pupil_int = (merged_df['pupil diameter left [mm]'] * 100).astype(np.int16)
 
