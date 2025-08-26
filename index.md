@@ -553,6 +553,11 @@ If you use the BIDS converter, please cite the BIDS format for eyetracker:
 
 - Szinte, Martin, et al. "Eye-Tracking-BIDS: the brain imaging data structure extended to gaze position and pupil data." Journal of Vision 25.9 (2025): 2351-2351. [10.1167/jov.25.9.2351](https://doi.org/10.1167/jov.25.9.2351)
 
+If you use the DICOM converter, please cite the DICOM inspiration paper:
+
+- Di Matteo, A., Lozzi, D., Mignosi, F., Polsinelli, M., & Placidi, G. (2025). A DICOM-based standard for quantitative physical rehabilitation. Computational and Structural Biotechnology Journal, 28, 40-49. [10.1016/j.csbj.2025.01.012](https://doi.org/10.1016/j.csbj.2025.01.012)
+
+
 ---
 
 ## 💻 Artificial Intelligence disclosure
