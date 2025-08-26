@@ -66,10 +66,17 @@ def _prepare_data(data_dir: Path, un_enriched_mode: bool, options: dict):
     if not un_enriched_mode and (options.get('overlay_on_surface_text') or options.get('crop_and_correct_perspective')):
         try:
             gaze_enr_df = pd.read_csv(data_dir / 'gaze_enriched.csv').sort_values('timestamp [ns]')
+            
+            cols_to_merge_enr = []
             if 'gaze detected on surface' in gaze_enr_df.columns:
+                cols_to_merge_enr.append('gaze detected on surface')
+            if 'aoi_name' in gaze_enr_df.columns:
+                cols_to_merge_enr.append('aoi_name')
+
+            if cols_to_merge_enr:
                  merged_data = pd.merge_asof(
                     merged_data,
-                    gaze_enr_df[['timestamp [ns]', 'gaze detected on surface']],
+                    gaze_enr_df[['timestamp [ns]'] + cols_to_merge_enr],
                     on='timestamp [ns]',
                     direction='backward' # backward fill per lo stato 'on surface'
                  )
@@ -395,9 +402,14 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                         cv2.putText(frame, "BLINK", (out_w - 150, out_h - 20), cv2.FONT_HERSHEY_TRIPLEX, 1.5, BLINK_TEXT_COLOR, 2)
                     
                     # --- NUOVO: Overlay testo 'On Surface' ---
-                    if options.get('overlay_on_surface_text') and frame_data.get('gaze detected on surface') == True:
-                        cv2.putText(frame, "On Surface", (20, out_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ON_SURFACE_TEXT_COLOR, 2)
-                    # --- FINE NUOVO ---
+                    if options.get('overlay_on_surface_text'):
+                        # Priorità all'AOI
+                        if pd.notna(frame_data.get('aoi_name')):
+                            aoi_name = frame_data['aoi_name']
+                            cv2.putText(frame, f"on AOI: {aoi_name}", (20, out_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ON_SURFACE_TEXT_COLOR, 2)
+                        # Altrimenti, controlla la superficie generica
+                        elif frame_data.get('gaze detected on surface') == True:
+                            cv2.putText(frame, "on enrichment area", (20, out_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ON_SURFACE_TEXT_COLOR, 2)
 
                     if options.get('overlay_pupil_plot'):
                         for name, col in pupil_cols.items():
