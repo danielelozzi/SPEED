@@ -1,0 +1,203 @@
+# src/speed_analyzer/analysis_modules/dicom_converter.py
+import pandas as pd
+import pydicom
+from pydicom.dataset import Dataset, FileDataset
+from pydicom.sequence import Sequence
+from pydicom.uid import generate_uid
+import numpy as np
+from pathlib import Path
+import logging
+import datetime
+import time
+
+def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info: dict):
+    """
+    Converte i dati di eye-tracking in un singolo file DICOM usando il Waveform IOD.
+    """
+    logging.info(f"--- AVVIO CONVERSIONE DICOM ---")
+
+    # 1. Carica i dati sorgente di SPEED
+    gaze_file = unenriched_dir / "gaze.csv"
+    pupil_file = unenriched_dir / "3d_eye_states.csv"
+    events_file = unenriched_dir / "events.csv"
+
+    if not gaze_file.exists() or not pupil_file.exists():
+        raise FileNotFoundError("gaze.csv e 3d_eye_states.csv sono necessari per la conversione DICOM.")
+
+    gaze_df = pd.read_csv(gaze_file)
+    pupil_df = pd.read_csv(pupil_file)
+    events_df = pd.read_csv(events_file) if events_file.exists() else pd.DataFrame()
+
+    # Unisci gaze e pupil per avere un unico dataset temporale
+    merged_df = pd.merge_asof(
+        gaze_df.sort_values('timestamp [ns]'),
+        pupil_df[['timestamp [ns]', 'pupil diameter left [mm]']].sort_values('timestamp [ns]'),
+        on='timestamp [ns]', direction='nearest', tolerance=pd.Timedelta('50ms').value
+    ).dropna(subset=['gaze x [px]', 'gaze y [px]', 'pupil diameter left [mm]'])
+
+    start_time_ns = merged_df['timestamp [ns]'].min()
+    merged_df['time_sec'] = (merged_df['timestamp [ns]'] - start_time_ns) / 1e9
+
+    # 2. Imposta i metadati del file DICOM
+    file_meta = Dataset()
+    file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.9.1.1'  # Waveform Storage SOP Class
+    file_meta.MediaStorageSOPInstanceUID = generate_uid()
+    file_meta.ImplementationClassUID = generate_uid()
+
+    # 3. Crea il dataset DICOM principale
+    ds = FileDataset(str(output_dicom_path), {}, file_meta=file_meta, preamble=b"\0" * 128)
+
+    # Informazioni su Paziente e Studio
+    ds.PatientName = patient_info.get("name", "Anonymous")
+    ds.PatientID = patient_info.get("id", "NoID")
+    ds.StudyInstanceUID = generate_uid()
+    ds.SeriesInstanceUID = generate_uid()
+    ds.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
+    ds.SOPClassUID = file_meta.MediaStorageSOPClassUID
+    
+    # Informazioni sulla data e ora
+    now = datetime.datetime.now()
+    ds.StudyDate = now.strftime('%Y%m%d')
+    ds.StudyTime = now.strftime('%H%M%S')
+    ds.ContentDate = ds.StudyDate
+    ds.ContentTime = ds.StudyTime
+    
+    # Modality
+    ds.Modality = 'WAV' # Waveform
+
+    # 4. Crea la Waveform Sequence
+    ds.WaveformSequence = Sequence()
+    waveform = Dataset()
+    ds.WaveformSequence.append(waveform)
+
+    # Definisci i canali (gaze_x, gaze_y, pupil)
+    waveform.NumberOfChannels = 3
+    waveform.NumberOfSamples = len(merged_df)
+    waveform.SamplingFrequency = 1 / merged_df['time_sec'].diff().mean()  # Calcola la freq di campionamento
+    waveform.WaveformBitsAllocated = 16 # I dati verranno salvati come interi a 16 bit
+
+    # Multiplex Group Time Offset (tempo di inizio in secondi)
+    waveform.MultiplexGroupTimeOffset = pydicom.DataElement(0x003A0200, 'DS', merged_df['time_sec'].iloc[0])
+
+    # Definizioni dei canali
+    waveform.ChannelDefinitionSequence = Sequence()
+    channel_defs = [
+        ("Gaze X", "pixels"),
+        ("Gaze Y", "pixels"),
+        ("Pupil Diameter", "mm")
+    ]
+    for i, (name, units) in enumerate(channel_defs):
+        ch_def = Dataset()
+        ch_def.ChannelSourceSequence = Sequence([Dataset()])
+        ch_def.ChannelSourceSequence[0].CodeValue = str(i)
+        ch_def.ChannelSourceSequence[0].CodingSchemeDesignator = "L"
+        ch_def.ChannelSourceSequence[0].CodeMeaning = name
+        ch_def.UnitsCodeSequence = Sequence([Dataset()])
+        ch_def.UnitsCodeSequence[0].CodeValue = "1"
+        ch_def.UnitsCodeSequence[0].CodingSchemeDesignator = "UCUM"
+        ch_def.UnitsCodeSequence[0].CodeMeaning = units
+        waveform.ChannelDefinitionSequence.append(ch_def)
+        
+    # Prepara i dati della forma d'onda (interleaving e conversione a int16)
+    # Moltiplichiamo per 100 per preservare due cifre decimali
+    gaze_x_int = (merged_df['gaze x [px]'] * 100).astype(np.int16)
+    gaze_y_int = (merged_df['gaze y [px]'] * 100).astype(np.int16)
+    pupil_int = (merged_df['pupil diameter left [mm]'] * 100).astype(np.int16)
+
+    waveform_data = np.empty((len(merged_df) * 3,), dtype=np.int16)
+    waveform_data[0::3] = gaze_x_int
+    waveform_data[1::3] = gaze_y_int
+    waveform_data[2::3] = pupil_int
+    
+    waveform.WaveformPaddingValue = 0
+    waveform.WaveformData = waveform_data.tobytes()
+
+    # 5. Aggiungi gli eventi come Annotation Sequence
+    if not events_df.empty:
+        ds.AnnotationSequence = Sequence()
+        for _, event in events_df.iterrows():
+            annotation = Dataset()
+            event_time_sec = (event['timestamp [ns]'] - start_time_ns) / 1e9
+            annotation.AnnotationTime = f"{event_time_sec:.6f}"
+            annotation.AnnotationText = event['name']
+            ds.AnnotationSequence.append(annotation)
+
+    # 6. Salva il file DICOM
+    ds.save_as(str(output_dicom_path), write_like_original=False)
+    logging.info(f"File DICOM salvato con successo in: {output_dicom_path}")
+
+
+def load_from_dicom(dicom_path: Path) -> Path:
+    """
+    Carica un file DICOM Waveform e lo converte in una cartella temporanea "un-enriched".
+    """
+    logging.info(f"--- CARICAMENTO DATI DICOM da: {dicom_path} ---")
+    ds = pydicom.dcmread(dicom_path, force=True)
+
+    # Crea cartella temporanea
+    temp_unenriched_dir = dicom_path.parent / "speed_temp_dicom_import"
+    temp_unenriched_dir.mkdir(parents=True, exist_ok=True)
+    logging.info(f"Cartella temporanea 'un-enriched' creata in: {temp_unenriched_dir}")
+
+    # 1. Estrai i dati dalla Waveform Sequence
+    if 'WaveformSequence' in ds:
+        waveform = ds.WaveformSequence[0]
+        num_samples = waveform.NumberOfSamples
+        
+        # Carica i dati e decodificali da bytes a int16
+        waveform_data_bytes = waveform.WaveformData
+        waveform_data = np.frombuffer(waveform_data_bytes, dtype=np.int16)
+        
+        # Separa i canali e riconverti a float (dividendo per 100)
+        gaze_x = waveform_data[0::3].astype(float) / 100.0
+        gaze_y = waveform_data[1::3].astype(float) / 100.0
+        pupil = waveform_data[2::3].astype(float) / 100.0
+        
+        # Ricrea il timestamp in nanosecondi
+        sampling_freq = waveform.SamplingFrequency
+        time_sec = np.arange(num_samples) / sampling_freq
+        timestamps_ns = (time_sec * 1e9).astype('int64')
+
+        # Crea i DataFrame per SPEED
+        gaze_df = pd.DataFrame({
+            'timestamp [ns]': timestamps_ns,
+            'gaze x [px]': gaze_x,
+            'gaze y [px]': gaze_y
+        })
+        pupil_df = pd.DataFrame({
+            'timestamp [ns]': timestamps_ns,
+            'pupil diameter left [mm]': pupil,
+            'pupil diameter right [mm]': pupil # Duplica per compatibilità
+        })
+        
+        gaze_df.to_csv(temp_unenriched_dir / "gaze.csv", index=False)
+        pupil_df.to_csv(temp_unenriched_dir / "3d_eye_states.csv", index=False)
+        logging.info("Convertiti gaze.csv e 3d_eye_states.csv")
+
+    # 2. Estrai gli eventi dalla Annotation Sequence
+    if 'AnnotationSequence' in ds:
+        events = []
+        start_ts = timestamps_ns[0] if 'timestamps_ns' in locals() else 0
+        for annotation in ds.AnnotationSequence:
+            onset_sec = float(annotation.AnnotationTime)
+            events.append({
+                'name': annotation.AnnotationText,
+                'timestamp [ns]': start_ts + int(onset_sec * 1e9),
+                'recording id': 'dicom_import'
+            })
+        events_df = pd.DataFrame(events)
+        events_df.to_csv(temp_unenriched_dir / "events.csv", index=False)
+        logging.info("Convertito events.csv")
+        
+    # 3. Crea file fittizi per compatibilità
+    if 'gaze_df' in locals() and not gaze_df.empty:
+        world_ts_df = pd.DataFrame({'timestamp [ns]': gaze_df['timestamp [ns]']})
+        world_ts_df.to_csv(temp_unenriched_dir / 'world_timestamps.csv', index=False)
+
+    pd.DataFrame(columns=['fixation id', 'start timestamp [ns]', 'duration [ms]', 'fixation x [px]', 'fixation y [px]']).to_csv(temp_unenriched_dir / 'fixations.csv', index=False)
+    pd.DataFrame(columns=['saccade id', 'start timestamp [ns]', 'duration [ms]']).to_csv(temp_unenriched_dir / 'saccades.csv', index=False)
+    pd.DataFrame(columns=['blink id', 'start timestamp [ns]', 'duration [ms]']).to_csv(temp_unenriched_dir / 'blinks.csv', index=False)
+    logging.info("Creati file comportamentali fittizi.")
+
+    logging.info(f"--- CARICAMENTO DICOM COMPLETATO. Dati pronti in: {temp_unenriched_dir} ---")
+    return temp_unenriched_dir

@@ -11,7 +11,8 @@ import sys
 import webbrowser
 import threading
 from PIL import Image, ImageTk
-from src.speed_analyzer.analysis_modules.bids_converter import convert_to_bids
+from src.speed_analyzer.analysis_modules.bids_converter import convert_to_bids, load_from_bids
+from src.speed_analyzer.analysis_modules.dicom_converter import convert_to_dicom, load_from_dicom # <-- NUOVA IMPORTAZIONE
 
 # Importazione della libreria LSL
 try:
@@ -504,10 +505,11 @@ class SpeedApp:
         folders_frame = tk.LabelFrame(main_frame, text="2. Input Folders", padx=10, pady=10)
         folders_frame.pack(fill=tk.X, pady=5, padx=10)
 
-        bids_load_frame = tk.Frame(folders_frame)
-        bids_load_frame.pack(fill=tk.X, pady=5, side=tk.TOP)
-        tk.Button(bids_load_frame, text="Load from BIDS Directory...", command=self.load_bids_data, bg="#E0E0E0").pack(fill=tk.X)
-        
+        load_buttons_frame = tk.Frame(folders_frame)
+        load_buttons_frame.pack(fill=tk.X, pady=5, side=tk.TOP)
+        tk.Button(load_buttons_frame, text="Load from BIDS Directory...", command=self.load_bids_data, bg="#E0E0E0").pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0,5))
+        tk.Button(load_buttons_frame, text="Load from DICOM File...", command=self.load_dicom_data, bg="#E0E0E0").pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5) # <-- NUOVO BOTTONE
+         
         self.unenriched_dir_var.trace_add("write", lambda *args: self.load_data_for_editors())
         self.enriched_dir_var.trace_add("write", lambda *args: self.update_aoi_list_display())
 
@@ -569,7 +571,10 @@ class SpeedApp:
 
         bids_frame = tk.LabelFrame(main_frame, text="4. Data Export", padx=10, pady=10)
         bids_frame.pack(fill=tk.X, pady=5, padx=10)
-        tk.Button(bids_frame, text="CONVERT TO BIDS FORMAT", command=self.run_bids_conversion, font=('Helvetica', 10, 'bold'), bg='#FFD54F').pack(pady=5)
+        export_buttons_frame = tk.Frame(bids_frame)
+        export_buttons_frame.pack(fill=tk.X)
+        tk.Button(export_buttons_frame, text="CONVERT TO BIDS FORMAT", command=self.run_bids_conversion, font=('Helvetica', 10, 'bold'), bg='#FFD54F').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0,5), pady=5)
+        tk.Button(export_buttons_frame, text="CONVERT TO DICOM FORMAT", command=self.run_dicom_conversion, font=('Helvetica', 10, 'bold'), bg='#FFD54F').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5, pady=5) # <-- NUOVO BOTTONE
 
         notebook = ttk.Notebook(main_frame)
         notebook.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
@@ -594,6 +599,62 @@ class SpeedApp:
         footer_label_part2.pack(side=tk.LEFT)
         
         self.update_aoi_list_display()
+    
+    def run_dicom_conversion(self):
+        unenriched_path_str = self.unenriched_dir_var.get()
+        if not unenriched_path_str or not Path(unenriched_path_str).is_dir():
+            messagebox.showerror("Error", "La cartella 'Un-enriched' è obbligatoria per la conversione DICOM.")
+            return
+
+        patient_name = self.participant_name_var.get().strip()
+        if not patient_name:
+            messagebox.showerror("Error", "Il nome del partecipante è obbligatorio.")
+            return
+        
+        output_dicom_path = filedialog.asksaveasfilename(
+            title="Salva file DICOM",
+            defaultextension=".dcm",
+            filetypes=[("DICOM files", "*.dcm")]
+        )
+        if not output_dicom_path:
+            return
+
+        try:
+            messagebox.showinfo("In Corso", "Avvio della conversione in formato DICOM...")
+            patient_info = {"name": patient_name, "id": patient_name}
+            convert_to_dicom(
+                unenriched_dir=Path(unenriched_path_str),
+                output_dicom_path=Path(output_dicom_path),
+                patient_info=patient_info
+            )
+            messagebox.showinfo("Successo", f"Conversione DICOM completata!\nFile salvato in: {output_dicom_path}")
+        except Exception as e:
+            logging.error(f"Errore durante la conversione DICOM: {e}\n{traceback.format_exc()}")
+            messagebox.showerror("Errore di Conversione", f"Si è verificato un errore: {e}\n\nControlla i log per i dettagli.")
+
+    def load_dicom_data(self):
+        dicom_path_str = filedialog.askopenfilename(
+            title="Seleziona un file DICOM Waveform",
+            filetypes=[("DICOM files", "*.dcm"), ("All files", "*.*")]
+        )
+        if not dicom_path_str:
+            return
+
+        try:
+            messagebox.showinfo("In Corso", "Caricamento e conversione del file DICOM...")
+            temp_unenriched_path = load_from_dicom(Path(dicom_path_str))
+            
+            # Leggi il nome del paziente dal file DICOM per popolare la GUI
+            ds = pydicom.dcmread(dicom_path_str)
+            patient_name = str(ds.PatientName) if 'PatientName' in ds else "dicom_patient"
+
+            self.unenriched_dir_var.set(str(temp_unenriched_path))
+            self.participant_name_var.set(patient_name)
+            
+            messagebox.showinfo("Successo", "Dati DICOM caricati e convertiti con successo per l'analisi in SPEED.")
+        except Exception as e:
+            logging.error(f"Errore durante il caricamento da DICOM: {e}\n{traceback.format_exc()}")
+            messagebox.showerror("Errore di Caricamento", f"Si è verificato un errore: {e}\n\nControlla i log per i dettagli.")
     
     def run_bids_conversion(self):
         unenriched_path_str = self.unenriched_dir_var.get()

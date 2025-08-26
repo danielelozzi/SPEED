@@ -446,6 +446,91 @@ subject_name=f"sub-{subject}_ses-{session}"
 )
 ```
 
+## DICOM Integration (Import/Export)
+
+To enhance interoperability with medical imaging systems and workflows, SPEED now supports basic import and export of eye-tracking data using the DICOM standard.
+
+Inspired by standards for storing time-series data, this feature encapsulates gaze coordinates, pupil diameter, and event markers into a single DICOM file using the **Waveform IOD (Information Object Definition)**. This allows eye-tracking data to be archived and managed within Picture Archiving and Communication Systems (PACS).
+
+### Using the Desktop App
+
+The functionality is accessible through dedicated buttons in the graphical interface.
+
+#### Exporting to DICOM Format
+
+1.  Ensure your project is set up and the **Un-enriched Data Folder** is selected. The **Participant Name** field must also be filled out, as this will be used for the `PatientName` tag in the DICOM file.
+2.  In the **"4. Data Export"** section, click the **"CONVERT TO DICOM FORMAT"** button.
+3.  A save dialog will appear. Choose a location and filename for your `.dcm` file.
+4.  SPEED will package the gaze, pupil, and event data into a single DICOM file.
+
+#### Importing from a DICOM File
+
+1.  In the **"2. Input Folders"** section, click the **"Load from DICOM File..."** button.
+2.  Select the `.dcm` file containing the eye-tracking waveform data.
+3.  SPEED will parse the DICOM file and create a temporary "un-enriched" folder containing the data converted back into the `.csv` formats required for analysis.
+4.  The application will automatically populate the **"Un-enriched Data Folder"** and **"Participant Name"** fields for you.
+5.  You can now proceed with the Core Analysis, plot generation, and other functions as usual.
+
+### Using the `speed-analyzer` Package
+
+You can also access the DICOM conversion tools programmatically.
+
+#### Converting Data to DICOM
+
+Use the `convert_to_dicom` function to export your data.
+
+```python
+from pathlib import Path
+from speed_analyzer import convert_to_dicom
+
+# 1. Define paths and patient information
+unenriched_path = Path("./data/unenriched")
+output_dicom_file = Path("./dicom_exports/subject01.dcm")
+output_dicom_file.parent.mkdir(exist_ok=True)
+
+patient_info = {
+    "name": "Subject 01",
+    "id": "SUB01"
+}
+
+# 2. Run the conversion
+convert_to_dicom(
+    unenriched_dir=unenriched_path,
+    output_dicom_path=output_dicom_file,
+    patient_info=patient_info
+)
+
+print(f"DICOM file successfully created at: {output_dicom_file}")
+```
+
+### Loading Data from DICOM
+Use the load_from_dicom function to import a DICOM file for analysis. The function returns the path to a temporary "un-enriched" folder.
+
+
+```python
+from pathlib import Path
+from speed_analyzer import load_from_dicom, run_full_analysis
+
+# 1. Define the path to the DICOM file
+dicom_file_path = Path("./dicom_exports/subject01.dcm")
+
+# 2. Load and convert the DICOM data
+# This creates a temporary folder with the required CSV files
+temp_unenriched_path = load_from_dicom(dicom_path=dicom_file_path)
+
+print(f"DICOM data is ready for analysis in: {temp_unenriched_path}")
+
+# 3. Use the temporary path to run a full analysis with SPEED
+run_full_analysis(
+    raw_data_path=str(temp_unenriched_path), # For DICOM import, raw and unenriched can be the same
+    unenriched_data_path=str(temp_unenriched_path),
+    output_path="./analysis_from_dicom",
+    subject_name="Subject_01_from_DICOM"
+)
+```
+
+
+
 ---
 
 ## ✍️ Authors & Citation
