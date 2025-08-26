@@ -124,16 +124,16 @@ if __name__ == "__main__":
     outlet_gaze = StreamOutlet(info_gaze)
 
     # --- Setup Stream Video ---
-    # Per il video, inviamo un grande array. Il numero di canali è larghezza * altezza * 3 (BGR)
     video_channel_count = WIDTH * HEIGHT * 3
-    info_video = StreamInfo(VIDEO_STREAM_NAME, VIDEO_STREAM_TYPE, video_channel_count, VIDEO_RATE, 'uint8', 'VideoSimID1')
+    # --- CORREZIONE QUI ---
+    info_video = StreamInfo(VIDEO_STREAM_NAME, VIDEO_STREAM_TYPE, video_channel_count, VIDEO_RATE, 'int8', 'VideoSimID1')
     info_video.desc().append_child_value("width", str(WIDTH))
     info_video.desc().append_child_value("height", str(HEIGHT))
     info_video.desc().append_child_value("color_format", "BGR")
     outlet_video = StreamOutlet(info_video)
 
     # --- Setup Stream Eventi ---
-    info_event = StreamInfo(EVENT_STREAM_NAME, EVENT_STREAM_TYPE, 1, 0, 'string', 'EventSimID1') # Rate 0 per eventi irregolari
+    info_event = StreamInfo(EVENT_STREAM_NAME, EVENT_STREAM_TYPE, 1, 0, 'string', 'EventSimID1')
     outlet_event = StreamOutlet(info_event)
 
     # --- Avvio dei thread per ogni stream ---

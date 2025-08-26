@@ -4,13 +4,20 @@ from pathlib import Path
 import traceback
 import json
 import pandas as pd
-import cv2  
+import cv2
 import logging
 import time
 import sys
 import webbrowser
 import threading
 from PIL import Image, ImageTk
+
+# Importazione della libreria LSL
+try:
+    from pylsl import StreamInfo, StreamOutlet
+except ImportError:
+    StreamInfo = None
+    StreamOutlet = None
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
@@ -21,6 +28,95 @@ from desktop_app.manual_aoi_editor import ManualAoiEditor
 from src.speed_analyzer import run_full_analysis
 from src.speed_analyzer.analysis_modules.realtime_analyzer import RealtimeNeonAnalyzer
 
+
+# --- NUOVA CLASSE PER GESTIRE IL PONTE LSL ---
+class LSLBridge:
+    """
+    Gestisce la creazione e l'invio di dati attraverso stream LSL
+    in un thread separato.
+    """
+    def __init__(self, analyzer: RealtimeNeonAnalyzer):
+        if not StreamOutlet:
+            raise ImportError("Libreria `pylsl` non trovata. Impossibile avviare lo streaming LSL.")
+        
+        self.analyzer = analyzer
+        self.is_running = False
+        self.thread = threading.Thread(target=self._run_bridge, daemon=True)
+        
+        # Gli outlet verranno creati all'interno del thread
+        self.outlet_gaze = None
+        self.outlet_video = None
+        self.outlet_event = None
+        
+        print("LSL Bridge inizializzato.")
+
+    def start(self):
+        self.is_running = True
+        self.thread.start()
+        print("LSL Bridge thread avviato.")
+
+    def stop(self):
+        self.is_running = False
+        print("Fermando LSL Bridge...")
+
+    def push_event(self, event_name: str):
+        if self.outlet_event and self.is_running:
+            try:
+                self.outlet_event.push_sample([event_name])
+                print(f"--> Inviato evento LSL: {event_name}")
+            except Exception as e:
+                print(f"Errore durante l'invio dell'evento LSL: {e}")
+
+    def _run_bridge(self):
+        """
+        Ciclo principale che recupera dati dall'analizzatore e li invia a LSL.
+        """
+        # --- Setup Stream Gaze ---
+        info_gaze = StreamInfo('PupilNeonGaze', 'Gaze', 3, 120, 'float32', 'PupilNeonGazeID1')
+        info_gaze.desc().append_child_value("manufacturer", "Pupil Labs")
+        channels_gaze = info_gaze.desc().append_child("channels")
+        channels_gaze.append_child("channel").append_child_value("label", "x_position_px")
+        channels_gaze.append_child("channel").append_child_value("label", "y_position_px")
+        channels_gaze.append_child("channel").append_child_value("label", "pupil_diameter_mm")
+        self.outlet_gaze = StreamOutlet(info_gaze)
+
+        # --- Setup Stream Eventi ---
+        info_event = StreamInfo('GUI_Events', 'Markers', 1, 0, 'string', 'GUI_EventID1')
+        self.outlet_event = StreamOutlet(info_event)
+
+        print("Stream LSL (Gaze, Events) creati. In attesa di dati video...")
+
+        while self.is_running:
+            # Usa gli ultimi dati già recuperati dal thread principale della GUI
+            gaze_datum = self.analyzer.last_gaze
+            scene_frame = self.analyzer.last_scene_frame
+
+            if gaze_datum:
+                sample = [
+                    gaze_datum.x, gaze_datum.y,
+                    gaze_datum.pupil_diameter_mm if hasattr(gaze_datum, 'pupil_diameter_mm') else 0.0
+                ]
+                self.outlet_gaze.push_sample(sample, gaze_datum.timestamp_unix_seconds)
+
+            if scene_frame:
+                frame_image, frame_ts = scene_frame
+                
+                if self.outlet_video is None: # Inizializza al primo frame
+                    h, w, channels = frame_image.shape
+                    video_channel_count = h * w * channels
+                    info_video = StreamInfo('PupilNeonVideo', 'Video', video_channel_count, 30, 'uint8', 'PupilNeonVideoID1')
+                    info_video.desc().append_child_value("width", str(w))
+                    info_video.desc().append_child_value("height", str(h))
+                    info_video.desc().append_child_value("color_format", "RGB")
+                    self.outlet_video = StreamOutlet(info_video)
+                    print(f"Video stream LSL inizializzato con dimensioni {w}x{h}.")
+
+                self.outlet_video.push_sample(frame_image.flatten(), frame_ts)
+
+            time.sleep(1 / 200) # Dormi per un breve periodo per non sovraccaricare la CPU
+        
+        print("Thread LSL Bridge terminato.")
+
 class RealtimeDisplayWindow(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
@@ -30,6 +126,9 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.analyzer = RealtimeNeonAnalyzer()
         self.is_running = False
         self.is_paused_for_drawing = False
+        
+        # --- NUOVO: Variabile per il ponte LSL ---
+        self.lsl_bridge = None
 
         self.canvas = tk.Canvas(self, width=1280, height=720, cursor="crosshair")
         self.canvas.pack()
@@ -41,12 +140,25 @@ class RealtimeDisplayWindow(tk.Toplevel):
         main_control_frame = tk.Frame(self, pady=10)
         main_control_frame.pack(fill=tk.X, padx=10)
 
-        record_frame = tk.LabelFrame(main_control_frame, text="Recording Controls", padx=10, pady=10)
+        record_frame = tk.LabelFrame(main_control_frame, text="Controls", padx=10, pady=10)
         record_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
+        
         self.record_button = tk.Button(record_frame, text="Start Recording", command=self.toggle_recording, font=('Helvetica', 10, 'bold'), bg='#c8e6c9', state=tk.DISABLED)
         self.record_button.pack(pady=(0,5))
-        self.event_name_entry = tk.Entry(record_frame, width=25); self.event_name_entry.pack(pady=5); self.event_name_entry.insert(0, "New Event")
-        self.add_event_button = tk.Button(record_frame, text="Add Event", command=self.add_event, state=tk.DISABLED); self.add_event_button.pack(pady=5)
+        
+        self.event_name_entry = tk.Entry(record_frame, width=25)
+        self.event_name_entry.pack(pady=5)
+        self.event_name_entry.insert(0, "New Event")
+        
+        self.add_event_button = tk.Button(record_frame, text="Add Event", command=self.add_event, state=tk.DISABLED)
+        self.add_event_button.pack(pady=5)
+        
+        # --- NUOVA CHECKBOX PER LSL ---
+        self.lsl_stream_var = tk.BooleanVar(value=False)
+        lsl_check = tk.Checkbutton(record_frame, text="Enable LSL Stream", variable=self.lsl_stream_var)
+        lsl_check.pack(pady=5)
+        if StreamInfo is None:
+            lsl_check.config(text="Enable LSL Stream (pylsl not found)", state=tk.DISABLED)
 
         aoi_frame = tk.LabelFrame(main_control_frame, text="AOI Management", padx=10, pady=10)
         aoi_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
@@ -75,7 +187,21 @@ class RealtimeDisplayWindow(tk.Toplevel):
 
     def stream_loop(self):
         if self.analyzer.connect():
-            self.is_running = True; self.status_label.config(text="Streaming..."); self.record_button.config(state=tk.NORMAL)
+            self.is_running = True
+            
+            # --- MODIFICATO: Avvia LSL se richiesto ---
+            if self.lsl_stream_var.get():
+                try:
+                    self.lsl_bridge = LSLBridge(self.analyzer)
+                    self.lsl_bridge.start()
+                    self.status_label.config(text="Streaming... (LSL Enabled)")
+                except ImportError as e:
+                    messagebox.showerror("LSL Error", str(e), parent=self)
+                    self.status_label.config(text="Streaming... (LSL FAILED)")
+            else:
+                 self.status_label.config(text="Streaming...")
+            
+            self.record_button.config(state=tk.NORMAL)
         else:
             self.status_label.config(text="Failed to connect. Please check device."); return
 
@@ -89,13 +215,10 @@ class RealtimeDisplayWindow(tk.Toplevel):
                 self.canvas.after(0, self.update_canvas)
             time.sleep(1/60)
 
-    # --- MODIFICA QUI: Aggiunto try-except per TclError ---
     def update_canvas(self):
         try:
             self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
         except tk.TclError:
-            # Questa eccezione viene sollevata se il canvas è stato distrutto
-            # mentre questo aggiornamento era in coda. È sicuro ignorarla.
             pass
 
     def toggle_recording(self):
@@ -113,7 +236,14 @@ class RealtimeDisplayWindow(tk.Toplevel):
     def add_event(self):
         event_name = self.event_name_entry.get()
         if event_name:
-            self.analyzer.add_event(event_name)
+            # Invia l'evento sia alla registrazione interna sia a LSL
+            if self.analyzer.is_recording:
+                self.analyzer.add_event(event_name)
+            
+            # --- NUOVO: Invia evento a LSL se attivo ---
+            if self.lsl_bridge:
+                self.lsl_bridge.push_event(event_name)
+
             self.event_name_entry.delete(0, tk.END); self.event_name_entry.insert(0, "New Event")
         else:
             messagebox.showwarning("Input Error", "Please enter an event name.", parent=self)
@@ -162,10 +292,14 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.update_aoi_listbox()
             
     def on_close(self):
+        # --- MODIFICATO: Ferma anche il ponte LSL ---
+        if self.lsl_bridge:
+            self.lsl_bridge.stop()
         self.is_running = False
         if self.analyzer: self.analyzer.close()
         self.destroy()
 
+# ... (Il resto della classe EventManagerWindow e SpeedApp rimane invariato) ...
 class EventManagerWindow(tk.Toplevel):
     """
     Una finestra per visualizzare, selezionare, modificare, aggiungere, unire e rimuovere eventi
@@ -333,10 +467,8 @@ class SpeedApp:
         self.events_df = pd.DataFrame()
         self.world_timestamps_df = pd.DataFrame()
         
-        # --- MODIFICATO: Lista per le AOI ---
         self.user_defined_aois = []
 
-        # --- MODIFICATO: Setup della scrollbar ---
         main_container = tk.Frame(root)
         main_container.pack(fill=tk.BOTH, expand=True)
 
@@ -358,7 +490,6 @@ class SpeedApp:
         
         main_frame = self.scrollable_frame
 
-        # --- Sezione 1: Setup ---
         setup_frame = tk.LabelFrame(main_frame, text="1. Project Setup", padx=10, pady=10)
         setup_frame.pack(fill=tk.X, pady=10, padx=10)
         name_frame = tk.Frame(setup_frame); name_frame.pack(fill=tk.X, pady=2)
@@ -370,7 +501,6 @@ class SpeedApp:
         self.output_dir_entry = tk.Entry(output_frame); self.output_dir_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(output_frame, text="Browse...", command=self.select_output_dir).pack(side=tk.RIGHT)
 
-        # --- Sezione 2: Input Folders ---
         folders_frame = tk.LabelFrame(main_frame, text="2. Input Folders", padx=10, pady=10)
         folders_frame.pack(fill=tk.X, pady=5, padx=10)
         self.unenriched_dir_var.trace_add("write", lambda *args: self.load_data_for_editors())
@@ -391,7 +521,6 @@ class SpeedApp:
         tk.Entry(enriched_frame, textvariable=self.enriched_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(enriched_frame, text="Browse...", command=lambda: self.select_folder(self.enriched_dir_var, "Select Enriched Data Folder")).pack(side=tk.RIGHT)
         
-        # --- MODIFICATO: Sezione Gestione AOI ---
         aoi_frame = tk.LabelFrame(main_frame, text="2.1 Area of Interest (AOI) Management", padx=10, pady=10)
         aoi_frame.pack(fill=tk.X, pady=5, padx=10)
 
@@ -406,7 +535,6 @@ class SpeedApp:
         self.remove_aoi_btn.pack(side=tk.LEFT, padx=10)
         self.aoi_listbox.bind('<<ListboxSelect>>', self.on_aoi_select)
 
-        # --- Sezione 2.5: Event Management ---
         event_frame = tk.LabelFrame(main_frame, text="2.5 Event Management", padx=10, pady=10)
         event_frame.pack(fill=tk.X, pady=5, padx=10)
         ext_event_file_frame = tk.Frame(event_frame)
@@ -424,19 +552,16 @@ class SpeedApp:
         self.edit_events_btn = tk.Button(event_buttons_frame, text="Edit in Table", command=self.open_event_manager_table, state=tk.DISABLED)
         self.edit_events_btn.pack(side=tk.RIGHT, padx=5)
 
-        # --- Sezione 3: Analisi ---
         analysis_frame = tk.LabelFrame(main_frame, text="3. Run Analysis", padx=10, pady=10)
         analysis_frame.pack(fill=tk.X, pady=5, padx=10)
         self.yolo_var = tk.BooleanVar(value=True)
         tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (Required for Dynamic AOI, GPU Recommended)", variable=self.yolo_var).pack(anchor='w')
         tk.Button(analysis_frame, text="RUN FULL ANALYSIS", command=self.run_full_analysis_wrapper, font=('Helvetica', 10, 'bold'), bg='#c5e1a5').pack(pady=5)
         
-        # --- Sezione 3.5: Analisi Real-time ---
         realtime_frame = tk.LabelFrame(main_frame, text="3.5 Real-time Analysis", padx=10, pady=10)
         realtime_frame.pack(fill=tk.X, pady=5, padx=10)
         tk.Button(realtime_frame, text="START REAL-TIME STREAM", command=self.start_realtime_stream, font=('Helvetica', 10, 'bold'), bg='#a5d6a7').pack(pady=5)
 
-        # --- Sezioni 4, 5, 6 (Tabs) ---
         notebook = ttk.Notebook(main_frame)
         notebook.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
         plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='4. Generate Plots')
@@ -446,7 +571,6 @@ class SpeedApp:
         self.setup_video_tab(video_tab)
         self.setup_yolo_tab(yolo_tab)
         
-        # --- MODIFICATO: Aggiunta del footer ---
         footer_frame = tk.Frame(root, pady=5)
         footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
         
@@ -462,9 +586,7 @@ class SpeedApp:
         
         self.update_aoi_list_display()
 
-    # Aggiungi questo nuovo metodo alla classe SpeedApp:
     def start_realtime_stream(self):
-        """Apre la finestra per lo streaming in tempo reale."""
         RealtimeDisplayWindow(self.root)
 
     def open_github(self):
@@ -597,7 +719,6 @@ class SpeedApp:
             self.update_event_summary_display()
             logging.info("Event list updated via video editor.")
 
-    # --- MODIFICATO: Logica di aggiornamento della lista AOI ---
     def update_aoi_list_display(self):
         self.aoi_listbox.delete(0, tk.END)
         for aoi in self.user_defined_aois:
@@ -605,7 +726,7 @@ class SpeedApp:
         
         unenriched_ok = Path(self.unenriched_dir_var.get()).is_dir()
         self.add_aoi_btn.config(state=tk.NORMAL if unenriched_ok else tk.DISABLED)
-        self.on_aoi_select(None) # Aggiorna lo stato del pulsante remove
+        self.on_aoi_select(None)
 
     def on_aoi_select(self, event):
         self.remove_aoi_btn.config(state=tk.NORMAL if self.aoi_listbox.curselection() else tk.DISABLED)
@@ -616,7 +737,6 @@ class SpeedApp:
             return
         
         if messagebox.askyesno("Confirm", "Are you sure you want to remove the selected AOI?"):
-            # Rimuovi dalla lista in ordine inverso per evitare problemi di indicizzazione
             for index in sorted(selected_indices, reverse=True):
                 del self.user_defined_aois[index]
             self.update_aoi_list_display()
@@ -662,7 +782,6 @@ class SpeedApp:
             self.root.wait_window(editor)
             
             new_aoi = None
-            # Controlla il tipo di editor per accedere agli attributi corretti
             if isinstance(editor, AoiEditor):
                 if editor.result is not None:
                     new_aoi = {
@@ -679,7 +798,6 @@ class SpeedApp:
                     }
 
             if new_aoi:
-                # Controlla unicità del nome
                 if any(aoi['name'] == new_aoi['name'] for aoi in self.user_defined_aois):
                     messagebox.showerror("Error", f"An AOI with the name '{new_aoi['name']}' already exists. Please use a unique name.")
                 else:
@@ -708,7 +826,6 @@ class SpeedApp:
 
             messagebox.showinfo("In Progress", "Starting full analysis...")
             
-            # Se ci sono AOI definite dall'utente, ignora la cartella enriched
             enriched_path_to_use = self.enriched_dir_var.get() or None
             if self.user_defined_aois:
                 enriched_path_to_use = None
@@ -723,7 +840,7 @@ class SpeedApp:
                 events_df=final_events_df,
                 run_yolo=self.yolo_var.get(),
                 yolo_model_path="yolov8n.pt",
-                defined_aois=self.user_defined_aois # Passa la lista di AOI
+                defined_aois=self.user_defined_aois
             )
 
             messagebox.showinfo("Success", f"Full analysis completed.\nResults in: {output_dir}")
