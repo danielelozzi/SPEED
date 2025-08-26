@@ -1,4 +1,6 @@
-# SPEED v4.0.3 - Desktop App & Analysis Package
+# SPEED v4.0.3 - labScoc Processing and Extraction of Eye tracking Data
+
+Desktop App & Analysis Package
 
 *An Advanced Eye-Tracking Data Analysis Software*
 
