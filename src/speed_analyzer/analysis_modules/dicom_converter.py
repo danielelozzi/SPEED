@@ -48,7 +48,6 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     # 3. Crea il dataset DICOM principale
     ds = FileDataset(str(output_dicom_path), {}, file_meta=file_meta, preamble=b"\0" * 128)
 
-    # Informazioni su Paziente e Studio
     ds.PatientName = patient_info.get("name", "Anonymous")
     ds.PatientID = patient_info.get("id", "NoID")
     ds.StudyInstanceUID = generate_uid()
@@ -69,16 +68,14 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     waveform = Dataset()
     ds.WaveformSequence.append(waveform)
 
-    # --- CORREZIONE: Usa i tag numerici espliciti per il Waveform Module ---
-    waveform.add_new((0x003A, 0x0005), 'US', 3)  # Number of Channels
-    waveform.add_new((0x003A, 0x0010), 'UL', len(merged_df)) # Number of Samples
+    waveform.add_new((0x003A, 0x0005), 'US', 3)
+    waveform.add_new((0x003A, 0x0010), 'UL', len(merged_df))
     sampling_freq = 1 / merged_df['time_sec'].diff().mean()
-    waveform.add_new((0x003A, 0x001A), 'DS', f"{sampling_freq:.6f}") # Sampling Frequency
-    waveform.add_new((0x5400, 0x1004), 'US', 16) # Waveform Bits Allocated
-    # --- FINE CORREZIONE ---
+    waveform.add_new((0x003A, 0x001A), 'DS', f"{sampling_freq:.6f}")
+    waveform.add_new((0x5400, 0x1004), 'US', 16)
+    waveform.add_new((0x003A, 0x0200), 'DS', f"{merged_df['time_sec'].iloc[0]:.6f}")
 
-    waveform.add_new((0x003A, 0x0200), 'DS', f"{merged_df['time_sec'].iloc[0]:.6f}") # Multiplex Group Time Offset
-
+    # --- CORREZIONE QUI: Costruisci le sequenze interne in modo esplicito ---
     waveform.ChannelDefinitionSequence = Sequence()
     channel_defs = [
         ("Gaze X", "pixels"),
@@ -87,15 +84,27 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     ]
     for i, (name, units) in enumerate(channel_defs):
         ch_def = Dataset()
-        ch_def.ChannelSourceSequence = Sequence([Dataset()])
-        ch_def.ChannelSourceSequence[0].CodeValue = str(i)
-        ch_def.ChannelSourceSequence[0].CodingSchemeDesignator = "L"
-        ch_def.ChannelSourceSequence[0].CodeMeaning = name
-        ch_def.UnitsCodeSequence = Sequence([Dataset()])
-        ch_def.UnitsCodeSequence[0].CodeValue = "1"
-        ch_def.UnitsCodeSequence[0].CodingSchemeDesignator = "UCUM"
-        ch_def.UnitsCodeSequence[0].CodeMeaning = units
+        
+        # Crea la ChannelSourceSequence
+        source_seq = Sequence()
+        source_ds = Dataset()
+        source_ds.CodeValue = str(i)
+        source_ds.CodingSchemeDesignator = "L"
+        source_ds.CodeMeaning = name
+        source_seq.append(source_ds)
+        ch_def.ChannelSourceSequence = source_seq
+
+        # Crea la UnitsCodeSequence
+        units_seq = Sequence()
+        units_ds = Dataset()
+        units_ds.CodeValue = "1"
+        units_ds.CodingSchemeDesignator = "UCUM"
+        units_ds.CodeMeaning = units
+        units_seq.append(units_ds)
+        ch_def.add_new((0x003A, 0x021A), 'SQ', units_seq) # Tag per Units Code Sequence
+
         waveform.ChannelDefinitionSequence.append(ch_def)
+    # --- FINE CORREZIONE ---
         
     gaze_x_int = (merged_df['gaze x [px]'] * 100).astype(np.int16)
     gaze_y_int = (merged_df['gaze y [px]'] * 100).astype(np.int16)
@@ -115,9 +124,8 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
         for _, event in events_df.iterrows():
             annotation = Dataset()
             event_time_sec = (event['timestamp [ns]'] - start_time_ns) / 1e9
-            # Usiamo tag comuni per testo e tempo
-            annotation.add_new((0x0008, 0x0033), 'TM', f"{datetime.timedelta(seconds=event_time_sec)}") # Content Time
-            annotation.add_new((0x0040, 0xA160), 'UT', event['name']) # Text Value
+            annotation.add_new((0x0070, 0x0004), 'TM', f"{datetime.timedelta(seconds=event_time_sec)}") # Annotation Time
+            annotation.add_new((0x0070, 0x0006), 'CS', event['name']) # Annotation Text
             ds.AnnotationSequence.append(annotation)
 
     # 6. Salva il file DICOM
@@ -126,7 +134,7 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     ds.save_as(str(output_dicom_path), write_like_original=False)
     logging.info(f"File DICOM salvato con successo in: {output_dicom_path}")
 
-# ... (La funzione load_from_dicom rimane invariata)
+
 def load_from_dicom(dicom_path: Path) -> Path:
     """
     Carica un file DICOM Waveform e lo converte in una cartella temporanea "un-enriched".
@@ -140,7 +148,7 @@ def load_from_dicom(dicom_path: Path) -> Path:
 
     if 'WaveformSequence' in ds:
         waveform = ds.WaveformSequence[0]
-        num_samples = waveform.NumberOfSamples
+        num_samples = int(waveform.NumberOfSamples)
         
         waveform_data_bytes = waveform.WaveformData
         waveform_data = np.frombuffer(waveform_data_bytes, dtype=np.int16)
@@ -172,13 +180,16 @@ def load_from_dicom(dicom_path: Path) -> Path:
         events = []
         start_ts = timestamps_ns[0] if 'timestamps_ns' in locals() else 0
         for annotation in ds.AnnotationSequence:
-            # Estrai tempo e testo dai tag corretti
-            time_str = str(annotation.ContentTime)
-            h, m, s = map(float, time_str.split(':'))
-            onset_sec = h * 3600 + m * 60 + s
+            time_str = str(annotation[0x0070, 0x0004].value)
+            parts = time_str.split('.')
+            hms = parts[0]
+            micros = parts[1] if len(parts) > 1 else "0"
+            h, m, s = map(int, hms.split(':'))
+            total_seconds = h * 3600 + m * 60 + s + float("0." + micros)
+            
             events.append({
-                'name': str(annotation.TextValue),
-                'timestamp [ns]': start_ts + int(onset_sec * 1e9),
+                'name': str(annotation[0x0070, 0x0006].value),
+                'timestamp [ns]': start_ts + int(total_seconds * 1e9),
                 'recording id': 'dicom_import'
             })
         events_df = pd.DataFrame(events)
