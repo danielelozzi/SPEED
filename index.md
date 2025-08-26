@@ -1,4 +1,4 @@
-# Welcome to the Official Page for SPEED 4.0.3 - labScoc Processing and Extraction of Eye tracking Data
+# Welcome to the Official Page for SPEED 4.5 - labScoc Processing and Extraction of Eye tracking Data
 
 *An Advanced Eye-Tracking Data Analysis Software for Researchers*
 
@@ -55,7 +55,7 @@ The core analysis engine of SPEED, now available as a reusable package. It's des
 ### Installation from PyPI
 You can install the package directly from the Python Package Index (PyPI) using pip:
 ```bash
-pip install speed-analyzer==4.0.3
+pip install speed-analyzer==4.5
 ```
 ### How to Use the Package
 The package exposes a main function, `run_full_analysis`, that takes paths and options as arguments. See the `example_usage.py` file for a complete demonstration.
@@ -239,7 +239,7 @@ This approach guarantees that your analysis is always executed in the same contr
 ---
 
 ## The Modular Workflow (GUI)
-SPEED 4.0.3 operates on a two-step workflow designed to save time and computational resources.
+SPEED 4.5 operates on a two-step workflow designed to save time and computational resources.
 
 ### Step 1: Run Core Analysis
 This is the main data processing stage. You run this step only once per participant for a given set of events. The software will:
@@ -352,7 +352,49 @@ or for LSL testing:
 
 ```bash
 python lsl_stream_simulator.py
-``
+```
+
+## Export to BIDS Format
+
+SPEED 4.5 introduces a new feature to convert processed eye-tracking data into a format compatible with the **Brain Imaging Data Structure (BIDS)**, following the [BEP020 for Eye Tracking](https://bids.neuroimaging.io/extensions/beps/bep_020.html) guidelines. This facilitates data sharing and standardization for the research community.
+
+### Use via Desktop App
+
+1. After setting the input folders (specifically the **Un-enriched** folder), a new section "4. Data Export" will be available.
+2. Click the **"CONVERT TO BIDS FORMAT"** button.
+3. A dialog box will open asking you for the metadata required for the BIDS structure:
+* **Subject ID**: The participant's identifier (e.g., `01`).
+* **Session ID**: The session identifier (e.g., `01`).
+* **Task Name**: The task name (e.g., `reading`, `visualsearch`).
+4. Select an empty output folder where the BIDS structure will be created.
+5. Click "Start Conversion" to begin the process.
+
+### Usage via the Python `speed-analyzer` package
+
+This functionality is also available via the `convert_to_bids` function.
+
+```python
+from pathlib import Path
+from speed_analyzer import convert_to_bids
+
+# Define input and output paths
+unenriched_path = Path("./data/unenriched")
+bids_output_path = Path("./bids_dataset")
+
+# Define BIDS metadata
+subject = "01"
+session = "01"
+task = "visualsearch"
+
+# Perform the conversion
+convert_to_bids( 
+unenriched_dir=unenriched_path, 
+output_bids_dir=bids_output_path, 
+subject_id=subject, 
+session_id=session, 
+task_name=task
+)
+
 ---
 
 ## ✍️ Authors & Citation

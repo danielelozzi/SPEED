@@ -11,6 +11,7 @@ import sys
 import webbrowser
 import threading
 from PIL import Image, ImageTk
+from src.speed_analyzer.analysis_modules.bids_converter import convert_to_bids
 
 # Importazione della libreria LSL
 try:
@@ -299,7 +300,6 @@ class RealtimeDisplayWindow(tk.Toplevel):
         if self.analyzer: self.analyzer.close()
         self.destroy()
 
-# ... (Il resto della classe EventManagerWindow e SpeedApp rimane invariato) ...
 class EventManagerWindow(tk.Toplevel):
     """
     Una finestra per visualizzare, selezionare, modificare, aggiungere, unire e rimuovere eventi
@@ -455,7 +455,7 @@ class EventManagerWindow(tk.Toplevel):
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v4.0.3")
+        self.root.title("SPEED v4.5")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
@@ -562,11 +562,15 @@ class SpeedApp:
         realtime_frame.pack(fill=tk.X, pady=5, padx=10)
         tk.Button(realtime_frame, text="START REAL-TIME STREAM", command=self.start_realtime_stream, font=('Helvetica', 10, 'bold'), bg='#a5d6a7').pack(pady=5)
 
+        bids_frame = tk.LabelFrame(main_frame, text="4. Data Export", padx=10, pady=10)
+        bids_frame.pack(fill=tk.X, pady=5, padx=10)
+        tk.Button(bids_frame, text="CONVERT TO BIDS FORMAT", command=self.run_bids_conversion, font=('Helvetica', 10, 'bold'), bg='#FFD54F').pack(pady=5)
+
         notebook = ttk.Notebook(main_frame)
         notebook.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
-        plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='4. Generate Plots')
-        video_tab = tk.Frame(notebook); notebook.add(video_tab, text='5. Generate Videos')
-        yolo_tab = tk.Frame(notebook); notebook.add(yolo_tab, text='6. YOLO Results')
+        plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='5. Generate Plots')
+        video_tab = tk.Frame(notebook); notebook.add(video_tab, text='6. Generate Videos')
+        yolo_tab = tk.Frame(notebook); notebook.add(yolo_tab, text='7. YOLO Results')
         self.setup_plot_tab(plot_tab)
         self.setup_video_tab(video_tab)
         self.setup_yolo_tab(yolo_tab)
@@ -585,6 +589,67 @@ class SpeedApp:
         footer_label_part2.pack(side=tk.LEFT)
         
         self.update_aoi_list_display()
+    
+    def run_bids_conversion(self):
+        unenriched_path_str = self.unenriched_dir_var.get()
+        if not unenriched_path_str or not Path(unenriched_path_str).is_dir():
+            messagebox.showerror("Error", "La cartella 'Un-enriched' è obbligatoria per la conversione BIDS.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("BIDS Conversion Setup")
+        dialog.geometry("400x250")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="Inserisci i metadati per la conversione BIDS:", pady=10).pack()
+
+        tk.Label(dialog, text="Subject ID (es. 01):").pack()
+        subject_entry = tk.Entry(dialog)
+        subject_entry.pack(padx=20, fill=tk.X)
+        subject_entry.insert(0, self.participant_name_var.get().replace("participant_", ""))
+
+        tk.Label(dialog, text="Session ID (es. 01):").pack()
+        session_entry = tk.Entry(dialog)
+        session_entry.pack(padx=20, fill=tk.X)
+        session_entry.insert(0, "01")
+
+        tk.Label(dialog, text="Task Name (es. reading):").pack()
+        task_entry = tk.Entry(dialog)
+        task_entry.pack(padx=20, fill=tk.X)
+        task_entry.insert(0, "eyetracking")
+        
+        def on_convert():
+            subject_id = subject_entry.get().strip()
+            session_id = session_entry.get().strip()
+            task_name = task_entry.get().strip()
+
+            if not all([subject_id, session_id, task_name]):
+                messagebox.showwarning("Input Mancante", "Tutti i campi sono obbligatori.", parent=dialog)
+                return
+
+            output_bids_dir = filedialog.askdirectory(title="Seleziona la cartella di output per i dati BIDS")
+            if not output_bids_dir:
+                return
+            
+            dialog.destroy()
+            
+            try:
+                messagebox.showinfo("In Corso", "Avvio della conversione in formato BIDS...")
+                convert_to_bids(
+                    unenriched_dir=Path(unenriched_path_str),
+                    output_bids_dir=Path(output_bids_dir),
+                    subject_id=subject_id,
+                    session_id=session_id,
+                    task_name=task_name
+                )
+                messagebox.showinfo("Successo", f"Conversione BIDS completata con successo!\nDati salvati in: {output_bids_dir}")
+            except Exception as e:
+                logging.error(f"Errore durante la conversione BIDS: {e}\n{traceback.format_exc()}")
+                messagebox.showerror("Errore di Conversione", f"Si è verificato un errore: {e}\n\nControlla i log per i dettagli.")
+
+        tk.Button(dialog, text="Avvia Conversione", command=on_convert, font=('Helvetica', 10, 'bold')).pack(pady=20)
+
 
     def start_realtime_stream(self):
         RealtimeDisplayWindow(self.root)
