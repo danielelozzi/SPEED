@@ -75,8 +75,8 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     waveform.add_new((0x5400, 0x1004), 'US', 16)
     waveform.add_new((0x003A, 0x0200), 'DS', f"{merged_df['time_sec'].iloc[0]:.6f}")
 
-    # --- CORREZIONE QUI: Costruisci le sequenze interne in modo esplicito ---
-    waveform.ChannelDefinitionSequence = Sequence()
+    # --- CORREZIONE FINALE: Costruisci le sequenze interne in modo esplicito ---
+    channel_definition_sequence = Sequence()
     channel_defs = [
         ("Gaze X", "pixels"),
         ("Gaze Y", "pixels"),
@@ -101,9 +101,15 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
         units_ds.CodingSchemeDesignator = "UCUM"
         units_ds.CodeMeaning = units
         units_seq.append(units_ds)
-        ch_def.add_new((0x003A, 0x021A), 'SQ', units_seq) # Tag per Units Code Sequence
+        
+        # Aggiungi la sequenza delle unità al dataset del canale
+        ch_def.add_new((0x003A, 0x021A), 'SQ', units_seq)
+        
+        # Aggiungi il dataset del canale completo alla sequenza principale dei canali
+        channel_definition_sequence.append(ch_def)
 
-        waveform.ChannelDefinitionSequence.append(ch_def)
+    # Assegna la sequenza completa al waveform dataset
+    waveform.ChannelDefinitionSequence = channel_definition_sequence
     # --- FINE CORREZIONE ---
         
     gaze_x_int = (merged_df['gaze x [px]'] * 100).astype(np.int16)
@@ -115,7 +121,7 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     waveform_data[1::3] = gaze_y_int
     waveform_data[2::3] = pupil_int
     
-    waveform.WaveformPaddingValue = 0
+    waveform.add_new((0x5400, 0x0112), 'US', 0) # WaveformPaddingValue
     waveform.WaveformData = waveform_data.tobytes()
 
     # 5. Aggiungi gli eventi come Annotation Sequence
@@ -124,8 +130,13 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
         for _, event in events_df.iterrows():
             annotation = Dataset()
             event_time_sec = (event['timestamp [ns]'] - start_time_ns) / 1e9
-            annotation.add_new((0x0070, 0x0004), 'TM', f"{datetime.timedelta(seconds=event_time_sec)}") # Annotation Time
-            annotation.add_new((0x0070, 0x0006), 'CS', event['name']) # Annotation Text
+            
+            # Formatta il tempo correttamente per il tipo TM (Time)
+            time_obj = datetime.datetime.utcfromtimestamp(event_time_sec)
+            time_str = time_obj.strftime('%H%M%S.%f')
+            
+            annotation.add_new('AnnotationTime', 'TM', time_str)
+            annotation.add_new('AnnotationText', 'CS', event['name'])
             ds.AnnotationSequence.append(annotation)
 
     # 6. Salva il file DICOM
@@ -180,15 +191,20 @@ def load_from_dicom(dicom_path: Path) -> Path:
         events = []
         start_ts = timestamps_ns[0] if 'timestamps_ns' in locals() else 0
         for annotation in ds.AnnotationSequence:
-            time_str = str(annotation[0x0070, 0x0004].value)
-            parts = time_str.split('.')
-            hms = parts[0]
-            micros = parts[1] if len(parts) > 1 else "0"
-            h, m, s = map(int, hms.split(':'))
-            total_seconds = h * 3600 + m * 60 + s + float("0." + micros)
+            time_val = annotation.AnnotationTime
+            # Gestisce sia stringhe che oggetti pydicom.valuerep.TM
+            time_str = str(time_val) if time_val else "000000"
+            try:
+                # Prova a parsare il formato HHMMSS.FFFFFF
+                dt_obj = datetime.datetime.strptime(time_str, '%H%M%S.%f')
+            except ValueError:
+                # Prova a parsare il formato HHMMSS
+                dt_obj = datetime.datetime.strptime(time_str, '%H%M%S')
             
+            total_seconds = dt_obj.hour * 3600 + dt_obj.minute * 60 + dt_obj.second + dt_obj.microsecond / 1e6
+
             events.append({
-                'name': str(annotation[0x0070, 0x0006].value),
+                'name': str(annotation.AnnotationText),
                 'timestamp [ns]': start_ts + int(total_seconds * 1e9),
                 'recording id': 'dicom_import'
             })
