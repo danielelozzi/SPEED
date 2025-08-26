@@ -43,6 +43,7 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.9.1.1'  # Waveform Storage SOP Class
     file_meta.MediaStorageSOPInstanceUID = generate_uid()
     file_meta.ImplementationClassUID = generate_uid()
+    file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian # Sintassi di trasferimento esplicita
 
     # 3. Crea il dataset DICOM principale
     ds = FileDataset(str(output_dicom_path), {}, file_meta=file_meta, preamble=b"\0" * 128)
@@ -70,11 +71,13 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
     waveform = Dataset()
     ds.WaveformSequence.append(waveform)
 
-    # Definisci i canali (gaze_x, gaze_y, pupil)
-    waveform.NumberOfChannels = 3
-    waveform.NumberOfSamples = len(merged_df)
-    waveform.SamplingFrequency = 1 / merged_df['time_sec'].diff().mean()  # Calcola la freq di campionamento
-    waveform.WaveformBitsAllocated = 16 # I dati verranno salvati come interi a 16 bit
+    # --- CORREZIONE QUI: Usa add_new per gli attributi del modulo Waveform ---
+    waveform.add_new('NumberOfChannels', 'US', 3)
+    waveform.add_new('NumberOfSamples', 'UL', len(merged_df))
+    sampling_freq = 1 / merged_df['time_sec'].diff().mean()
+    waveform.add_new('SamplingFrequency', 'DS', f"{sampling_freq:.6f}")
+    waveform.add_new('WaveformBitsAllocated', 'US', 16)
+    # --- FINE CORREZIONE ---
 
     # Multiplex Group Time Offset (tempo di inizio in secondi)
     waveform.MultiplexGroupTimeOffset = pydicom.DataElement(0x003A0200, 'DS', merged_df['time_sec'].iloc[0])
@@ -118,15 +121,17 @@ def convert_to_dicom(unenriched_dir: Path, output_dicom_path: Path, patient_info
         for _, event in events_df.iterrows():
             annotation = Dataset()
             event_time_sec = (event['timestamp [ns]'] - start_time_ns) / 1e9
-            annotation.AnnotationTime = f"{event_time_sec:.6f}"
-            annotation.AnnotationText = event['name']
+            annotation.add_new('AnnotationTime', 'TM', f"{event_time_sec:.6f}")
+            annotation.add_new('AnnotationText', 'CS', event['name'])
             ds.AnnotationSequence.append(annotation)
 
     # 6. Salva il file DICOM
+    ds.is_little_endian = True
+    ds.is_implicit_VR = True
     ds.save_as(str(output_dicom_path), write_like_original=False)
     logging.info(f"File DICOM salvato con successo in: {output_dicom_path}")
 
-
+# ... (La funzione load_from_dicom rimane invariata)
 def load_from_dicom(dicom_path: Path) -> Path:
     """
     Carica un file DICOM Waveform e lo converte in una cartella temporanea "un-enriched".
@@ -154,7 +159,7 @@ def load_from_dicom(dicom_path: Path) -> Path:
         pupil = waveform_data[2::3].astype(float) / 100.0
         
         # Ricrea il timestamp in nanosecondi
-        sampling_freq = waveform.SamplingFrequency
+        sampling_freq = float(waveform.SamplingFrequency)
         time_sec = np.arange(num_samples) / sampling_freq
         timestamps_ns = (time_sec * 1e9).astype('int64')
 
