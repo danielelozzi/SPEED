@@ -517,6 +517,10 @@ run_full_analysis(
 )
 ```
 
+## R package
+
+An experimental version of speed-analyzer package is under contruction for R language, available in R folder.
+
 
 ---
 
