@@ -1,0 +1,14 @@
+Package: speedAnalyzerR
+Type: Package
+Title: Command-Line Eye-Tracking Analyzer (R)
+Version: 0.1.0
+Authors@R: c(person(given = "Your", family = "Name", role = c("aut", "cre"), email = "you@example.com"))
+Description: Command-line tools to organize eye-tracking data into a BIDS-like layout, compute summaries, generate plots, and optionally render a simple video overlay from gaze data. No Python required.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Depends: R (>= 4.0)
+Imports: data.table, ggplot2, optparse, jsonlite, tools, utils, stats, grDevices, graphics, MASS
+Suggests: av, magick
+URL: https://example.org/speedAnalyzerR
+BugReports: https://example.org/speedAnalyzerR/issues

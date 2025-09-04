@@ -1,0 +1,41 @@
+title: Speed Analyzer
+name: speedAnalyzer
+menuGroup: speedAnalyzerR
+version: 0.1.0
+jms: '1.0'
+
+options:
+  - name: data
+    title: Data directory
+    type: FileChooser
+    filters: [dirs]
+  - name: out
+    title: Output directory
+    type: FileChooser
+    filters: [dirs]
+  - name: subject
+    title: Subject ID
+    type: String
+    default: S01
+  - name: bids
+    title: Interpret input as BIDS root
+    type: Bool
+    default: false
+  - name: plots
+    title: Generate plots
+    type: Bool
+    default: true
+  - name: video
+    title: Generate video overlay
+    type: Bool
+    default: false
+
+analysis:
+  function: speedAnalyzerR::run_full_analysis
+  outputs:
+    - name: text
+      title: Messages
+      type: Output
+    - name: plots
+      title: Plots
+      type: Image
