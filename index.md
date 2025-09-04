@@ -2,7 +2,7 @@
 
 *An Advanced Eye-Tracking Data Analysis Software for Researchers*
 
-SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. This project offers two main components: a user-friendly **Desktop App** and a powerful **`speed-analyzer` Python package**.
+SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. This project offers two main components: a user-friendly **Desktop App** and a powerful **`speed-analyzer` Python package** and **`speed-analyzerR` for R programming language**-
 
 
 ## Quick Links
