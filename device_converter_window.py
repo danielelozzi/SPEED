@@ -1,7 +1,7 @@
 # desktop_app/device_converter_window.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
-from src.speed_analyzer.analysis_modules.device_converters import convert_device_data
+from src.speed_analyzer import convert_device_data
 
 
 class DeviceConverterWindow(tk.Toplevel):

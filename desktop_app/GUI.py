@@ -28,7 +28,7 @@ sys.path.insert(0, str(project_root))
 from desktop_app.interactive_video_editor import InteractiveVideoEditor
 from desktop_app.aoi_editor import AoiEditor
 from desktop_app.manual_aoi_editor import ManualAoiEditor
-from desktop_app.device_converter_window import DeviceConverterWindow
+from device_converter_window import DeviceConverterWindow
 from src.speed_analyzer import run_full_analysis
 from src.speed_analyzer.analysis_modules.realtime_analyzer import RealtimeNeonAnalyzer
 
@@ -460,7 +460,7 @@ class EventManagerWindow(tk.Toplevel):
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v4.8")
+        self.root.title("SPEED v4.8.1")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()

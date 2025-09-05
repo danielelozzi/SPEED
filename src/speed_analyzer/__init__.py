@@ -9,9 +9,10 @@ from typing import Optional, Dict, Any, List
 from .analysis_modules import speed_script_events
 from .analysis_modules import yolo_analyzer
 from .analysis_modules import video_generator
-from .analysis_modules.bids_converter import convert_to_bids, load_from_bids 
+from .analysis_modules.bids_converter import convert_to_bids, load_from_bids
+from .analysis_modules.device_converters import convert_device_data
 
-__all__ = ["run_full_analysis", "convert_to_bids", "load_from_bids"] 
+__all__ = ["run_full_analysis", "convert_to_bids", "load_from_bids", "convert_device_data"]
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
