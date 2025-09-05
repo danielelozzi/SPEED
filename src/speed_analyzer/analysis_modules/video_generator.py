@@ -43,6 +43,38 @@ EVENT_BG_COLOR = (0, 0, 0) # Black
 # --- On Surface Text Constants (NEW) ---
 ON_SURFACE_TEXT_COLOR = (120, 255, 120) # Light Green
 
+def _overlay_transparent(background, overlay, x, y):
+    """
+    Sovrappone un'immagine (overlay) con canale alpha su uno sfondo.
+    """
+    background_width = background.shape[1]
+    background_height = background.shape[0]
+    h, w = overlay.shape[0], overlay.shape[1]
+
+    if x >= background_width or y >= background_height:
+        return background
+
+    if x + w > background_width:
+        w = background_width - x
+        overlay = overlay[:, :w]
+    if y + h > background_height:
+        h = background_height - y
+        overlay = overlay[:h]
+
+    if overlay.shape[2] < 4:
+        return background
+
+    alpha = overlay[:, :, 3] / 255.0
+    alpha = np.expand_dims(alpha, axis=2)
+
+    b, g, r = overlay[:, :, 0], overlay[:, :, 1], overlay[:, :, 2]
+    bgr = np.dstack([b, g, r])
+
+    background_subsection = background[y:y+h, x:x+w]
+    composite = bgr * alpha + background_subsection * (1.0 - alpha)
+    background[y:y+h, x:x+w] = composite
+    return background
+
 def _prepare_data(data_dir: Path, un_enriched_mode: bool, options: dict):
     """
     Loads and synchronizes all necessary DataFrames for video generation.
@@ -297,6 +329,23 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
         all_frag_data = sync_data['gaze_speed_px_per_s'].dropna()
         if not all_frag_data.empty: frag_min, frag_max = 0, all_frag_data.quantile(0.99)
 
+
+    # Setup for Dynamic Heatmap
+    gaze_history_for_heatmap = []
+    heatmap_window_size_frames = 0
+    if options.get('overlay_dynamic_heatmap'):
+        # Il valore dello slider viene passato tramite il dizionario 'options'
+        heatmap_window_seconds = options.get('heatmap_window_seconds', 2.0) 
+        heatmap_window_size_frames = int(heatmap_window_seconds * fps)
+    # --- FINE BLOCCO ---
+
+    gaze_history_for_heatmap = []
+    heatmap_window_size_frames = 0
+    if options.get('overlay_dynamic_heatmap'):
+        # Il valore dello slider viene passato tramite il dizionario 'options'
+        heatmap_window_seconds = options.get('heatmap_window_seconds', 2.0) 
+        heatmap_window_size_frames = int(heatmap_window_seconds * fps)
+
     # --- NUOVA LOGICA: DEFINIZIONE DEI SEGMENTI DI FRAME DA PROCESSARE ---
     frame_segments = []
     if options.get('trim_to_events') and selected_events and not events_df.empty:
@@ -345,7 +394,46 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                     
                     frame_data = sync_data.iloc[frame_idx]
                     current_ts = frame_data['timestamp [ns]']
-                    
+
+                    # --- MODIFICA CHIAVE: Disegno Heatmap con Trasparenza ---
+                    if options.get('overlay_dynamic_heatmap'):
+                        if pd.notna(frame_data.get('gaze x [px]')):
+                            gaze_history_for_heatmap.append((int(frame_data['gaze x [px]']), int(frame_data['gaze y [px]'])))
+                        if len(gaze_history_for_heatmap) > heatmap_window_size_frames:
+                            gaze_history_for_heatmap.pop(0)
+
+                        if len(gaze_history_for_heatmap) > 1:
+                            intensity_map = np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
+                            for point in gaze_history_for_heatmap:
+                                cv2.circle(intensity_map, point, radius=25, color=50, thickness=-1)
+                            
+                            intensity_map = cv2.blur(intensity_map, (91, 91))
+                            heatmap_color = cv2.applyColorMap(intensity_map, cv2.COLORMAP_JET)
+                            heatmap_rgba = cv2.cvtColor(heatmap_color, cv2.COLOR_BGR2BGRA)
+                            heatmap_rgba[:, :, 3] = intensity_map
+                            frame = _overlay_transparent(frame, heatmap_rgba, 0, 0)
+                    # --- FINE MODIFICA CHIAVE ---
+
+                    # --- AGGIUNGI QUESTO BLOCCO PRIMA DI TUTTI GLI ALTRI OVERLAY ---
+                    # Overlay Heatmap Dinamica
+                    if options.get('overlay_dynamic_heatmap'):
+                        # Aggiungi il punto di sguardo corrente alla cronologia
+                        if pd.notna(frame_data.get('gaze x [px]')):
+                            gaze_history_for_heatmap.append((int(frame_data['gaze x [px]']), int(frame_data['gaze y [px]'])))
+                        
+                        # Mantieni la cronologia entro la dimensione della finestra
+                        if len(gaze_history_for_heatmap) > heatmap_window_size_frames:
+                            gaze_history_for_heatmap.pop(0)
+
+                        if len(gaze_history_for_heatmap) > 1:
+                            heatmap_img = np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
+                            for point in gaze_history_for_heatmap:
+                                cv2.circle(heatmap_img, point, radius=20, color=20, thickness=-1)
+                            
+                            heatmap_img = cv2.blur(heatmap_img, (81, 81))
+                            heatmap_color = cv2.applyColorMap(heatmap_img, cv2.COLORMAP_JET)
+                            frame = cv2.addWeighted(frame, 0.6, heatmap_color, 0.4, 0)
+                    # --- FINE BLOCCO ---
                     M = None
                     if options.get('crop_and_correct_perspective') and pd.notna(frame_data.get('tl x [px]')):
                         src_pts = np.float32([[frame_data[c] for c in [f'{p} x [px]', f'{p} y [px]']] for p in ['tl','tr','br','bl']])

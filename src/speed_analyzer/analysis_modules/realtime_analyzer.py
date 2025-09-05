@@ -11,12 +11,47 @@ from .video_generator import (_draw_pupil_plot, _draw_generic_plot,
                                FRAG_PLOT_WIDTH, FRAG_PLOT_HEIGHT, FRAG_LINE_COLOR, FRAG_BG_COLOR, 
                                BLINK_TEXT_COLOR, EVENT_TEXT_COLOR, EVENT_BG_COLOR, FRAG_PLOT_HISTORY)
 
-# --- NUOVE COSTANTI PER IL GRAFICO DEI BLINK ---
+# --- NUOVA COSTANTE PER IL GRAFICO DEI BLINK ---
 BLINK_PLOT_HISTORY = 200
 BLINK_PLOT_WIDTH = 350
 BLINK_PLOT_HEIGHT = 100 # Altezza ridotta per un grafico binario
 BLINK_PLOT_BG_COLOR = (80, 80, 80)
 BLINK_PLOT_LINE_COLOR = (255, 100, 255) # Lilla
+
+# --- NUOVA FUNZIONE HELPER PER LA TRASPARENZA ---
+def _overlay_transparent(background, overlay, x, y):
+    """
+    Sovrappone un'immagine (overlay) con canale alpha su uno sfondo.
+    """
+    background_width = background.shape[1]
+    background_height = background.shape[0]
+    h, w = overlay.shape[0], overlay.shape[1]
+
+    if x >= background_width or y >= background_height:
+        return background
+
+    if x + w > background_width:
+        w = background_width - x
+        overlay = overlay[:, :w]
+    if y + h > background_height:
+        h = background_height - y
+        overlay = overlay[:h]
+
+    if overlay.shape[2] < 4:
+        return background
+
+    alpha = overlay[:, :, 3] / 255.0
+    alpha = np.expand_dims(alpha, axis=2)
+
+    b, g, r = overlay[:, :, 0], overlay[:, :, 1], overlay[:, :, 2]
+    bgr = np.dstack([b, g, r])
+
+    background_subsection = background[y:y+h, x:x+w]
+    composite = bgr * alpha + background_subsection * (1.0 - alpha)
+    background[y:y+h, x:x+w] = composite
+    return background
+# --- FINE FUNZIONE HELPER ---
+
 
 class RealtimeNeonAnalyzer:
     """
@@ -42,6 +77,7 @@ class RealtimeNeonAnalyzer:
         self.fragmentation_data = []
         self.blink_data = []
         self.gaze_history = []
+        self.gaze_history_heatmap = []
         self.is_blinking = False
         self.blink_off_counter = 0
         self.last_gazed_object = "N/A"
@@ -206,11 +242,40 @@ class RealtimeNeonAnalyzer:
         results_df.to_csv(results_path, index=False)
         print(f"AOI analysis complete. Results saved to {results_path}")
 
-    def process_and_visualize(self, show_yolo=True, show_pupil=True, show_frag=True, show_blink=True, show_aois=True):
+    def process_and_visualize(self, show_yolo=True, show_pupil=True, show_frag=True, show_blink=True, show_aois=True, show_heatmap=False):
         if not self.is_recording: self.get_latest_frames_and_gaze()
         if self.last_scene_frame is None: return np.zeros((720, 1280, 3), dtype=np.uint8)
 
-        scene_img, scene_ts = self.last_scene_frame
+        scene_img, scene_ts = self.last_scene_frame.image, self.last_scene_frame.timestamp_unix_seconds
+
+        # --- MODIFICA CHIAVE: Logica Heatmap con Trasparenza ---
+        if show_heatmap and self.last_gaze:
+            heatmap_window_size = 60  # Finestra fissa di 60 frame (circa 2 secondi)
+            
+            self.gaze_history_heatmap.append((int(self.last_gaze.x), int(self.last_gaze.y)))
+            if len(self.gaze_history_heatmap) > heatmap_window_size:
+                self.gaze_history_heatmap.pop(0)
+
+            if len(self.gaze_history_heatmap) > 1:
+                # 1. Crea mappa di intensità in scala di grigi
+                intensity_map = np.zeros((scene_img.shape[0], scene_img.shape[1]), dtype=np.uint8)
+                for point in self.gaze_history_heatmap:
+                    cv2.circle(intensity_map, point, radius=25, color=50, thickness=-1)
+                
+                intensity_map = cv2.blur(intensity_map, (91, 91))
+                
+                # 2. Applica la colormap
+                heatmap_color = cv2.applyColorMap(intensity_map, cv2.COLORMAP_JET)
+                
+                # 3. Usa la mappa di intensità come canale Alpha
+                heatmap_rgba = cv2.cvtColor(heatmap_color, cv2.COLOR_BGR2BGRA)
+                heatmap_rgba[:, :, 3] = intensity_map
+                
+                # 4. Sovrapponi l'immagine con trasparenza
+                scene_img = _overlay_transparent(scene_img, heatmap_rgba, 0, 0)
+        else:
+            self.gaze_history_heatmap.clear()
+        # --- FINE MODIFICA CHIAVE ---
         
         self.last_gazed_aoi = "N/A"
         if self.last_gaze and show_aois:
@@ -221,10 +286,13 @@ class RealtimeNeonAnalyzer:
                     break
         
         if show_yolo and self.last_gaze:
-            self.last_gazed_object, scene_img = self.get_gazed_object(scene_img.copy(), self.last_gaze)
+            self.last_gazed_object, scene_img_yolo = self.get_gazed_object(scene_img.copy(), self.last_gaze)
+            # Usa l'immagine annotata da YOLO solo se YOLO è attivo
+            scene_img = scene_img_yolo
         
         if self.last_gaze:
             gaze = self.last_gaze
+            # Disegna il punto di sguardo sopra la heatmap e gli altri overlay
             cv2.circle(scene_img, (int(gaze.x), int(gaze.y)), 20, (0, 0, 255), 2)
             pupil_val = gaze.pupil_diameter_mm if hasattr(gaze, 'pupil_diameter_mm') and gaze.pupil_diameter_mm > 0 else None
             if pupil_val:
@@ -274,7 +342,6 @@ class RealtimeNeonAnalyzer:
                 cv2.rectangle(scene_img, (x1, y1), (x2, y2), color, 2)
                 cv2.putText(scene_img, name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-        # --- MODIFICA: Sposta il nome dell'evento in basso a destra ---
         if self.last_event_name:
             font_scale = 1.0
             font_thickness = 2
@@ -292,7 +359,6 @@ class RealtimeNeonAnalyzer:
 
         if self.last_eye_frame:
             eye_img, _ = self.last_eye_frame
-            # Questo disegna la camera oculare in alto a sinistra
             cv2.rectangle(scene_img, (10, 10), (410, 210), (0,0,0), -1)
             scene_img[10:210, 10:410] = cv2.resize(eye_img, (400, 200))
 

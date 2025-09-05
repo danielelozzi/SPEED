@@ -1,55 +1,88 @@
 #!/usr/bin/env Rscript
 suppressPackageStartupMessages({
-  library(optparse); library(speedAnalyzerR)
+  library(optparse)
+  library(speedAnalyzerR)
 })
 
-subcommands <- c("analyze","bids-convert","video","help")
+# --- NUOVO: Funzione per gestire opzioni multiple ---
+make_option_multiple <- function(...) {
+  option <- make_option(...)
+  option@action <- "store"
+  option@type <- "character"
+  class(option) <- c("MultipleOption", class(option))
+  option
+}
+
+parse_args_multiple <- function(parser, args) {
+  option_list <- parser@option_list
+  for (i in seq_along(option_list)) {
+    if ("MultipleOption" %in% class(option_list[[i]])) {
+      parser@option_list[[i]]@action <- "append"
+    }
+  }
+  parse_args(parser, args)
+}
+# --- FINE NUOVA FUNZIONE ---
+
+subcommands <- c("analyze", "bids-convert", "video", "help")
 
 if (length(commandArgs(trailingOnly = TRUE)) == 0) {
   cat("speed-analyzer-r <subcommand> [options]\n")
   cat("Subcommands: analyze, bids-convert, video, help\n")
-  quit(status=0)
+  quit(status = 0)
 }
 
 sub <- commandArgs(trailingOnly = TRUE)[1]
 
 if (!(sub %in% subcommands)) {
-  cat("Unknown subcommand: ", sub, "\n", sep="")
-  quit(status=1)
+  cat("Unknown subcommand: ", sub, "\n", sep = "")
+  quit(status = 1)
 }
 
 argv <- commandArgs(trailingOnly = TRUE)[-1]
 
 if (sub == "help") {
   cat("Usage:\n")
-  cat("  speed-analyzer-r analyze --data DIR --out DIR --subject S01 [--bids]\n")
+  cat("  speed-analyzer-r analyze --data DIR --out DIR --subject S01 [--bids] [--enriched DIR1] [--enriched DIR2]\n")
   cat("  speed-analyzer-r bids-convert --input DIR --out DIR --subject S01 [--session 01]\n")
   cat("  speed-analyzer-r video --data DIR --out DIR --subject S01 [--video path.mp4]\n")
-  quit(status=0)
+  quit(status = 0)
 }
 
 if (sub == "analyze") {
   option_list <- list(
-    make_option(c("--data"), type="character", help="Data directory (or BIDS root with --bids)"),
-    make_option(c("--out"), type="character", default=NULL, help="Output directory"),
-    make_option(c("--subject"), type="character", default="S01", help="Subject id"),
-    make_option(c("--bids"), action="store_true", default=FALSE, help="Interpret --data as BIDS-like root"),
-    make_option(c("--video"), type="character", default=NULL, help="Optional video path for overlay"),
-    make_option(c("--plots"), action="store_true", default=TRUE, help="Generate plots"),
-    make_option(c("--no-plots"), action="store_true", default=FALSE, help="Disable plots"),
-    make_option(c("--video-overlay"), action="store_true", default=FALSE, help="Also create video overlay")
+    make_option(c("--data"), type = "character", help = "Data directory (or BIDS root with --bids)"),
+    make_option(c("--out"), type = "character", default = NULL, help = "Output directory"),
+    make_option(c("--subject"), type = "character", default = "S01", help = "Subject id"),
+    make_option(c("--bids"), action = "store_true", default = FALSE, help = "Interpret --data as BIDS-like root"),
+    # --- MODIFICA: Aggiunta opzione per cartelle enriched multiple ---
+    make_option_multiple(c("--enriched"), type = "character", default = NULL, help = "Path to an enriched data folder (can be used multiple times)."),
+    # --- FINE MODIFICA ---
+    make_option(c("--video"), type = "character", default = NULL, help = "Optional video path for overlay"),
+    make_option(c("--plots"), action = "store_true", default = TRUE, help = "Generate plots"),
+    make_option(c("--no-plots"), action = "store_true", default = FALSE, help = "Disable plots"),
+    make_option(c("--video-overlay"), action = "store_true", default = FALSE, help = "Also create video overlay")
   )
-  opt <- parse_args(OptionParser(option_list=option_list), args=argv, positional_arguments = FALSE)
+  
+  parser <- OptionParser(option_list = option_list)
+  opt <- parse_args_multiple(parser, args = argv)
+  
   if (isTRUE(opt$`no-plots`)) opt$plots <- FALSE
   if (is.null(opt$data)) stop("--data is required")
   out <- opt$out
   if (is.null(out)) out <- file.path(opt$data, "speed_out")
+  
   speedAnalyzerR::run_full_analysis(
-    working_dir = opt$data, output_dir = out, subject_name = opt$subject,
-    generate_plots = opt$plots, generate_video = opt$`video-overlay`,
-    bids = opt$bids, video_file = opt$video
+    working_dir = opt$data,
+    output_dir = out,
+    subject_name = opt$subject,
+    enriched_dirs = opt$enriched, # Passa la lista di percorsi
+    generate_plots = opt$plots,
+    generate_video = opt$`video-overlay`,
+    bids = opt$bids,
+    video_file = opt$video
   )
-  quit(status=0)
+  quit(status = 0)
 }
 
 if (sub == "bids-convert") {

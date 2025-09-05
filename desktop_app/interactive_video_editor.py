@@ -36,9 +36,11 @@ class InteractiveVideoEditor(tk.Toplevel):
         self.is_playing = False
         self.current_frame_idx = 0
         self.root = parent
-        self.is_updating = False # Flag per prevenire il loop infinito
+        
+        # --- CORREZIONE: Aggiunto flag per prevenire loop ---
+        self.is_updating_slider = False
 
-        # --- GUI Setup ---
+        # ... (Il resto del __init__ è invariato)
         main_frame = tk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.video_label = tk.Label(main_frame)
@@ -72,26 +74,25 @@ class InteractiveVideoEditor(tk.Toplevel):
         self.after(100, lambda: self.draw_timeline())
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
+
     def on_close(self):
         self.is_playing = False
         self.cap.release()
         self.destroy()
 
     def seek_frame(self, frame_idx_str):
-        # **CORREZIONE**: Esegui solo se non stiamo già aggiornando
-        if self.is_updating or self.is_playing:
+        # --- CORREZIONE: Controlla il flag ---
+        if self.is_updating_slider or self.is_playing:
             return
         self.update_frame(int(float(frame_idx_str)))
 
     def update_frame(self, frame_idx):
-        if self.is_updating:
-            return
-        self.is_updating = True
-
         self.current_frame_idx = max(0, min(int(frame_idx), self.total_frames - 1))
         
-        # **CORREZIONE**: Aggiorna lo slider qui, protetto dal flag
+        # --- CORREZIONE: Usa il flag ---
+        self.is_updating_slider = True
         self.frame_scale.set(self.current_frame_idx)
+        self.is_updating_slider = False
         
         self.time_label.config(text=f"Frame: {self.current_frame_idx} / {self.total_frames}")
 
@@ -103,9 +104,8 @@ class InteractiveVideoEditor(tk.Toplevel):
             self.photo = ImageTk.PhotoImage(image=img)
             self.video_label.config(image=self.photo)
             self.draw_timeline()
-        
-        self.is_updating = False
 
+    # ... (Il resto delle funzioni rimane invariato)
     def toggle_play(self):
         self.is_playing = not self.is_playing
         self.play_pause_btn.config(text="❚❚ Pause" if self.is_playing else "▶ Play")

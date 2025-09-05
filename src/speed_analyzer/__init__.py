@@ -112,7 +112,7 @@ def _generate_enriched_from_multiple_aois(
 
     return enriched_gaze # Restituisce per il calcolo SI
 
-def _prepare_working_directory(output_dir: Path, raw_dir: Path, unenriched_dir: Path, enriched_dir: Optional[Path], events_df: pd.DataFrame):
+def _prepare_working_directory(output_dir: Path, raw_dir: Path, unenriched_dir: Path, enriched_dirs: List[Path], events_df: pd.DataFrame):
     working_dir = output_dir / 'eyetracking_files'
     working_dir.mkdir(parents=True, exist_ok=True)
     logging.info(f"Preparing working directory at: {working_dir}")
@@ -130,12 +130,30 @@ def _prepare_working_directory(output_dir: Path, raw_dir: Path, unenriched_dir: 
         '3d_eye_states.csv': unenriched_dir / '3d_eye_states.csv',
         'world_timestamps.csv': unenriched_dir / 'world_timestamps.csv',
     }
-    if enriched_dir:
-        # Per le AOI multiple, i file enriched ora sono diversi
-        if (enriched_dir / 'gaze_enriched.csv').exists():
-            file_map['gaze_enriched.csv'] = enriched_dir / 'gaze_enriched.csv'
-        if (enriched_dir / 'fixations_enriched.csv').exists():
-            file_map['fixations_enriched.csv'] = enriched_dir / 'fixations_enriched.csv'
+    if enriched_dirs:
+        # --- MODIFICA: Logica per unire file da più cartelle ---
+        all_enriched_gaze = []
+        all_enriched_fixations = []
+
+        for enrich_dir in enriched_dirs:
+            aoi_name_from_folder = enrich_dir.name
+
+            gaze_path = enrich_dir / 'gaze.csv'
+            if gaze_path.exists():
+                gaze_df = pd.read_csv(gaze_path)
+                gaze_df['aoi_name'] = aoi_name_from_folder
+                all_enriched_gaze.append(gaze_df)
+
+            fix_path = enrich_dir / 'fixations.csv'
+            if fix_path.exists():
+                fix_df = pd.read_csv(fix_path)
+                fix_df['aoi_name'] = aoi_name_from_folder
+                all_enriched_fixations.append(fix_df)
+
+        if all_enriched_gaze:
+            pd.concat(all_enriched_gaze).to_csv(working_dir / 'gaze_enriched.csv', index=False)
+        if all_enriched_fixations:
+            pd.concat(all_enriched_fixations).to_csv(working_dir / 'fixations_enriched.csv', index=False)
 
     for dest, source in file_map.items():
         if source and source.exists():
@@ -148,7 +166,7 @@ def _prepare_working_directory(output_dir: Path, raw_dir: Path, unenriched_dir: 
 
 def run_full_analysis(
     raw_data_path: str, unenriched_data_path: str, output_path: str, subject_name: str,
-    enriched_data_path: Optional[str] = None, events_df: Optional[pd.DataFrame] = None,
+    enriched_data_paths: Optional[List[str]] = None, events_df: Optional[pd.DataFrame] = None,
     run_yolo: bool = False, yolo_model_path: str = 'yolov8n.pt',
     generate_plots: bool = True, plot_selections: Optional[Dict[str, bool]] = None,
     generate_video: bool = True, video_options: Optional[Dict[str, bool]] = None,
@@ -157,10 +175,10 @@ def run_full_analysis(
     raw_dir = Path(raw_data_path)
     unenriched_dir = Path(unenriched_data_path)
     output_dir = Path(output_path)
-    enriched_dir = Path(enriched_data_path) if enriched_data_path else None
+    enriched_dirs = [Path(p) for p in enriched_data_paths] if enriched_data_paths else []
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    un_enriched_mode = not bool(enriched_dir) and not bool(defined_aois)
+    un_enriched_mode = not bool(enriched_dirs) and not bool(defined_aois)
     enriched_gaze_df = pd.DataFrame()
 
     if events_df is None:
@@ -178,11 +196,14 @@ def run_full_analysis(
 
     if defined_aois:
         un_enriched_mode = False
-        enriched_dir = output_dir / 'enriched_from_AOIs'
-        enriched_dir.mkdir(exist_ok=True)
-        enriched_gaze_df = _generate_enriched_from_multiple_aois(unenriched_dir, enriched_dir, defined_aois, output_dir)
+        enriched_dir_for_aois = output_dir / 'enriched_from_AOIs'
+        enriched_dir_for_aois.mkdir(exist_ok=True)
+        enriched_gaze_df = _generate_enriched_from_multiple_aois(unenriched_dir, enriched_dir_for_aois, defined_aois, output_dir)
+        # Aggiungi questa nuova cartella alla lista di quelle da processare
+        enriched_dirs.append(enriched_dir_for_aois)
 
-    working_dir = _prepare_working_directory(output_dir, raw_dir, unenriched_dir, enriched_dir, events_df)
+
+    working_dir = _prepare_working_directory(output_dir, raw_dir, unenriched_dir, enriched_dirs, events_df)
     selected_event_names = events_df['name'].tolist() if not events_df.empty else []
 
     # --- NUOVO: Calcolo Switching Index ---

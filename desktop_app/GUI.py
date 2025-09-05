@@ -12,7 +12,8 @@ import webbrowser
 import threading
 from PIL import Image, ImageTk
 from src.speed_analyzer.analysis_modules.bids_converter import convert_to_bids, load_from_bids
-from src.speed_analyzer.analysis_modules.dicom_converter import convert_to_dicom, load_from_dicom # <-- NUOVA IMPORTAZIONE
+from src.speed_analyzer.analysis_modules.dicom_converter import convert_to_dicom, load_from_dicom 
+from desktop_app.data_viewer import DataViewerWindow
 
 # Importazione della libreria LSL
 try:
@@ -173,12 +174,14 @@ class RealtimeDisplayWindow(tk.Toplevel):
         
         vis_options_frame = tk.LabelFrame(main_control_frame, text="Visual Options", padx=10, pady=10)
         vis_options_frame.pack(side=tk.LEFT, fill=tk.Y)
-        self.overlay_vars = {"show_yolo": tk.BooleanVar(value=True), "show_pupil": tk.BooleanVar(value=True), "show_frag": tk.BooleanVar(value=True), "show_blink": tk.BooleanVar(value=True), "show_aois": tk.BooleanVar(value=True)}
+        self.overlay_vars = {"show_yolo": tk.BooleanVar(value=True), "show_pupil": tk.BooleanVar(value=True), "show_frag": tk.BooleanVar(value=True), "show_blink": tk.BooleanVar(value=True), "show_aois": tk.BooleanVar(value=True),"show_heatmap": tk.BooleanVar(value=False)}
         tk.Checkbutton(vis_options_frame, text="YOLO", variable=self.overlay_vars["show_yolo"]).pack(anchor='w')
         tk.Checkbutton(vis_options_frame, text="Pupil Plot", variable=self.overlay_vars["show_pupil"]).pack(anchor='w')
         tk.Checkbutton(vis_options_frame, text="Frag. Plot", variable=self.overlay_vars["show_frag"]).pack(anchor='w')
         tk.Checkbutton(vis_options_frame, text="Blink", variable=self.overlay_vars["show_blink"]).pack(anchor='w')
         tk.Checkbutton(vis_options_frame, text="AOIs", variable=self.overlay_vars["show_aois"]).pack(anchor='w')
+        tk.Checkbutton(vis_options_frame, text="Heatmap", variable=self.overlay_vars["show_heatmap"]).pack(anchor='w')
+
 
         self.status_label = tk.Label(main_control_frame, text="Connecting to device...", font=('Helvetica', 10))
         self.status_label.pack(side=tk.LEFT, padx=20, fill=tk.BOTH, expand=True)
@@ -456,7 +459,7 @@ class EventManagerWindow(tk.Toplevel):
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v4.5")
+        self.root.title("SPEED v4.7")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
@@ -523,10 +526,17 @@ class SpeedApp:
         tk.Entry(unenriched_frame, textvariable=self.unenriched_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(unenriched_frame, text="Browse...", command=lambda: self.select_folder(self.unenriched_dir_var, "Select Un-enriched Data Folder")).pack(side=tk.RIGHT)
         
-        enriched_frame = tk.Frame(folders_frame); enriched_frame.pack(fill=tk.X, pady=2)
-        tk.Label(enriched_frame, text="Enriched Data Folder (Optional):", width=25, anchor='w').pack(side=tk.LEFT)
-        tk.Entry(enriched_frame, textvariable=self.enriched_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
-        tk.Button(enriched_frame, text="Browse...", command=lambda: self.select_folder(self.enriched_dir_var, "Select Enriched Data Folder")).pack(side=tk.RIGHT)
+        enriched_frame = tk.LabelFrame(folders_frame, text="Enriched Data Folders (Optional):", padx=10, pady=5)
+        enriched_frame.pack(fill=tk.X, pady=2)
+        
+        self.enriched_listbox = tk.Listbox(enriched_frame, height=3)
+        self.enriched_listbox.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
+        
+        enriched_btn_frame = tk.Frame(enriched_frame)
+        enriched_btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        tk.Button(enriched_btn_frame, text="Add...", command=self.add_enriched_dir).pack(pady=2)
+        tk.Button(enriched_btn_frame, text="Remove", command=self.remove_enriched_dir).pack(pady=2)
+        self.enriched_dir_paths = [] # Lista per memorizzare i percorsi
         
         aoi_frame = tk.LabelFrame(main_frame, text="2.1 Area of Interest (AOI) Management", padx=10, pady=10)
         aoi_frame.pack(fill=tk.X, pady=5, padx=10)
@@ -575,6 +585,7 @@ class SpeedApp:
         export_buttons_frame.pack(fill=tk.X)
         tk.Button(export_buttons_frame, text="CONVERT TO BIDS FORMAT", command=self.run_bids_conversion, font=('Helvetica', 10, 'bold'), bg='#FFD54F').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0,5), pady=5)
         tk.Button(export_buttons_frame, text="CONVERT TO DICOM FORMAT", command=self.run_dicom_conversion, font=('Helvetica', 10, 'bold'), bg='#FFD54F').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5, pady=5) # <-- NUOVO BOTTONE
+        tk.Button(export_buttons_frame, text="Open Data Viewer...", command=self.open_data_viewer, font=('Helvetica', 10, 'bold'), bg='#AED581').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5, pady=5)
 
         notebook = ttk.Notebook(main_frame)
         notebook.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
@@ -599,6 +610,10 @@ class SpeedApp:
         footer_label_part2.pack(side=tk.LEFT)
         
         self.update_aoi_list_display()
+    
+    def open_data_viewer(self):
+        viewer_window = DataViewerWindow(self.root, defined_aois=self.user_defined_aois)
+
     
     def run_dicom_conversion(self):
         unenriched_path_str = self.unenriched_dir_var.get()
@@ -716,6 +731,23 @@ class SpeedApp:
 
         tk.Button(dialog, text="Avvia Conversione", command=on_convert, font=('Helvetica', 10, 'bold')).pack(pady=20)
 
+    def add_enriched_dir(self):
+        dir_path = filedialog.askdirectory(title="Select Enriched Data Folder")
+        if dir_path and dir_path not in self.enriched_dir_paths:
+            self.enriched_dir_paths.append(dir_path)
+            self.enriched_listbox.insert(tk.END, Path(dir_path).name) # Mostra solo il nome della cartella
+            self.update_aoi_list_display()
+
+    def remove_enriched_dir(self):
+        selected_indices = self.enriched_listbox.curselection()
+        if not selected_indices:
+            return
+        
+        # Rimuovi in ordine inverso per evitare problemi con gli indici
+        for index in sorted(selected_indices, reverse=True):
+            self.enriched_listbox.delete(index)
+            del self.enriched_dir_paths[index]
+        self.update_aoi_list_display()
 
     def start_realtime_stream(self):
         RealtimeDisplayWindow(self.root)
@@ -737,9 +769,16 @@ class SpeedApp:
     def setup_video_tab(self, parent_tab):
         video_options_frame = tk.LabelFrame(parent_tab, text="Video Options", padx=10, pady=10)
         video_options_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        video_opts = {"trim_to_events": "Trim video to selected events only", "crop_and_correct_perspective": "Crop & Correct Perspective", "overlay_yolo": "Overlay YOLO detections", "overlay_gaze": "Overlay gaze point", "overlay_pupil_plot": "Overlay pupillometry plot", "overlay_fragmentation_plot": "Overlay gaze fragmentation plot", "overlay_event_text": "Overlay event name text", "overlay_on_surface_text": "Overlay Enriched Area / AOI text", "include_internal_cam": "Include internal camera (PiP)"}
+        video_opts = {"trim_to_events": "Trim video to selected events only", "crop_and_correct_perspective": "Crop & Correct Perspective", "overlay_yolo": "Overlay YOLO detections", "overlay_gaze": "Overlay gaze point", "overlay_pupil_plot": "Overlay pupillometry plot", "overlay_fragmentation_plot": "Overlay gaze fragmentation plot", "overlay_event_text": "Overlay event name text", "overlay_on_surface_text": "Overlay Enriched Area / AOI text", "include_internal_cam": "Include internal camera (PiP)", "overlay_dynamic_heatmap": "Overlay Dynamic Gaze Heatmap"}
         for key, text in video_opts.items():
             self.video_vars[key] = tk.BooleanVar(value=False); tk.Checkbutton(video_options_frame, text=text, variable=self.video_vars[key]).pack(anchor='w')
+
+        heatmap_video_frame = tk.Frame(video_options_frame)
+        heatmap_video_frame.pack(fill=tk.X, padx=(20, 0), pady=(5,0))
+        self.heatmap_video_window_var = tk.DoubleVar(value=2.0)
+        tk.Label(heatmap_video_frame, text="Heatmap Window (seconds):").pack(side=tk.LEFT)
+        ttk.Scale(heatmap_video_frame, from_=0.5, to=10.0, variable=self.heatmap_video_window_var, orient=tk.HORIZONTAL).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=5)
+        
         self.video_vars['overlay_gaze'].set(True); self.video_vars['overlay_event_text'].set(True)
         tk.Label(video_options_frame, text="\nOutput Filename:").pack(anchor='w')
         self.video_filename_var = tk.StringVar(value="video_output_1.mp4")

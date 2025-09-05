@@ -1,3 +1,1 @@
-aggiugnere scan path dynamics per yolo e per le definizioni di multiple aoi statiche e dinamiche
-aggiungere definizioni multiple dei due tipi di AOI, dinamica e statica 
-verificare l'eventuale secondo tipo di enrichemnt sovrapponibile
+Aggiungere il path delle fissazioni come segmenti

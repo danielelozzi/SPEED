@@ -5,12 +5,15 @@
 #' @param output_dir where to write PNGs
 #' @param subject character id to annotate
 #' @param bids logical if true, use load_from_bids
+#' @param enriched_dirs character vector of paths to enriched data folders (AOIs)
 #' @return vector of file paths created
-generate_plots <- function(data_dir, output_dir, subject = "S01", bids = FALSE) {
+generate_plots <- function(data_dir, output_dir, subject = "S01", bids = FALSE, enriched_dirs = NULL) {
   data_dir <- normalizePath(data_dir, mustWork = TRUE)
   ensure_dir(output_dir)
   suppressPackageStartupMessages({
-    library(data.table); library(ggplot2); library(MASS)
+    library(data.table)
+    library(ggplot2)
+    library(MASS)
   })
 
   if (bids) {
@@ -87,6 +90,47 @@ generate_plots <- function(data_dir, output_dir, subject = "S01", bids = FALSE) 
     ggplot2::ggsave(f4, p4, dpi = 120, width = 9, height = 6)
     out_files <- c(out_files, f4)
   }
+
+  # --- NUOVA SEZIONE: Analisi Multi-AOI da cartelle "enriched" ---
+  if (!is.null(enriched_dirs) && length(enriched_dirs) > 0) {
+    pkg_message("Processing ", length(enriched_dirs), " enriched data folders (AOIs)...")
+    
+    enriched_fix_list <- list()
+    
+    for (dir_path in enriched_dirs) {
+      if (!dir.exists(dir_path)) {
+        pkg_message("Warning: Enriched directory not found, skipping: ", dir_path)
+        next
+      }
+      
+      aoi_name <- basename(dir_path)
+      fix_enriched <- read_csv_safe(file.path(dir_path, "fixations.csv"))
+      
+      if (!is.null(fix_enriched) && ("duration [ms]" %in% names(fix_enriched))) {
+        fix_enriched[, aoi_name := aoi_name]
+        enriched_fix_list[[aoi_name]] <- fix_enriched
+      }
+    }
+    
+    if (length(enriched_fix_list) > 0) {
+      all_enriched_fix <- rbindlist(enriched_fix_list, fill = TRUE)
+      
+      # NUOVO PLOT: Confronto delle durate delle fissazioni tra le AOI
+      p5 <- ggplot(all_enriched_fix[is.finite(`duration [ms]`)], aes(x = `duration [ms]`, fill = aoi_name)) +
+        geom_density(alpha = 0.6) +
+        facet_wrap(~aoi_name, ncol = 1) +
+        ggtitle(paste0("Fixation Duration Density across AOIs - ", subject)) +
+        xlab("Duration (ms)") +
+        ylab("Density") +
+        theme_bw()
+      
+      f5 <- file.path(output_dir, "plot_fixation_duration_per_aoi.png")
+      ggplot2::ggsave(f5, p5, dpi = 120, width = 8, height = 2 + 2 * length(enriched_fix_list))
+      out_files <- c(out_files, f5)
+      pkg_message("Generated multi-AOI fixation plot.")
+    }
+  }
+  # --- FINE NUOVA SEZIONE ---
 
   out_files
 }
