@@ -28,6 +28,7 @@ sys.path.insert(0, str(project_root))
 from desktop_app.interactive_video_editor import InteractiveVideoEditor
 from desktop_app.aoi_editor import AoiEditor
 from desktop_app.manual_aoi_editor import ManualAoiEditor
+from desktop_app.device_converter_window import DeviceConverterWindow
 from src.speed_analyzer import run_full_analysis
 from src.speed_analyzer.analysis_modules.realtime_analyzer import RealtimeNeonAnalyzer
 
@@ -459,7 +460,7 @@ class EventManagerWindow(tk.Toplevel):
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v4.7")
+        self.root.title("SPEED v4.8")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
@@ -582,10 +583,17 @@ class SpeedApp:
         bids_frame = tk.LabelFrame(main_frame, text="4. Data Export", padx=10, pady=10)
         bids_frame.pack(fill=tk.X, pady=5, padx=10)
         export_buttons_frame = tk.Frame(bids_frame)
-        export_buttons_frame.pack(fill=tk.X)
+        export_buttons_frame.pack(fill=tk.X, pady=(0, 5))
         tk.Button(export_buttons_frame, text="CONVERT TO BIDS FORMAT", command=self.run_bids_conversion, font=('Helvetica', 10, 'bold'), bg='#FFD54F').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0,5), pady=5)
         tk.Button(export_buttons_frame, text="CONVERT TO DICOM FORMAT", command=self.run_dicom_conversion, font=('Helvetica', 10, 'bold'), bg='#FFD54F').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5, pady=5) # <-- NUOVO BOTTONE
         tk.Button(export_buttons_frame, text="Open Data Viewer...", command=self.open_data_viewer, font=('Helvetica', 10, 'bold'), bg='#AED581').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5, pady=5)
+
+        # --- NUOVO PULSANTE PER IL CONVERTITORE DI DISPOSITIVI ---
+        device_converter_frame = tk.Frame(bids_frame)
+        device_converter_frame.pack(fill=tk.X)
+        tk.Button(device_converter_frame, text="Device Converter...", command=self.open_device_converter,
+                  font=('Helvetica', 10, 'bold'), bg='#B2EBF2').pack(expand=True, fill=tk.X, pady=(5, 0))
+        # --- FINE NUOVO PULSANTE ---
 
         notebook = ttk.Notebook(main_frame)
         notebook.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
@@ -614,6 +622,11 @@ class SpeedApp:
     def open_data_viewer(self):
         viewer_window = DataViewerWindow(self.root, defined_aois=self.user_defined_aois)
 
+    def open_device_converter(self):
+        """
+        Apre la finestra per la conversione di dati da altri dispositivi (es. Tobii).
+        """
+        DeviceConverterWindow(self.root)
     
     def run_dicom_conversion(self):
         unenriched_path_str = self.unenriched_dir_var.get()
@@ -769,7 +782,7 @@ class SpeedApp:
     def setup_video_tab(self, parent_tab):
         video_options_frame = tk.LabelFrame(parent_tab, text="Video Options", padx=10, pady=10)
         video_options_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        video_opts = {"trim_to_events": "Trim video to selected events only", "crop_and_correct_perspective": "Crop & Correct Perspective", "overlay_yolo": "Overlay YOLO detections", "overlay_gaze": "Overlay gaze point", "overlay_pupil_plot": "Overlay pupillometry plot", "overlay_fragmentation_plot": "Overlay gaze fragmentation plot", "overlay_event_text": "Overlay event name text", "overlay_on_surface_text": "Overlay Enriched Area / AOI text", "include_internal_cam": "Include internal camera (PiP)", "overlay_dynamic_heatmap": "Overlay Dynamic Gaze Heatmap"}
+        video_opts = {"trim_to_events": "Trim video to selected events only", "crop_and_correct_perspective": "Crop & Correct Perspective", "overlay_yolo": "Overlay YOLO detections", "overlay_gaze": "Overlay gaze point", "overlay_gaze_path": "Overlay gaze path (trail)", "overlay_pupil_plot": "Overlay pupillometry plot", "overlay_fragmentation_plot": "Overlay gaze fragmentation plot", "overlay_event_text": "Overlay event name text", "overlay_on_surface_text": "Overlay Enriched Area / AOI text", "include_internal_cam": "Include internal camera (PiP)", "overlay_dynamic_heatmap": "Overlay Dynamic Gaze Heatmap"}
         for key, text in video_opts.items():
             self.video_vars[key] = tk.BooleanVar(value=False); tk.Checkbutton(video_options_frame, text=text, variable=self.video_vars[key]).pack(anchor='w')
 
@@ -779,7 +792,7 @@ class SpeedApp:
         tk.Label(heatmap_video_frame, text="Heatmap Window (seconds):").pack(side=tk.LEFT)
         ttk.Scale(heatmap_video_frame, from_=0.5, to=10.0, variable=self.heatmap_video_window_var, orient=tk.HORIZONTAL).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=5)
         
-        self.video_vars['overlay_gaze'].set(True); self.video_vars['overlay_event_text'].set(True)
+        self.video_vars['overlay_gaze'].set(True); self.video_vars['overlay_gaze_path'].set(True); self.video_vars['overlay_event_text'].set(True)
         tk.Label(video_options_frame, text="\nOutput Filename:").pack(anchor='w')
         self.video_filename_var = tk.StringVar(value="video_output_1.mp4")
         tk.Entry(video_options_frame, textvariable=self.video_filename_var).pack(fill=tk.X, pady=5)

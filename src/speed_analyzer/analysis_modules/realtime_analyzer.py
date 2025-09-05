@@ -76,7 +76,7 @@ class RealtimeNeonAnalyzer:
         self.pupil_data = {"Left": [], "Right": [], "Mean": []}
         self.fragmentation_data = []
         self.blink_data = []
-        self.gaze_history = []
+        self.gaze_path_history = []
         self.gaze_history_heatmap = []
         self.is_blinking = False
         self.blink_off_counter = 0
@@ -242,7 +242,7 @@ class RealtimeNeonAnalyzer:
         results_df.to_csv(results_path, index=False)
         print(f"AOI analysis complete. Results saved to {results_path}")
 
-    def process_and_visualize(self, show_yolo=True, show_pupil=True, show_frag=True, show_blink=True, show_aois=True, show_heatmap=False):
+    def process_and_visualize(self, show_yolo=True, show_pupil=True, show_frag=True, show_blink=True, show_aois=True, show_heatmap=False, show_gaze_path=True):
         if not self.is_recording: self.get_latest_frames_and_gaze()
         if self.last_scene_frame is None: return np.zeros((720, 1280, 3), dtype=np.uint8)
 
@@ -294,6 +294,18 @@ class RealtimeNeonAnalyzer:
             gaze = self.last_gaze
             # Disegna il punto di sguardo sopra la heatmap e gli altri overlay
             cv2.circle(scene_img, (int(gaze.x), int(gaze.y)), 20, (0, 0, 255), 2)
+
+            # --- NUOVO: Disegna il percorso dello sguardo con dissolvenza ---
+            if show_gaze_path and len(self.gaze_path_history) > 1:
+                # Itera attraverso la cronologia per disegnare le linee
+                for i in range(1, len(self.gaze_path_history)):
+                    # Calcola l'intensità del colore in base alla posizione nella cronologia
+                    # Le linee più vecchie (indice più basso) saranno più scure
+                    intensity = i / len(self.gaze_path_history)
+                    color = (0, 0, int(255 * intensity)) # Rosso che si dissolve al nero
+                    cv2.line(scene_img, self.gaze_path_history[i-1], self.gaze_path_history[i], color, 2)
+            # --- FINE BLOCCO ---
+
             pupil_val = gaze.pupil_diameter_mm if hasattr(gaze, 'pupil_diameter_mm') and gaze.pupil_diameter_mm > 0 else None
             if pupil_val:
                 self.pupil_data["Mean"].append(pupil_val)
@@ -304,18 +316,22 @@ class RealtimeNeonAnalyzer:
                 if self.blink_off_counter > 3: self.is_blinking = True
             
             self.blink_data.append(1 if self.is_blinking else 0)
+            
+            # Aggiorna la cronologia del percorso dello sguardo
+            self.gaze_path_history.append((int(gaze.x), int(gaze.y)))
 
-            self.gaze_history.append({'ts': scene_ts, 'pos': (gaze.x, gaze.y)})
-            if len(self.gaze_history) > 1:
-                p1, p2 = self.gaze_history[-2], self.gaze_history[-1]
-                dist = np.linalg.norm(np.array(p1['pos']) - np.array(p2['pos']))
-                time_delta = p2['ts'] - p1['ts']
+            # Calcolo della frammentazione (usa la nuova cronologia)
+            if len(self.gaze_path_history) > 1:
+                p1 = self.gaze_path_history[-2]
+                p2 = self.gaze_path_history[-1]
+                dist = np.linalg.norm(np.array(p1) - np.array(p2))
+                time_delta = scene_ts - getattr(self, '_last_frag_ts', scene_ts)
                 self.fragmentation_data.append(dist / time_delta if time_delta > 0 else 0)
-
+            self._last_frag_ts = scene_ts
         if len(self.pupil_data["Mean"]) > BLINK_PLOT_HISTORY: self.pupil_data["Mean"].pop(0)
         if len(self.fragmentation_data) > FRAG_PLOT_HISTORY: self.fragmentation_data.pop(0)
         if len(self.blink_data) > BLINK_PLOT_HISTORY: self.blink_data.pop(0)
-        if len(self.gaze_history) > 10: self.gaze_history.pop(0)
+        if len(self.gaze_path_history) > 10: self.gaze_path_history.pop(0)
 
         y_pos = 10
         if show_pupil: 

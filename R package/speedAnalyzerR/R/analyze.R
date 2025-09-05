@@ -8,6 +8,7 @@
 #' @param generate_plots logical, if TRUE plots will be generated
 #' @param generate_video logical, if TRUE a video overlay is created
 #' @param bids logical, interpret working_dir as BIDS-like root
+#' @param draw_gaze_path logical, if TRUE, draw a trail for the gaze
 #' @param video_file optional video path for overlay
 #' @return the output directory (invisible)
 run_full_analysis <- function(
@@ -18,6 +19,7 @@ run_full_analysis <- function(
   generate_plots = TRUE,
   generate_video = FALSE,
   bids = FALSE,
+  draw_gaze_path = TRUE,
   video_file = NULL
 ) {
   ensure_dir(output_dir)
@@ -37,7 +39,13 @@ run_full_analysis <- function(
   }
   if (generate_video) {
     pkg_message("--- START VIDEO ---")
-    vf <- try(create_video_overlay(working_dir, output_dir, subject = subject_name, video_file = video_file), silent = TRUE)
+    vf <- try(create_video_overlay(
+        working_dir, 
+        output_dir, 
+        subject = subject_name, 
+        video_file = video_file,
+        draw_gaze_path = draw_gaze_path
+    ), silent = TRUE)
     if (inherits(vf, "try-error") || is.null(vf)) {
       pkg_message("Video overlay failed or skipped.")
     } else {

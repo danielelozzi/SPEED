@@ -105,11 +105,12 @@ class DataViewerWindow(tk.Toplevel):
         overlay_controls_frame.pack(fill=tk.X, padx=5, pady=5)
         self.overlay_vars = {
             "gaze": tk.BooleanVar(value=True), "pupil_plot": tk.BooleanVar(value=True),
-            "frag_plot": tk.BooleanVar(value=True), "heatmap": tk.BooleanVar(value=False),
-            "aois": tk.BooleanVar(value=True)
+            "frag_plot": tk.BooleanVar(value=True), "aois": tk.BooleanVar(value=True),
+            "gaze_path": tk.BooleanVar(value=True), "heatmap": tk.BooleanVar(value=False)
         }
-        for key, text in {"gaze": "Show Gaze Point", "pupil_plot": "Show Pupil Plot", 
-                           "frag_plot": "Show Fragmentation Plot", "aois": "Show Defined AOIs"}.items():
+        for key, text in {"gaze": "Show Gaze Point", "gaze_path": "Show Gaze Path", 
+                           "pupil_plot": "Show Pupil Plot", "frag_plot": "Show Fragmentation Plot", 
+                           "aois": "Show Defined AOIs"}.items():
             tk.Checkbutton(overlay_controls_frame, text=text, variable=self.overlay_vars[key], 
                            command=self.update_current_frame_display).pack(anchor='w')
         
@@ -366,6 +367,20 @@ class DataViewerWindow(tk.Toplevel):
         if self.overlay_vars["gaze"].get() and pd.notna(frame_data_row['gaze x [px]']):
             px, py = int(frame_data_row['gaze x [px]']), int(frame_data_row['gaze y [px]'])
             cv2.circle(frame, (px, py), GAZE_RADIUS, GAZE_COLOR, GAZE_THICKNESS, cv2.LINE_AA)
+
+        # --- NUOVO: Logica per disegnare la scia dello sguardo ---
+        if self.overlay_vars["gaze_path"].get():
+            path_length = 10
+            start_idx = max(0, self.current_frame_idx - path_length)
+            path_data = self.sync_data.iloc[start_idx:self.current_frame_idx]
+            gaze_points = path_data[['gaze x [px]', 'gaze y [px]']].dropna().astype(int).values
+
+            if len(gaze_points) > 1:
+                for i in range(1, len(gaze_points)):
+                    # Applica un gradiente di spessore per l'effetto di dissolvenza
+                    thickness = int(np.ceil((i / len(gaze_points)) * (GAZE_THICKNESS + 1)))
+                    cv2.line(frame, tuple(gaze_points[i-1]), tuple(gaze_points[i]), GAZE_COLOR, thickness, cv2.LINE_AA)
+        # --- FINE BLOCCO ---
         
         history_data = self.sync_data.iloc[max(0, self.current_frame_idx - PUPIL_PLOT_HISTORY):self.current_frame_idx]
         

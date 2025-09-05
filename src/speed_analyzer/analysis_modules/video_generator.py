@@ -346,6 +346,10 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
         heatmap_window_seconds = options.get('heatmap_window_seconds', 2.0) 
         heatmap_window_size_frames = int(heatmap_window_seconds * fps)
 
+    # --- NUOVO: Inizializzazione per la scia dello sguardo ---
+    gaze_path_history = []
+    gaze_path_length = 10 # Memorizza gli ultimi 10 punti
+
     # --- NUOVA LOGICA: DEFINIZIONE DEI SEGMENTI DI FRAME DA PROCESSARE ---
     frame_segments = []
     if options.get('trim_to_events') and selected_events and not events_df.empty:
@@ -485,6 +489,17 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                                 px, py = int(gaze_pt_transformed[0][0][0]), int(gaze_pt_transformed[0][0][1])
                         if 0 <= px < out_w and 0 <= py < out_h:
                             cv2.circle(frame, (px, py), GAZE_RADIUS, GAZE_COLOR, GAZE_THICKNESS, cv2.LINE_AA)
+
+                            # --- NUOVO: Logica per la scia dello sguardo ---
+                            gaze_path_history.append((px, py))
+                            if len(gaze_path_history) > gaze_path_length:
+                                gaze_path_history.pop(0)
+                            
+                            if options.get('overlay_gaze_path', True) and len(gaze_path_history) > 1:
+                                for i in range(1, len(gaze_path_history)):
+                                    thickness = int(np.ceil((i / len(gaze_path_history)) * (GAZE_THICKNESS)))
+                                    cv2.line(frame, gaze_path_history[i-1], gaze_path_history[i], GAZE_COLOR, thickness, cv2.LINE_AA)
+                            # --- FINE BLOCCO ---
                     
                     if frame_data.get('is_blinking', False):
                         cv2.putText(frame, "BLINK", (out_w - 150, out_h - 20), cv2.FONT_HERSHEY_TRIPLEX, 1.5, BLINK_TEXT_COLOR, 2)

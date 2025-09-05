@@ -5,9 +5,10 @@
 #' @param output_dir destination
 #' @param subject subject id
 #' @param video_file optional path to video; if NULL, tries data_dir/scene_video.mp4
+#' @param draw_gaze_path logical, if TRUE, draw a trail for the gaze
 #' @param point_radius numeric radius in pixels
 #' @return output video path (mp4) or NULL if prerequisites missing
-create_video_overlay <- function(data_dir, output_dir, subject = "S01", video_file = NULL, point_radius = 10) {
+create_video_overlay <- function(data_dir, output_dir, subject = "S01", video_file = NULL, draw_gaze_path = TRUE, point_radius = 10) {
   suppressWarnings({
     has_av <- requireNamespace("av", quietly = TRUE)
     has_magick <- requireNamespace("magick", quietly = TRUE)
@@ -49,13 +50,32 @@ create_video_overlay <- function(data_dir, output_dir, subject = "S01", video_fi
   }, integer(1))
   # Overlay
   outdir <- file.path(output_dir, "frames_overlay")
+  gaze_history <- list()
+  path_palette <- colorRampPalette(c("darkred", "red"))(10)
   dir.create(outdir, showWarnings = FALSE)
   for (i in seq_along(frames)) {
     fr <- magick::image_read(frames[i])
     j <- idx[i]
-    if (is.finite(gaze$x[j]) && is.finite(gaze$y[j])) {
+    
+    current_point <- if (is.finite(gaze$x[j]) && is.finite(gaze$y[j])) {
+      list(x = gaze$x[j], y = gaze$y[j])
+    } else {
+      NULL
+    }
+    
+    if (!is.null(current_point)) {
+      gaze_history <- c(gaze_history, list(current_point))
+      if (length(gaze_history) > 10) {
+        gaze_history <- tail(gaze_history, 10)
+      }
+      
       fr <- magick::image_draw(fr)
-      symbols(gaze$x[j], gaze$y[j], circles = point_radius, inches = FALSE, add = TRUE)
+      if (draw_gaze_path && length(gaze_history) > 1) {
+        for (k in 1:(length(gaze_history) - 1)) {
+          graphics::lines(c(gaze_history[[k]]$x, gaze_history[[k+1]]$x), c(gaze_history[[k]]$y, gaze_history[[k+1]]$y), col = path_palette[k], lwd = 2)
+        }
+      }
+      symbols(current_point$x, current_point$y, circles = point_radius, inches = FALSE, add = TRUE, bg = "red", fg = "white")
       dev.off()
     }
     magick::image_write(fr, path = file.path(outdir, sprintf("frame_%06d.png", i)))
