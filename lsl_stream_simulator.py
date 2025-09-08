@@ -126,7 +126,7 @@ if __name__ == "__main__":
     # --- Setup Stream Video ---
     video_channel_count = WIDTH * HEIGHT * 3
     # --- CORREZIONE QUI ---
-    info_video = StreamInfo(VIDEO_STREAM_NAME, VIDEO_STREAM_TYPE, video_channel_count, VIDEO_RATE, 'int8', 'VideoSimID1')
+    info_video = StreamInfo(VIDEO_STREAM_NAME, VIDEO_STREAM_TYPE, video_channel_count, VIDEO_RATE, 'uint8', 'VideoSimID1')
     info_video.desc().append_child_value("width", str(WIDTH))
     info_video.desc().append_child_value("height", str(HEIGHT))
     info_video.desc().append_child_value("color_format", "BGR")

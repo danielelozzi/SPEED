@@ -285,7 +285,7 @@ class RealtimeNeonAnalyzer:
         results_df.to_csv(results_path, index=False)
         print(f"AOI analysis complete. Results saved to {results_path}")
 
-    def process_and_visualize(self, show_yolo=True, show_pupil=True, show_frag=True, show_blink=True, show_aois=True, show_heatmap=False, show_gaze_path=True):
+    def process_and_visualize(self, show_yolo=True, show_pupil=True, show_frag=True, show_blink=True, show_aois=True, show_heatmap=False, show_gaze_path=True, show_gaze_point=True):
         if not self.is_recording: self.get_latest_frames_and_gaze()
         if self.last_scene_frame is None: return np.zeros((720, 1280, 3), dtype=np.uint8)
 
@@ -334,18 +334,16 @@ class RealtimeNeonAnalyzer:
         
         if self.last_gaze:
             gaze = self.last_gaze
-            # Disegna il punto di sguardo sopra la heatmap e gli altri overlay
-            cv2.circle(scene_img, (int(gaze.x), int(gaze.y)), 20, (0, 0, 255), 2)
+            if show_gaze_point:
+                cv2.circle(scene_img, (int(gaze.x), int(gaze.y)), 20, (0, 0, 255), 2)
 
             # --- NUOVO: Disegna il percorso dello sguardo con dissolvenza ---
-            if show_gaze_path and len(self.gaze_path_history) > 1:
-                # Itera attraverso la cronologia per disegnare le linee
-                for i in range(1, len(self.gaze_path_history)):
-                    # Calcola l'intensità del colore in base alla posizione nella cronologia
-                    # Le linee più vecchie (indice più basso) saranno più scure
-                    intensity = i / len(self.gaze_path_history)
-                    color = (0, 0, int(255 * intensity)) # Rosso che si dissolve al nero
-                    cv2.line(scene_img, self.gaze_path_history[i-1], self.gaze_path_history[i], color, 2)
+            if show_gaze_path:
+                if len(self.gaze_path_history) > 1:
+                    for i in range(1, len(self.gaze_path_history)):
+                        intensity = i / len(self.gaze_path_history)
+                        color = (0, 0, int(255 * intensity))
+                        cv2.line(scene_img, self.gaze_path_history[i-1], self.gaze_path_history[i], color, 2)
             # --- FINE BLOCCO ---
 
             pupil_val = gaze.pupil_diameter_mm if hasattr(gaze, 'pupil_diameter_mm') and gaze.pupil_diameter_mm > 0 else None

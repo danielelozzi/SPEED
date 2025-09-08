@@ -131,9 +131,6 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.is_running = False
         self.is_paused_for_drawing = False
         
-        # Dizionario dei modelli YOLO specifico per questa finestra
-        self.YOLO_MODELS = SpeedApp.YOLO_MODELS
-
         # --- NUOVO: Variabile per il ponte LSL ---
         self.lsl_bridge = None
 
@@ -193,7 +190,7 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.yolo_classes_var = tk.StringVar()
 
         tk.Label(self.yolo_config_frame, text="YOLO Task:").pack(anchor='w')
-        self.yolo_task_combo = ttk.Combobox(self.yolo_config_frame, textvariable=self.yolo_task_var, values=list(self.YOLO_MODELS.keys()), state='disabled', width=25)
+        self.yolo_task_combo = ttk.Combobox(self.yolo_config_frame, textvariable=self.yolo_task_var, values=list(YOLO_MODELS.keys()), state='disabled', width=25)
         self.yolo_task_combo.pack(pady=(0,5))
         self.yolo_task_combo.bind('<<ComboboxSelected>>', self.update_yolo_model_options)
 
@@ -209,8 +206,19 @@ class RealtimeDisplayWindow(tk.Toplevel):
         
         vis_options_frame = tk.LabelFrame(main_control_frame, text="Visual Options", padx=10, pady=10)
         vis_options_frame.pack(side=tk.LEFT, fill=tk.Y)
-        self.overlay_vars = {"show_yolo": tk.BooleanVar(value=True), "show_pupil": tk.BooleanVar(value=True), "show_frag": tk.BooleanVar(value=True), "show_blink": tk.BooleanVar(value=True), "show_aois": tk.BooleanVar(value=True),"show_heatmap": tk.BooleanVar(value=False)}
+        self.overlay_vars = {
+            "show_yolo": tk.BooleanVar(value=True),
+            "show_pupil": tk.BooleanVar(value=True),
+            "show_frag": tk.BooleanVar(value=True),
+            "show_blink": tk.BooleanVar(value=True),
+            "show_aois": tk.BooleanVar(value=True),
+            "show_heatmap": tk.BooleanVar(value=False),
+            "show_gaze_point": tk.BooleanVar(value=True),
+            "show_gaze_path": tk.BooleanVar(value=True)
+        }
         tk.Checkbutton(vis_options_frame, text="YOLO", variable=self.overlay_vars["show_yolo"]).pack(anchor='w')
+        tk.Checkbutton(vis_options_frame, text="Gaze Point", variable=self.overlay_vars["show_gaze_point"]).pack(anchor='w')
+        tk.Checkbutton(vis_options_frame, text="Gaze Path", variable=self.overlay_vars["show_gaze_path"]).pack(anchor='w')
         tk.Checkbutton(vis_options_frame, text="Pupil Plot", variable=self.overlay_vars["show_pupil"]).pack(anchor='w')
         tk.Checkbutton(vis_options_frame, text="Frag. Plot", variable=self.overlay_vars["show_frag"]).pack(anchor='w')
         tk.Checkbutton(vis_options_frame, text="Blink", variable=self.overlay_vars["show_blink"]).pack(anchor='w')
@@ -225,7 +233,7 @@ class RealtimeDisplayWindow(tk.Toplevel):
 
     def update_yolo_model_options(self, event=None):
         selected_task = self.yolo_task_var.get()
-        available_models = self.YOLO_MODELS.get(selected_task, [])
+        available_models = YOLO_MODELS.get(selected_task, [])
         self.yolo_model_combo['values'] = available_models
         if available_models:
             self.yolo_model_var.set(available_models[0])
@@ -546,19 +554,19 @@ class EventManagerWindow(tk.Toplevel):
         self.saved_df = self.events_df
         self.destroy()
 
+# --- COSTANTE GLOBALE PER I MODELLI YOLO ---
+YOLO_MODELS = {
+    'detect': ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt'],
+    'detect_custom': ['yolov8s-world.pt', 'yolov8s-worldv2.pt', 'yolov8m-world.pt', 'yolov8x-world.pt', 'yolov8x-worldv2.pt'],
+    'segment': ['yolov8n-seg.pt', 'yolov8s-seg.pt', 'yolov8m-seg.pt', 'yolov8l-seg.pt', 'yolov8x-seg.pt'],
+    'pose': ['yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt', 'yolov8x-pose-p6.pt']
+}
+
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.0.0")
+        self.root.title("SPEED v5.0.1")
         self.root.geometry("850x850")
-
-        # --- NUOVA STRUTTURA DATI PER I MODELLI YOLO ---
-        SpeedApp.YOLO_MODELS = {
-            'detect': ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt'],
-            'detect_custom': ['yolov8s-world.pt', 'yolov8s-worldv2.pt', 'yolov8m-world.pt', 'yolov8x-world.pt', 'yolov8x-worldv2.pt'],
-            'segment': ['yolov8n-seg.pt', 'yolov8s-seg.pt', 'yolov8m-seg.pt', 'yolov8l-seg.pt', 'yolov8x-seg.pt'],
-            'pose': ['yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt', 'yolov8x-pose-p6.pt']
-        }
 
         self.raw_dir_var = tk.StringVar()
         self.unenriched_dir_var = tk.StringVar()
@@ -680,7 +688,7 @@ class SpeedApp:
         task_frame = tk.Frame(yolo_options_frame)
         task_frame.pack(fill=tk.X, pady=2)
         tk.Label(task_frame, text="YOLO Task:", width=28, anchor='w').pack(side=tk.LEFT)
-        self.yolo_task_combobox = ttk.Combobox(task_frame, textvariable=self.yolo_task_var, values=list(SpeedApp.YOLO_MODELS.keys()), state='readonly')
+        self.yolo_task_combobox = ttk.Combobox(task_frame, textvariable=self.yolo_task_var, values=list(YOLO_MODELS.keys()), state='readonly')
         self.yolo_task_combobox.pack(fill=tk.X, expand=True)
         self.yolo_task_combobox.bind('<<ComboboxSelected>>', self.update_yolo_model_options)
 
@@ -751,7 +759,8 @@ class SpeedApp:
         
         self.update_aoi_list_display()
 
-    def add_placeholder(self, entry_widget, placeholder_text):
+    @staticmethod
+    def add_placeholder(entry_widget, placeholder_text):
         """Aggiunge un testo di placeholder a un widget Entry di Tkinter."""
         entry_widget.insert(0, placeholder_text)
         entry_widget.config(fg='grey')
@@ -787,7 +796,7 @@ class SpeedApp:
         selected_task = self.yolo_task_var.get()
         
         # Aggiorna la lista dei modelli disponibili
-        models_for_task = SpeedApp.YOLO_MODELS.get(selected_task, [])
+        models_for_task = YOLO_MODELS.get(selected_task, [])
         self.yolo_model_combobox['values'] = models_for_task
         if models_for_task:
             self.yolo_model_combobox.set(models_for_task[0])
@@ -1179,7 +1188,7 @@ class SpeedApp:
         selected_task = self.yolo_task_var.get()
         
         # Aggiorna i modelli disponibili
-        models_for_task = SpeedApp.YOLO_MODELS.get(selected_task, [])
+        models_for_task = YOLO_MODELS.get(selected_task, [])
         self.yolo_model_combobox['values'] = models_for_task
         if models_for_task:
             self.yolo_model_combobox.set(models_for_task[0])

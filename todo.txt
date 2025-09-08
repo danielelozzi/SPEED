@@ -1,1 +1,0 @@
-implementare segmentazione e altri task come pose estimation tramite yolo
