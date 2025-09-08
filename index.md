@@ -12,6 +12,7 @@ SPEED is a Python-based project for processing, analyzing, and visualizing eye-t
 - **[Use with Docker](#3-docker-container-for-maximum-reproducibility)**
 - **[GitHub project](https://www.github.com/danielelozzi/SPEED/)**
 - **[GitHub website](https://danielelozzi.github.io/SPEED/)**
+- **[speed-analyzer documentation](https://danielelozzi.github.io/SPEED/documentation/documentation.html)**
 
 
 ---
