@@ -6,6 +6,7 @@ from pathlib import Path
 from tqdm import tqdm
 import logging
 import torch
+from typing import Optional, List
 
 try:
     from ultralytics import YOLO
@@ -120,7 +121,13 @@ def _is_inside(px, py, x1, y1, x2, y2):
     """Checks if a point (px, py) is inside a bounding box (x1, y1, x2, y2)."""
     return x1 <= px <= x2 and y1 <= py <= y2
 
-def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str):
+def run_yolo_analysis(
+    data_dir: Path, 
+    output_dir: Path, 
+    subj_name: str,
+    yolo_model_name: str = 'yolov8n.pt',
+    custom_classes: Optional[List[str]] = None
+):
     """
     Runs YOLO object detection, correlates with fixations, and saves statistics.
     MODIFIED: Always calculates Switching Index based on detected objects as AOIs.
@@ -136,9 +143,14 @@ def run_yolo_analysis(data_dir: Path, output_dir: Path, subj_name: str):
 
     yolo_device = _get_yolo_device()
     try:
-        model = YOLO('yolov8n.pt')
+        model = YOLO(yolo_model_name)
+        logging.info(f"Loaded YOLO model: {yolo_model_name}")
+        if custom_classes:
+            logging.info(f"Setting custom classes for zero-shot detection: {custom_classes}")
+            model.set_classes(custom_classes)
+
     except Exception as e:
-        logging.error(f"Error loading YOLO model (yolov8n.pt): {e}. Skipping YOLO analysis.")
+        logging.error(f"Error loading YOLO model ({yolo_model_name}): {e}. Skipping YOLO analysis.")
         return
 
     try:

@@ -460,7 +460,7 @@ class EventManagerWindow(tk.Toplevel):
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v4.8.1")
+        self.root.title("SPEED v4.8.2")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
@@ -573,7 +573,38 @@ class SpeedApp:
         analysis_frame = tk.LabelFrame(main_frame, text="3. Run Analysis", padx=10, pady=10)
         analysis_frame.pack(fill=tk.X, pady=5, padx=10)
         self.yolo_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (Required for Dynamic AOI, GPU Recommended)", variable=self.yolo_var).pack(anchor='w')
+        yolo_checkbutton = tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (Required for Dynamic AOI, GPU Recommended)", variable=self.yolo_var, command=self.toggle_yolo_options)
+        yolo_checkbutton.pack(anchor='w')
+
+        # --- NUOVI CONTROLLI YOLO ---
+        yolo_options_frame = tk.Frame(analysis_frame)
+        yolo_options_frame.pack(fill=tk.X, padx=20, pady=5)
+
+        # Combobox per la selezione del modello
+        model_frame = tk.Frame(yolo_options_frame)
+        model_frame.pack(fill=tk.X, pady=2)
+        tk.Label(model_frame, text="YOLO Model:", width=28, anchor='w').pack(side=tk.LEFT)
+        self.yolo_model_var = tk.StringVar(value='yolov8n.pt')
+        yolo_models = [
+            'yolov8s-world.pt', 'yolov8s-worldv2.pt', 'yolov8m-world.pt', 'yolov8m-worldv2.pt',
+            'yolov8l-world.pt', 'yolov8l-worldv2.pt', 'yolov8x-world.pt', 'yolov8x-worldv2.pt', 'yolov8n.pt'
+        ]
+        self.yolo_model_combo = ttk.Combobox(model_frame, textvariable=self.yolo_model_var, values=yolo_models, state='readonly')
+        self.yolo_model_combo.pack(fill=tk.X, expand=True)
+
+        # Entry per le classi custom
+        classes_frame = tk.Frame(yolo_options_frame)
+        classes_frame.pack(fill=tk.X, pady=2)
+        tk.Label(classes_frame, text="Custom Classes (comma-separated):", width=28, anchor='w').pack(side=tk.LEFT)
+        self.yolo_classes_var = tk.StringVar()
+        self.yolo_classes_entry = tk.Entry(classes_frame, textvariable=self.yolo_classes_var)
+        self.yolo_classes_entry.pack(fill=tk.X, expand=True)
+        self.add_placeholder(self.yolo_classes_entry, "person, car, dog")
+
+        # Imposta lo stato iniziale
+        self.toggle_yolo_options()
+        # --- FINE NUOVI CONTROLLI ---
+
         tk.Button(analysis_frame, text="RUN FULL ANALYSIS", command=self.run_full_analysis_wrapper, font=('Helvetica', 10, 'bold'), bg='#c5e1a5').pack(pady=5)
         
         realtime_frame = tk.LabelFrame(main_frame, text="3.5 Real-time Analysis", padx=10, pady=10)
@@ -619,6 +650,24 @@ class SpeedApp:
         
         self.update_aoi_list_display()
     
+    def add_placeholder(self, entry, placeholder):
+        """Aggiunge un testo placeholder a un widget Entry."""
+        entry.insert(0, placeholder)
+        entry.config(fg='grey')
+
+        def on_focus_in(event):
+            if entry.get() == placeholder:
+                entry.delete(0, tk.END)
+                entry.config(fg='black')
+
+        def on_focus_out(event):
+            if not entry.get():
+                entry.insert(0, placeholder)
+                entry.config(fg='grey')
+
+        entry.bind("<FocusIn>", on_focus_in)
+        entry.bind("<FocusOut>", on_focus_out)
+
     def open_data_viewer(self):
         viewer_window = DataViewerWindow(self.root, defined_aois=self.user_defined_aois)
 
@@ -989,6 +1038,15 @@ class SpeedApp:
             
             self.update_aoi_list_display()
 
+    def toggle_yolo_options(self):
+        """Abilita/disabilita i controlli YOLO avanzati in base al checkbutton."""
+        if self.yolo_var.get():
+            self.yolo_model_combo.config(state='readonly')
+            self.yolo_classes_entry.config(state=tk.NORMAL)
+        else:
+            self.yolo_model_combo.config(state=tk.DISABLED)
+            self.yolo_classes_entry.config(state=tk.DISABLED)
+
 
     def run_full_analysis_wrapper(self):
         output_dir = self.output_dir_entry.get().strip()
@@ -1014,15 +1072,25 @@ class SpeedApp:
                 enriched_path_to_use = None
                 logging.info("User-defined AOIs are present. Ignoring 'Enriched Data Folder' and generating new enriched data.")
 
+            # Recupera i valori dai widget YOLO
+            yolo_model_selection = self.yolo_model_var.get()
+            custom_classes_str = self.yolo_classes_var.get().strip()
+            
+            # Prepara la lista delle classi custom
+            yolo_custom_classes = None
+            if custom_classes_str and custom_classes_str != "person, car, dog": # Ignora il placeholder
+                yolo_custom_classes = [cls.strip() for cls in custom_classes_str.split(',') if cls.strip()]
+
             run_full_analysis(
                 raw_data_path=self.raw_dir_var.get(),
                 unenriched_data_path=self.unenriched_dir_var.get(),
-                enriched_data_path=enriched_path_to_use,
+                enriched_data_paths=self.enriched_dir_paths if not self.user_defined_aois else None,
                 output_path=output_dir,
                 subject_name=subj_name,
                 events_df=final_events_df,
                 run_yolo=self.yolo_var.get(),
-                yolo_model_path="yolov8n.pt",
+                yolo_model_name=yolo_model_selection, # Nuovo
+                yolo_custom_classes=yolo_custom_classes, # Nuovo
                 defined_aois=self.user_defined_aois
             )
 
