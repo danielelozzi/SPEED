@@ -1,6 +1,7 @@
 # desktop_app/data_viewer.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
+import json
 from pathlib import Path
 import pandas as pd
 import json
@@ -8,6 +9,8 @@ import pydicom
 import cv2
 import numpy as np
 from PIL import Image, ImageTk
+from ultralytics import YOLO
+import tempfile
 import logging
 
 # Importa le funzioni di conversione e le utility di disegno
@@ -16,7 +19,8 @@ from src.speed_analyzer.analysis_modules.dicom_converter import load_from_dicom
 from src.speed_analyzer.analysis_modules.video_generator import (
     _draw_pupil_plot, _draw_generic_plot, PUPIL_PLOT_HISTORY, PUPIL_PLOT_WIDTH,
     PUPIL_PLOT_HEIGHT, FRAG_PLOT_HISTORY, FRAG_PLOT_WIDTH, FRAG_PLOT_HEIGHT,
-    FRAG_LINE_COLOR, FRAG_BG_COLOR, GAZE_COLOR, GAZE_RADIUS, GAZE_THICKNESS
+    FRAG_LINE_COLOR, FRAG_BG_COLOR, GAZE_COLOR, GAZE_RADIUS, GAZE_THICKNESS,
+    _overlay_transparent
 )
 
 def _overlay_transparent(background, overlay, x, y):
@@ -63,14 +67,25 @@ class DataViewerWindow(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
 
+        # Dizionario dei modelli YOLO specifico per questa finestra
+        self.YOLO_MODELS = {
+            'detect': ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt'],
+            'detect_custom': ['yolov8s-world.pt', 'yolov8s-worldv2.pt', 'yolov8m-world.pt', 'yolov8x-world.pt', 'yolov8x-worldv2.pt'],
+            'segment': ['yolov8n-seg.pt', 'yolov8s-seg.pt', 'yolov8m-seg.pt', 'yolov8l-seg.pt', 'yolov8x-seg.pt'],
+            'pose': ['yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt', 'yolov8x-pose-p6.pt']
+        }
         self.data_folder = None
         self.dataframe_cache = {}
         self.cap = None
+        # NUOVO: Cache per i dati YOLO
+        self.yolo_detections_df = pd.DataFrame()
         self.sync_data = pd.DataFrame()
         self.is_playing = False
         self.total_frames = 0
         self.fps = 30
         self.is_updating_slider = False
+        self.yolo_model = None
+        self.is_yolo_live = False
 
         self.defined_aois = defined_aois if defined_aois else []
         self.aoi_positions_per_frame = {}
@@ -104,13 +119,16 @@ class DataViewerWindow(tk.Toplevel):
         overlay_controls_frame = tk.LabelFrame(left_panel, text="Video Overlay Controls")
         overlay_controls_frame.pack(fill=tk.X, padx=5, pady=5)
         self.overlay_vars = {
-            "gaze": tk.BooleanVar(value=True), "pupil_plot": tk.BooleanVar(value=True),
-            "frag_plot": tk.BooleanVar(value=True), "aois": tk.BooleanVar(value=True),
-            "gaze_path": tk.BooleanVar(value=True), "heatmap": tk.BooleanVar(value=False)
+            "gaze": tk.BooleanVar(value=True), "pupil_plot": tk.BooleanVar(value=False),
+            "frag_plot": tk.BooleanVar(value=False), "aois": tk.BooleanVar(value=True), "gaze_path": tk.BooleanVar(value=True), 
+            "heatmap": tk.BooleanVar(value=False), 
+            "segmentation": tk.BooleanVar(value=True), # NUOVO
+            "pose": tk.BooleanVar(value=True) # NUOVO
         }
         for key, text in {"gaze": "Show Gaze Point", "gaze_path": "Show Gaze Path", 
                            "pupil_plot": "Show Pupil Plot", "frag_plot": "Show Fragmentation Plot", 
-                           "aois": "Show Defined AOIs"}.items():
+                           "aois": "Show Defined AOIs", "segmentation": "Show Segmentation", 
+                           "pose": "Show Pose Estimation"}.items():
             tk.Checkbutton(overlay_controls_frame, text=text, variable=self.overlay_vars[key], 
                            command=self.update_current_frame_display).pack(anchor='w')
         
@@ -127,6 +145,31 @@ class DataViewerWindow(tk.Toplevel):
         ttk.Scale(slider_frame, from_=0.5, to=10.0, variable=self.heatmap_window_var, 
                   orient=tk.HORIZONTAL, command=self.on_heatmap_slider_change).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=5)
         tk.Label(slider_frame, textvariable=self.heatmap_label_var, width=5).pack(side=tk.RIGHT)
+
+        # --- NUOVO: Interfaccia di controllo YOLO ---
+        yolo_live_frame = tk.LabelFrame(left_panel, text="YOLO Live Analysis")
+        yolo_live_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        self.yolo_task_var = tk.StringVar(value='detect')
+        self.yolo_model_var = tk.StringVar()
+        self.yolo_classes_var = tk.StringVar()
+
+        tk.Label(yolo_live_frame, text="Task:").pack(anchor='w')
+        self.yolo_task_combo = ttk.Combobox(yolo_live_frame, textvariable=self.yolo_task_var, values=list(self.YOLO_MODELS.keys()), state='readonly', width=25)
+        self.yolo_task_combo.pack(pady=(0,5), fill=tk.X)
+        self.yolo_task_combo.bind('<<ComboboxSelected>>', self.update_yolo_model_options)
+
+        tk.Label(yolo_live_frame, text="Model:").pack(anchor='w')
+        self.yolo_model_combo = ttk.Combobox(yolo_live_frame, textvariable=self.yolo_model_var, state='readonly', width=25)
+        self.yolo_model_combo.pack(fill=tk.X)
+
+        tk.Label(yolo_live_frame, text="Custom Classes:").pack(anchor='w', pady=(5,0))
+        self.yolo_classes_entry = tk.Entry(yolo_live_frame, textvariable=self.yolo_classes_var, width=28, state=tk.DISABLED)
+        self.yolo_classes_entry.pack(fill=tk.X)
+        self.add_placeholder(self.yolo_classes_entry, "person, car, dog")
+
+        self.run_yolo_btn = tk.Button(yolo_live_frame, text="Run Live YOLO", command=self.run_live_yolo, state=tk.DISABLED)
+        self.run_yolo_btn.pack(pady=5, fill=tk.X)
 
         right_panel = tk.Frame(main_frame)
         right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
@@ -161,6 +204,7 @@ class DataViewerWindow(tk.Toplevel):
         self.table_tree.pack(fill=tk.BOTH, expand=True)
         
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.update_yolo_model_options()
 
     def on_heatmap_slider_change(self, value):
         self.heatmap_label_var.set(f"{float(value):.1f} s")
@@ -172,6 +216,63 @@ class DataViewerWindow(tk.Toplevel):
         if self.cap:
             self.cap.release()
         self.destroy()
+
+    def add_placeholder(self, entry_widget, placeholder_text):
+        """Aggiunge un testo di placeholder a un widget Entry di Tkinter."""
+        entry_widget.insert(0, placeholder_text)
+        entry_widget.config(fg='grey')
+
+        def on_focus_in(event):
+            if entry_widget.cget('fg') == 'grey':
+                entry_widget.delete(0, "end")
+                entry_widget.config(fg='black')
+
+        def on_focus_out(event):
+            if not entry_widget.get():
+                entry_widget.insert(0, placeholder_text)
+                entry_widget.config(fg='grey')
+
+        entry_widget.bind("<FocusIn>", on_focus_in)
+        entry_widget.bind("<FocusOut>", on_focus_out)
+
+    def update_yolo_model_options(self, event=None):
+        selected_task = self.yolo_task_var.get()
+        available_models = self.YOLO_MODELS.get(selected_task, [])
+        self.yolo_model_combo['values'] = available_models
+        if available_models:
+            self.yolo_model_var.set(available_models[0])
+        else:
+            self.yolo_model_var.set('')
+        is_custom_detect_task = (selected_task == 'detect_custom')
+        self.yolo_classes_entry.config(state=tk.NORMAL if is_custom_detect_task else tk.DISABLED)
+
+    def run_live_yolo(self):
+        task = self.yolo_task_var.get()
+        model_name = self.yolo_model_var.get()
+        custom_classes_str = self.yolo_classes_var.get().strip()
+        custom_classes = [cls.strip() for cls in custom_classes_str.split(',') if cls.strip()] if custom_classes_str and custom_classes_str != "person, car, dog" else None
+
+        self.status_label.config(text=f"Loading YOLO model: {model_name}...")
+        self.update()
+
+        try:
+            if task == 'detect_custom' and custom_classes:
+                base_model = YOLO(model_name)
+                base_model.set_classes(custom_classes)
+                temp_dir = Path(tempfile.gettempdir())
+                custom_model_path = temp_dir / f"yolo_world_custom_viewer_{'_'.join(custom_classes)}.pt"
+                base_model.save(custom_model_path)
+                self.yolo_model = YOLO(custom_model_path)
+            else:
+                self.yolo_model = YOLO(model_name)
+            
+            self.is_yolo_live = True
+            self.status_label.config(text=f"YOLO model '{model_name}' loaded. Live analysis is ON.")
+            self.update_frame(self.current_frame_idx) # Force refresh
+        except Exception as e:
+            self.is_yolo_live = False
+            self.yolo_model = None
+            messagebox.showerror("YOLO Error", f"Failed to load model: {e}", parent=self)
 
     def _prepare_sync_data(self):
         if not self.data_folder: return
@@ -306,11 +407,24 @@ class DataViewerWindow(tk.Toplevel):
         self.cap = cv2.VideoCapture(str(video_path))
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) if self.cap.get(cv2.CAP_PROP_FPS) > 0 else 30
+
+        # --- NUOVO: Caricamento dei dati di detection YOLO ---
+        # Cerca il file nella cartella di output, che si presume sia la parente della cartella dati
+        potential_output_dir = self.data_folder.parent
+        yolo_cache_path = potential_output_dir / 'yolo_detections_cache.csv'
+        if yolo_cache_path.exists():
+            try:
+                self.yolo_detections_df = pd.read_csv(yolo_cache_path)
+                logging.info(f"Loaded YOLO detection data from: {yolo_cache_path}")
+            except Exception as e:
+                logging.error(f"Failed to load YOLO cache file: {e}")
+                self.yolo_detections_df = pd.DataFrame()
         
         self._prepare_aoi_positions()
         
         self.frame_scale.config(to=self.total_frames - 1, state=tk.NORMAL)
         self.play_pause_btn.config(state=tk.NORMAL)
+        self.run_yolo_btn.config(state=tk.NORMAL)
         self.update_frame(0)
 
     def seek_frame(self, frame_idx_str):
@@ -334,6 +448,15 @@ class DataViewerWindow(tk.Toplevel):
             self.draw_overlays(frame)
 
     def draw_overlays(self, frame):
+        # Esegui l'inferenza YOLO live se il modello è attivo
+        if hasattr(self, 'is_yolo_live') and self.is_yolo_live and hasattr(self, 'yolo_model') and self.yolo_model is not None:
+            try:
+                # Usiamo track per coerenza, anche se qui non sfruttiamo il tracking tra frame
+                results = self.yolo_model.track(frame, persist=False, verbose=False)
+                frame = results[0].plot() # Sovrascrivi il frame con quello annotato da YOLO
+            except Exception as e:
+                print(f"Errore durante l'inferenza YOLO live: {e}")
+
         if self.sync_data.empty:
             self.update_current_frame_display(frame)
             return
@@ -356,6 +479,49 @@ class DataViewerWindow(tk.Toplevel):
                 heatmap_rgba[:, :, 3] = intensity_map
                 frame = _overlay_transparent(frame, heatmap_rgba, 0, 0)
         
+        # --- MODIFICATO: Disegno dei risultati YOLO (Segmentazione e Posa) ---
+        if not self.yolo_detections_df.empty:
+            detections_for_frame = self.yolo_detections_df[self.yolo_detections_df['frame_idx'] == self.current_frame_idx]
+            
+            if not detections_for_frame.empty:
+                # Disegna le maschere di segmentazione
+                if self.overlay_vars["segmentation"].get() and 'mask_contours' in detections_for_frame.columns:
+                    overlay_mask = np.zeros_like(frame, dtype=np.uint8)
+                    for _, det in detections_for_frame.iterrows():
+                        if pd.notna(det['mask_contours']):
+                            try:
+                                # La colonna ora contiene una stringa JSON di un singolo contorno
+                                contour = json.loads(det['mask_contours'])
+                                color = self.aoi_colors.get(det.get('track_id', 0), (0, 255, 0)) # Colore casuale per maschera
+                                contour_np = np.array(contour, dtype=np.int32)
+                                cv2.fillPoly(overlay_mask, [contour_np], color)
+                            except (json.JSONDecodeError, TypeError):
+                                continue # Ignora se il formato non è corretto
+                    frame = cv2.addWeighted(frame, 1.0, overlay_mask, 0.4, 0)
+
+                # Disegna gli scheletri della posa
+                if self.overlay_vars["pose"].get() and 'keypoints' in detections_for_frame.columns:
+                    # Definisci le connessioni dello scheletro (es. COCO)
+                    skeleton_connections = [
+                        (0, 1), (0, 2), (1, 3), (2, 4), # Testa
+                        (5, 6), (5, 7), (7, 9), (6, 8), (8, 10), # Corpo
+                        (11, 12), (5, 11), (6, 12), # Spalle
+                        (11, 13), (13, 15), (12, 14), (14, 16) # Braccia
+                    ]
+                    for _, det in detections_for_frame.iterrows():
+                        if pd.notna(det['keypoints']):
+                            try:
+                                keypoints = np.array(json.loads(det['keypoints']))
+                                for i, (x, y, conf) in enumerate(keypoints):
+                                    if conf > 0.5: cv2.circle(frame, (int(x), int(y)), 3, (0, 0, 255), -1) # Disegna solo se confident
+                                for start_idx, end_idx in skeleton_connections:
+                                    if start_idx < len(keypoints) and end_idx < len(keypoints) and keypoints[start_idx][2] > 0.5 and keypoints[end_idx][2] > 0.5:
+                                        start_point = tuple(keypoints[start_idx][:2])
+                                        end_point = tuple(keypoints[end_idx][:2])
+                                        cv2.line(frame, start_point, end_point, (0, 255, 0), 1)
+                            except (json.JSONDecodeError, TypeError, IndexError):
+                                continue
+
         frame_data_row = self.sync_data.iloc[min(self.current_frame_idx, len(self.sync_data)-1)]
         if self.overlay_vars["aois"].get():
             for name, positions in self.aoi_positions_per_frame.items():
@@ -462,3 +628,4 @@ class DataViewerWindow(tk.Toplevel):
         self.video_canvas.delete("all")
         self.play_pause_btn.config(state=tk.DISABLED)
         self.frame_scale.config(state=tk.DISABLED)
+        self.run_yolo_btn.config(state=tk.DISABLED)

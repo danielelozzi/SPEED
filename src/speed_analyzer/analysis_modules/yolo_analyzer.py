@@ -7,6 +7,7 @@ from tqdm import tqdm
 import logging
 import torch
 from typing import Optional, List
+import json
 
 try:
     from ultralytics import YOLO
@@ -125,12 +126,13 @@ def run_yolo_analysis(
     data_dir: Path, 
     output_dir: Path, 
     subj_name: str,
-    yolo_model_name: str = 'yolov8n.pt',
+    yolo_task: str,
+    yolo_model_name: str,
     custom_classes: Optional[List[str]] = None
 ):
     """
     Runs YOLO object detection, correlates with fixations, and saves statistics.
-    MODIFIED: Always calculates Switching Index based on detected objects as AOIs.
+    MODIFIED for multi-task (detect, detect_custom, segment, pose) and flexible model loading.
     """
     if YOLO is None:
         logging.warning("Skipping YOLO analysis because Ultralytics is not installed.")
@@ -142,10 +144,12 @@ def run_yolo_analysis(
         return
 
     yolo_device = _get_yolo_device()
+
     try:
         model = YOLO(yolo_model_name)
-        logging.info(f"Loaded YOLO model: {yolo_model_name}")
-        if custom_classes:
+        logging.info(f"Loaded YOLO model '{yolo_model_name}' for task '{yolo_task}'.")
+
+        if yolo_task == 'detect_custom' and custom_classes: # Handles -world models
             logging.info(f"Setting custom classes for zero-shot detection: {custom_classes}")
             model.set_classes(custom_classes)
 
@@ -192,9 +196,55 @@ def run_yolo_analysis(
                 boxes = results[0].boxes.xyxy.cpu().numpy()
                 track_ids = results[0].boxes.id.int().cpu().numpy()
                 class_ids = results[0].boxes.cls.int().cpu().numpy()
-                for box, track_id, class_id in zip(boxes, track_ids, class_ids):
-                    detections.append({'frame_idx': frame_idx, 'track_id': track_id, 'class_id': class_id, 'x1': box[0], 'y1': box[1], 'x2': box[2], 'y2': box[3]})
-            
+
+                # Estrai dati specifici per task
+                masks = results[0].masks if yolo_task == 'segment' and hasattr(results[0], 'masks') and results[0].masks is not None else None
+                keypoints_data = results[0].keypoints if yolo_task == 'pose' and hasattr(results[0], 'keypoints') and results[0].keypoints is not None else None
+
+                for i, (box, track_id, class_id) in enumerate(zip(boxes, track_ids, class_ids)):
+                    detection_data = {
+                        'frame_idx': frame_idx, 
+                        'track_id': track_id, 
+                        'class_id': class_id, 
+                        'x1': box[0], 'y1': box[1], 'x2': box[2], 'y2': box[3]
+                    }
+
+                    # Salva i dati della maschera se il task è 'segment' o 'pose' con maschere
+                    if masks and masks.xy and i < len(masks.xy):
+                        try:
+                            # Ultralytics restituisce un array di contorni per maschera
+                            contour = masks.xy[i] 
+                            # Salva i contorni come stringa JSON per robustezza nel CSV
+                            detection_data['mask_contours'] = json.dumps(contour.tolist())
+                        except IndexError:
+                            pass # No mask for this specific detection
+
+                    # Salva i dati dei keypoint se il task è 'pose'
+                    if keypoints_data and keypoints_data.xy and i < len(keypoints_data.xy):
+                        try:
+                            avg_kp_confidence = 0.0
+                            # Estrai i keypoint per l'istanza corrente e salvali come JSON
+                            # keypoints_data.xy contiene le coordinate (x, y)
+                            # keypoints_data.conf contiene le confidenze
+                            keypoints_xy = keypoints_data.xy[i].cpu().numpy()
+                            keypoints_conf_tensor = keypoints_data.conf[i] if keypoints_data.conf is not None else torch.ones(len(keypoints_xy))
+                            
+                            # Calcola la confidenza media dei keypoint visibili
+                            visible_keypoints_conf = keypoints_conf_tensor[keypoints_conf_tensor > 0]
+                            if len(visible_keypoints_conf) > 0:
+                                avg_kp_confidence = visible_keypoints_conf.mean().item()
+                            
+                            # Combina coordinate e confidenza in un'unica struttura
+                            keypoints_conf = keypoints_conf_tensor.cpu().numpy()
+                            keypoints_with_conf = np.hstack((keypoints_xy, keypoints_conf[:, None]))
+                            detection_data['keypoints'] = json.dumps(keypoints_with_conf.tolist())
+                            detection_data['avg_kp_confidence'] = avg_kp_confidence
+
+                        except IndexError:
+                            pass # No keypoints for this specific detection
+
+                    detections.append(detection_data)
+
             frame_idx += 1
             pbar.update(1)
 
@@ -207,25 +257,63 @@ def run_yolo_analysis(
 
     # --- INIZIA LA LOGICA DI ANALISI ---
     # Crea sempre i file di output, anche se vuoti.
-    stats_instance_df = pd.DataFrame(columns=['instance', 'n_fixations', 'normalized_fixation_count', 'avg_pupil_diameter_mm', 'total_frames_detected'])
-    stats_class_df = pd.DataFrame(columns=['class', 'n_fixations', 'normalized_fixation_count', 'avg_pupil_diameter_mm', 'total_frames_detected'])
+    stats_instance_df = pd.DataFrame()
+    stats_class_df = pd.DataFrame()
     id_map_df = pd.DataFrame(columns=['track_id', 'class_id', 'class_name', 'instance_name'])
 
     if not detections_df.empty:
+        # Crea la mappa delle classi una sola volta
+        class_map = {int(k): v for k, v in model.names.items()}
+        detections_df['class_name'] = detections_df['class_id'].map(class_map)
+        # Gestisci il caso in cui una class_id non sia nella mappa
+        detections_df['class_name'].fillna('unknown', inplace=True)
+        detections_df['instance_name'] = detections_df['class_name'] + '_' + detections_df['track_id'].astype(str)
+
         logging.info("Correlating detections with fixations...")
         merged_df_fix = pd.merge(detections_df, synced_et_data_fix, left_on='frame_idx', right_on='frame', how='inner')
-        fixation_hits = [row for _, row in merged_df_fix.iterrows() if pd.notna(row['fixation x [px]']) and _is_inside(row['fixation x [px]'], row['fixation y [px]'], row['x1'], row['y1'], row['x2'], row['y2'])]
         
+        # Sostituisci la vecchia list comprehension con un ciclo esplicito per gestire la segmentazione
+        fixation_hits = []
+        for _, row in merged_df_fix.iterrows():
+            if pd.isna(row['fixation x [px]']):
+                continue
+
+            px, py = row['fixation x [px]'], row['fixation y [px]']
+            is_hit = False
+
+            # Se il task è segmentazione e la maschera esiste
+            if yolo_task == 'segment' and 'mask_contours' in row and pd.notna(row['mask_contours']):
+                try:
+                    # Converte la stringa JSON di contorni in un array NumPy di interi
+                    contour_points = np.array(json.loads(row['mask_contours'])).astype(np.int32)
+                    # Usa pointPolygonTest di OpenCV per verificare se il punto è dentro il poligono
+                    if cv2.pointPolygonTest(contour_points, (px, py), False) >= 0:
+                        is_hit = True
+                except (json.JSONDecodeError, ValueError, IndexError):
+                    # Fallback al bounding box in caso di errore di parsing
+                    if _is_inside(px, py, row['x1'], row['y1'], row['x2'], row['y2']):
+                        is_hit = True
+            else:
+                # Comportamento di default: usa il bounding box
+                if _is_inside(px, py, row['x1'], row['y1'], row['x2'], row['y2']):
+                    is_hit = True
+
+            if is_hit:
+                fixation_hits.append(row)
+
         if fixation_hits:
             hits_df = pd.DataFrame(fixation_hits)
-            logging.info("Calculating statistics for fixations...")
-            class_map = {int(k): v for k, v in model.names.items()}
-            hits_df['class_name'] = hits_df['class_id'].map(class_map)
+            logging.info("Calculating statistics for fixations...")            
             
             stats_instance = hits_df.groupby('instance_name').agg(
                 n_fixations=('fixation id', 'nunique'),
-                avg_pupil_diameter_mm=('pupil diameter left [mm]', 'mean')
+                avg_pupil_diameter_mm=('pupil diameter left [mm]', 'mean'),
+                avg_keypoint_confidence=('avg_kp_confidence', 'mean') # NUOVA RIGA
             ).reset_index()
+
+            # Arrotonda il risultato per una migliore leggibilità
+            if 'avg_keypoint_confidence' in stats_instance.columns:
+                stats_instance['avg_keypoint_confidence'] = stats_instance['avg_keypoint_confidence'].round(3)
             
             total_detections_instance = detections_df.groupby('instance_name').size().reset_index(name='total_frames_detected')
             stats_instance = pd.merge(stats_instance, total_detections_instance, on='instance_name')
@@ -233,13 +321,20 @@ def run_yolo_analysis(
             
             stats_class = hits_df.groupby('class_name').agg(
                 n_fixations=('fixation id', 'nunique'),
-                avg_pupil_diameter_mm=('pupil diameter left [mm]', 'mean')
+                avg_pupil_diameter_mm=('pupil diameter left [mm]', 'mean'),
+                avg_keypoint_confidence=('avg_kp_confidence', 'mean') # NUOVA RIGA
             ).reset_index()
+
+            # Arrotonda il risultato per una migliore leggibilità
+            if 'avg_keypoint_confidence' in stats_class.columns:
+                stats_class['avg_keypoint_confidence'] = stats_class['avg_keypoint_confidence'].round(3)
 
             total_detections_class = detections_df.groupby('class_name').size().reset_index(name='total_frames_detected')
             stats_class = pd.merge(stats_class, total_detections_class, on='class_name')
             stats_class['normalized_fixation_count'] = stats_class['n_fixations'] / stats_class['total_frames_detected']
             
+            stats_instance_df = stats_instance
+            stats_class_df = stats_class
             id_map_df = hits_df[['track_id', 'class_id', 'class_name', 'instance_name']].drop_duplicates()
             logging.info("Fixation-based statistics calculated.")
         else:
@@ -258,10 +353,29 @@ def run_yolo_analysis(
     # Mappa ogni punto di sguardo a un track_id
     mapped_gaze_to_tid = []
     if not merged_df_gaze.empty:
-        merged_df_gaze['mapped_track_id'] = merged_df_gaze.apply(
-            lambda row: row['track_id'] if pd.notna(row['gaze x [px]']) and _is_inside(row['gaze x [px]'], row['gaze y [px]'], row['x1'], row['y1'], row['x2'], row['y2']) else None,
-            axis=1
-        )
+        # Applica la stessa logica di hit-testing delle fissazioni anche ai dati di sguardo
+        def find_gaze_hit_track_id(row):
+            if pd.isna(row['gaze x [px]']):
+                return None
+
+            px, py = row['gaze x [px]'], row['gaze y [px]']
+            
+            # Se il task è segmentazione e la maschera esiste
+            if yolo_task == 'segment' and 'mask_contours' in row and pd.notna(row['mask_contours']):
+                try:
+                    contour_points = np.array(json.loads(row['mask_contours'])).astype(np.int32)
+                    if cv2.pointPolygonTest(contour_points, (px, py), False) >= 0:
+                        return row['track_id']
+                except (json.JSONDecodeError, ValueError, IndexError):
+                    pass # Fallback al bounding box
+            
+            # Comportamento di default o fallback: usa il bounding box
+            if _is_inside(px, py, row['x1'], row['y1'], row['x2'], row['y2']):
+                return row['track_id']
+            
+            return None
+
+        merged_df_gaze['mapped_track_id'] = merged_df_gaze.apply(find_gaze_hit_track_id, axis=1)
         final_gaze_mapping = merged_df_gaze.groupby('timestamp [ns]')['mapped_track_id'].first() # Prendi il primo oggetto se ci sono sovrapposizioni
     else:
         final_gaze_mapping = pd.Series([])

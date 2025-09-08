@@ -127,10 +127,13 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.title("Real-time Neon Stream")
         self.geometry("1280x950")
 
-        self.analyzer = RealtimeNeonAnalyzer()
+        self.analyzer = None 
         self.is_running = False
         self.is_paused_for_drawing = False
         
+        # Dizionario dei modelli YOLO specifico per questa finestra
+        self.YOLO_MODELS = SpeedApp.YOLO_MODELS
+
         # --- NUOVO: Variabile per il ponte LSL ---
         self.lsl_bridge = None
 
@@ -143,6 +146,14 @@ class RealtimeDisplayWindow(tk.Toplevel):
         
         main_control_frame = tk.Frame(self, pady=10)
         main_control_frame.pack(fill=tk.X, padx=10)
+
+        # --- MODIFICA: Logica di connessione e avvio in due fasi ---
+        connect_frame = tk.Frame(main_control_frame)
+        connect_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 10))
+        self.connect_button = tk.Button(connect_frame, text="Connect to Device", command=self.connect_to_device, font=('Helvetica', 10, 'bold'), bg='#a5d6a7')
+        self.connect_button.pack(fill=tk.X, expand=True)
+        self.start_analysis_button = tk.Button(connect_frame, text="Start Analysis", command=self.start_stream, font=('Helvetica', 10, 'bold'), bg='#c8e6c9', state=tk.DISABLED)
+        self.start_analysis_button.pack(fill=tk.X, expand=True, pady=(5,0))
 
         record_frame = tk.LabelFrame(main_control_frame, text="Controls", padx=10, pady=10)
         record_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
@@ -172,6 +183,29 @@ class RealtimeDisplayWindow(tk.Toplevel):
         aoi_btn_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
         tk.Button(aoi_btn_frame, text="Add AOI", command=self.prepare_to_draw_aoi).pack()
         tk.Button(aoi_btn_frame, text="Remove", command=self.remove_selected_aoi).pack()
+
+        # --- MODIFICA: Frame per i controlli YOLO in tempo reale ---
+        self.yolo_config_frame = tk.LabelFrame(main_control_frame, text="YOLO Real-Time Controls", padx=10, pady=10)
+        self.yolo_config_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
+        
+        self.yolo_task_var = tk.StringVar(value='detect')
+        self.yolo_model_var = tk.StringVar()
+        self.yolo_classes_var = tk.StringVar()
+
+        tk.Label(self.yolo_config_frame, text="YOLO Task:").pack(anchor='w')
+        self.yolo_task_combo = ttk.Combobox(self.yolo_config_frame, textvariable=self.yolo_task_var, values=list(self.YOLO_MODELS.keys()), state='disabled', width=25)
+        self.yolo_task_combo.pack(pady=(0,5))
+        self.yolo_task_combo.bind('<<ComboboxSelected>>', self.update_yolo_model_options)
+
+        tk.Label(self.yolo_config_frame, text="YOLO Model:").pack(anchor='w')
+        self.yolo_model_combo = ttk.Combobox(self.yolo_config_frame, textvariable=self.yolo_model_var, state='disabled', width=25)
+        self.yolo_model_combo.pack()
+
+        tk.Label(self.yolo_config_frame, text="Custom Classes (for -world models):").pack(anchor='w', pady=(5,0))
+        self.yolo_classes_entry = tk.Entry(self.yolo_config_frame, textvariable=self.yolo_classes_var, width=28, state=tk.DISABLED)
+        self.yolo_classes_entry.pack()
+        SpeedApp.add_placeholder(self.yolo_classes_entry, "person, car, dog")
+
         
         vis_options_frame = tk.LabelFrame(main_control_frame, text="Visual Options", padx=10, pady=10)
         vis_options_frame.pack(side=tk.LEFT, fill=tk.Y)
@@ -183,35 +217,90 @@ class RealtimeDisplayWindow(tk.Toplevel):
         tk.Checkbutton(vis_options_frame, text="AOIs", variable=self.overlay_vars["show_aois"]).pack(anchor='w')
         tk.Checkbutton(vis_options_frame, text="Heatmap", variable=self.overlay_vars["show_heatmap"]).pack(anchor='w')
 
-
-        self.status_label = tk.Label(main_control_frame, text="Connecting to device...", font=('Helvetica', 10))
+        self.status_label = tk.Label(main_control_frame, text="Ready. Configure and press 'Connect'.", font=('Helvetica', 10))
         self.status_label.pack(side=tk.LEFT, padx=20, fill=tk.BOTH, expand=True)
 
+        self.update_yolo_model_options() # Imposta i valori iniziali
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def update_yolo_model_options(self, event=None):
+        selected_task = self.yolo_task_var.get()
+        available_models = self.YOLO_MODELS.get(selected_task, [])
+        self.yolo_model_combo['values'] = available_models
+        if available_models:
+            self.yolo_model_var.set(available_models[0])
+        else:
+            self.yolo_model_var.set('')
+            
+        # Abilita/disabilita l'entry per le classi custom
+        is_custom_detect_task = (selected_task == 'detect_custom')
+        self.yolo_classes_entry.config(state=tk.NORMAL if is_custom_detect_task else tk.DISABLED)
+
+    def connect_to_device(self):
+        """Tenta di connettersi al dispositivo Neon."""
+        self.status_label.config(text="Initializing and connecting...")
+        self.connect_button.config(state=tk.DISABLED)
+
+        # Istanzia l'analizzatore senza modello YOLO per ora
+        self.analyzer = RealtimeNeonAnalyzer(model_name=None, task=None)
+
+        if self.analyzer.connect():
+            self.status_label.config(text="Device connected. Configure analysis and press 'Start Analysis'.")
+            # Abilita i controlli per la fase successiva
+            self.start_analysis_button.config(state=tk.NORMAL)
+            self.yolo_task_combo.config(state='readonly')
+            self.yolo_model_combo.config(state='readonly')
+            self.update_yolo_model_options() # Aggiorna stato entry classi custom
+        else:
+            self.status_label.config(text="Failed to connect. Please check device.")
+            self.connect_button.config(state=tk.NORMAL)
+            self.analyzer = None # Resetta l'analizzatore
+
+    def start_stream(self):
+        """Avvia il loop di analisi e streaming video."""
+        if not self.analyzer or not self.analyzer.device:
+            messagebox.showerror("Error", "Device not connected. Please connect first.", parent=self)
+            return
+
+        self.start_analysis_button.config(state=tk.DISABLED)
+
+        # Prepara la lista delle classi custom
+        custom_classes_str = self.yolo_classes_var.get().strip()
+        yolo_custom_classes = None
+        if custom_classes_str and custom_classes_str != "person, car, dog": # Ignora il placeholder
+            yolo_custom_classes = [cls.strip() for cls in custom_classes_str.split(',') if cls.strip()]
+
+        # Ora inizializza il modello YOLO nell'analizzatore esistente
+        self.analyzer._initialize_yolo_model(
+            model_name=self.yolo_model_var.get(),
+            task=self.yolo_task_var.get(),
+            custom_classes=yolo_custom_classes)
+        
         self.thread = threading.Thread(target=self.stream_loop, daemon=True)
         self.thread.start()
 
     def stream_loop(self):
-        if self.analyzer.connect():
-            self.is_running = True
-            
-            # --- MODIFICATO: Avvia LSL se richiesto ---
-            if self.lsl_stream_var.get():
-                try:
-                    self.lsl_bridge = LSLBridge(self.analyzer)
-                    self.lsl_bridge.start()
-                    self.status_label.config(text="Streaming... (LSL Enabled)")
-                except ImportError as e:
-                    messagebox.showerror("LSL Error", str(e), parent=self)
-                    self.status_label.config(text="Streaming... (LSL FAILED)")
-            else:
-                 self.status_label.config(text="Streaming...")
-            
-            self.record_button.config(state=tk.NORMAL)
+        self.is_running = True
+        
+        if self.lsl_stream_var.get():
+            try:
+                self.lsl_bridge = LSLBridge(self.analyzer)
+                self.lsl_bridge.start()
+                self.status_label.config(text="Streaming... (LSL Enabled)")
+            except ImportError as e:
+                messagebox.showerror("LSL Error", str(e), parent=self)
+                self.status_label.config(text="Streaming... (LSL FAILED)")
         else:
-            self.status_label.config(text="Failed to connect. Please check device."); return
+             self.status_label.config(text="Streaming...")
+        
+        # Disabilita i controlli di configurazione YOLO una volta avviato lo stream
+        self.yolo_model_combo.config(state=tk.DISABLED)
+        self.yolo_task_combo.config(state=tk.DISABLED)
+        self.yolo_classes_entry.config(state=tk.DISABLED)
 
-        while self.is_running:
+        self.record_button.config(state=tk.NORMAL)
+
+        while self.is_running and self.analyzer:
             if not self.is_paused_for_drawing:
                 overlay_settings = {key: var.get() for key, var in self.overlay_vars.items()}
                 frame = self.analyzer.process_and_visualize(**overlay_settings)
@@ -460,15 +549,22 @@ class EventManagerWindow(tk.Toplevel):
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v4.8.2")
+        self.root.title("SPEED v5.0.0")
         self.root.geometry("850x850")
+
+        # --- NUOVA STRUTTURA DATI PER I MODELLI YOLO ---
+        SpeedApp.YOLO_MODELS = {
+            'detect': ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt'],
+            'detect_custom': ['yolov8s-world.pt', 'yolov8s-worldv2.pt', 'yolov8m-world.pt', 'yolov8x-world.pt', 'yolov8x-worldv2.pt'],
+            'segment': ['yolov8n-seg.pt', 'yolov8s-seg.pt', 'yolov8m-seg.pt', 'yolov8l-seg.pt', 'yolov8x-seg.pt'],
+            'pose': ['yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt', 'yolov8x-pose-p6.pt']
+        }
 
         self.raw_dir_var = tk.StringVar()
         self.unenriched_dir_var = tk.StringVar()
         self.enriched_dir_var = tk.StringVar()
         self.external_event_file_var = tk.StringVar()
-        self.plot_vars = {}
-        self.video_vars = {}
+        self.yolo_task_var = tk.StringVar(value='detect')
         self.events_df = pd.DataFrame()
         self.world_timestamps_df = pd.DataFrame()
         
@@ -581,26 +677,29 @@ class SpeedApp:
         yolo_options_frame.pack(fill=tk.X, padx=20, pady=5)
 
         # Combobox per la selezione del modello
-        model_frame = tk.Frame(yolo_options_frame)
-        model_frame.pack(fill=tk.X, pady=2)
+        task_frame = tk.Frame(yolo_options_frame)
+        task_frame.pack(fill=tk.X, pady=2)
+        tk.Label(task_frame, text="YOLO Task:", width=28, anchor='w').pack(side=tk.LEFT)
+        self.yolo_task_combobox = ttk.Combobox(task_frame, textvariable=self.yolo_task_var, values=list(SpeedApp.YOLO_MODELS.keys()), state='readonly')
+        self.yolo_task_combobox.pack(fill=tk.X, expand=True)
+        self.yolo_task_combobox.bind('<<ComboboxSelected>>', self.update_yolo_model_options)
+
+        # Combobox per il modello, ora dinamico
+        model_frame = tk.Frame(yolo_options_frame); model_frame.pack(fill=tk.X, pady=2)
         tk.Label(model_frame, text="YOLO Model:", width=28, anchor='w').pack(side=tk.LEFT)
         self.yolo_model_var = tk.StringVar(value='yolov8n.pt')
-        yolo_models = [
-            'yolov8s-world.pt', 'yolov8s-worldv2.pt', 'yolov8m-world.pt', 'yolov8m-worldv2.pt',
-            'yolov8l-world.pt', 'yolov8l-worldv2.pt', 'yolov8x-world.pt', 'yolov8x-worldv2.pt', 'yolov8n.pt'
-        ]
-        self.yolo_model_combo = ttk.Combobox(model_frame, textvariable=self.yolo_model_var, values=yolo_models, state='readonly')
-        self.yolo_model_combo.pack(fill=tk.X, expand=True)
+        self.yolo_model_combobox = ttk.Combobox(model_frame, textvariable=self.yolo_model_var, state='readonly')
+        self.yolo_model_combobox.pack(fill=tk.X, expand=True)
 
         # Entry per le classi custom
         classes_frame = tk.Frame(yolo_options_frame)
         classes_frame.pack(fill=tk.X, pady=2)
-        tk.Label(classes_frame, text="Custom Classes (comma-separated):", width=28, anchor='w').pack(side=tk.LEFT)
+        tk.Label(classes_frame, text="Custom Classes (for -world models):", width=28, anchor='w').pack(side=tk.LEFT)
         self.yolo_classes_var = tk.StringVar()
         self.yolo_classes_entry = tk.Entry(classes_frame, textvariable=self.yolo_classes_var)
         self.yolo_classes_entry.pack(fill=tk.X, expand=True)
         self.add_placeholder(self.yolo_classes_entry, "person, car, dog")
-
+        
         # Imposta lo stato iniziale
         self.toggle_yolo_options()
         # --- FINE NUOVI CONTROLLI ---
@@ -630,6 +729,8 @@ class SpeedApp:
         notebook.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
         plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='5. Generate Plots')
         video_tab = tk.Frame(notebook); notebook.add(video_tab, text='6. Generate Videos')
+        self.plot_vars = {}
+        self.video_vars = {}
         yolo_tab = tk.Frame(notebook); notebook.add(yolo_tab, text='7. YOLO Results')
         self.setup_plot_tab(plot_tab)
         self.setup_video_tab(video_tab)
@@ -649,24 +750,56 @@ class SpeedApp:
         footer_label_part2.pack(side=tk.LEFT)
         
         self.update_aoi_list_display()
-    
-    def add_placeholder(self, entry, placeholder):
-        """Aggiunge un testo placeholder a un widget Entry."""
-        entry.insert(0, placeholder)
-        entry.config(fg='grey')
+
+    def add_placeholder(self, entry_widget, placeholder_text):
+        """Aggiunge un testo di placeholder a un widget Entry di Tkinter."""
+        entry_widget.insert(0, placeholder_text)
+        entry_widget.config(fg='grey')
 
         def on_focus_in(event):
-            if entry.get() == placeholder:
-                entry.delete(0, tk.END)
-                entry.config(fg='black')
+            if entry_widget.cget('fg') == 'grey':
+                entry_widget.delete(0, "end")
+                entry_widget.config(fg='black')
 
         def on_focus_out(event):
-            if not entry.get():
-                entry.insert(0, placeholder)
-                entry.config(fg='grey')
+            if not entry_widget.get():
+                entry_widget.insert(0, placeholder_text)
+                entry_widget.config(fg='grey')
 
-        entry.bind("<FocusIn>", on_focus_in)
-        entry.bind("<FocusOut>", on_focus_out)
+        entry_widget.bind("<FocusIn>", on_focus_in)
+        entry_widget.bind("<FocusOut>", on_focus_out)
+
+
+    def toggle_yolo_options(self):
+        """Abilita o disabilita tutti i widget delle opzioni YOLO in base al checkbutton principale."""
+        is_enabled = self.yolo_var.get()
+        new_state = 'readonly' if is_enabled else 'disabled'
+        
+        self.yolo_task_combobox.config(state=new_state)
+        self.yolo_model_combobox.config(state=new_state)
+        
+        # Chiama l'altro metodo per gestire la logica specifica dell'entry delle classi custom
+        self.update_yolo_model_options()
+
+    def update_yolo_model_options(self, event=None):
+        """Aggiorna dinamicamente il combobox dei modelli e lo stato dell'entry per le classi custom."""
+        is_yolo_enabled = self.yolo_var.get()
+        selected_task = self.yolo_task_var.get()
+        
+        # Aggiorna la lista dei modelli disponibili
+        models_for_task = SpeedApp.YOLO_MODELS.get(selected_task, [])
+        self.yolo_model_combobox['values'] = models_for_task
+        if models_for_task:
+            self.yolo_model_combobox.set(models_for_task[0])
+        else:
+            self.yolo_model_combobox.set('')
+
+        # Abilita l'entry per le classi custom solo se YOLO è attivo E il task è quello giusto
+        # NOTA: Il nome del task nel dizionario è 'detect_custom', non 'Custom Classification'
+        if is_yolo_enabled and selected_task == 'detect_custom':
+            self.yolo_classes_entry.config(state='normal')
+        else:
+            self.yolo_classes_entry.config(state='disabled')
 
     def open_data_viewer(self):
         viewer_window = DataViewerWindow(self.root, defined_aois=self.user_defined_aois)
@@ -1038,16 +1171,25 @@ class SpeedApp:
             
             self.update_aoi_list_display()
 
-    def toggle_yolo_options(self):
-        """Abilita/disabilita i controlli YOLO avanzati in base al checkbutton."""
-        if self.yolo_var.get():
-            self.yolo_model_combo.config(state='readonly')
-            self.yolo_classes_entry.config(state=tk.NORMAL)
+    def update_yolo_model_options(self, event=None):
+        """
+        Aggiorna il combobox dei modelli in base al task selezionato e gestisce
+        lo stato dell'entry per le classi custom.
+        """
+        selected_task = self.yolo_task_var.get()
+        
+        # Aggiorna i modelli disponibili
+        models_for_task = SpeedApp.YOLO_MODELS.get(selected_task, [])
+        self.yolo_model_combobox['values'] = models_for_task
+        if models_for_task:
+            self.yolo_model_combobox.set(models_for_task[0])
         else:
-            self.yolo_model_combo.config(state=tk.DISABLED)
-            self.yolo_classes_entry.config(state=tk.DISABLED)
-
-
+            self.yolo_model_combobox.set('')
+            
+        # Abilita/disabilita l'entry per le classi custom
+        is_custom_detect_task = (selected_task == 'detect_custom')
+        self.yolo_classes_entry.config(state=tk.NORMAL if is_custom_detect_task else tk.DISABLED)
+        
     def run_full_analysis_wrapper(self):
         output_dir = self.output_dir_entry.get().strip()
         subj_name = self.participant_name_var.get().strip()
@@ -1073,7 +1215,8 @@ class SpeedApp:
                 logging.info("User-defined AOIs are present. Ignoring 'Enriched Data Folder' and generating new enriched data.")
 
             # Recupera i valori dai widget YOLO
-            yolo_model_selection = self.yolo_model_var.get()
+            yolo_model_selection = self.yolo_model_var.get() # Già corretto
+            yolo_task_selection = self.yolo_task_var.get()
             custom_classes_str = self.yolo_classes_var.get().strip()
             
             # Prepara la lista delle classi custom
@@ -1089,7 +1232,8 @@ class SpeedApp:
                 subject_name=subj_name,
                 events_df=final_events_df,
                 run_yolo=self.yolo_var.get(),
-                yolo_model_name=yolo_model_selection, # Nuovo
+                yolo_model_name=yolo_model_selection,
+                yolo_task=yolo_task_selection,
                 yolo_custom_classes=yolo_custom_classes, # Nuovo
                 defined_aois=self.user_defined_aois
             )

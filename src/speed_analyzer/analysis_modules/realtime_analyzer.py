@@ -4,7 +4,9 @@ import numpy as np
 import time
 import pandas as pd
 from pathlib import Path
+import tempfile
 import threading
+from typing import Optional
 from pupil_labs.realtime_api.simple import discover_one_device
 from ultralytics import YOLO
 from .video_generator import (_draw_pupil_plot, _draw_generic_plot, 
@@ -58,19 +60,11 @@ class RealtimeNeonAnalyzer:
     Gestisce la connessione, l'acquisizione dati e l'analisi in tempo reale
     da un dispositivo Pupil Labs Neon.
     """
-    def __init__(self, model_path='yolov8n.pt'):
+    def __init__(self, model_name='yolov8n.pt', task='detect', custom_classes=None):
         print("Initializing Real-time Neon Analyzer...")
         self.device = None
-        self.last_gaze = None
-        self.last_scene_frame = None
-        self.last_eye_frame = None
-        
-        try:
-            self.yolo_model = YOLO(model_path)
-            print("YOLO model loaded successfully.")
-        except Exception as e:
-            print(f"Error loading YOLO model: {e}")
-            self.yolo_model = None
+        self.yolo_model = None
+        self._initialize_yolo_model(model_name, task, custom_classes)
 
         # Dati per grafici e overlay
         self.pupil_data = {"Left": [], "Right": [], "Mean": []}
@@ -96,6 +90,46 @@ class RealtimeNeonAnalyzer:
         self.gaze_data_list = []
         self.events_list = []
         self.recording_start_time_unix = None
+        self.last_gaze = None
+        self.last_scene_frame = None
+        self.last_eye_frame = None
+
+    def _initialize_yolo_model(self, model_name, task, custom_classes):
+        """Carica e configura il modello YOLO in base al task e alle classi custom."""
+        try:
+            # Gestione dei modelli specifici per task (es. -seg, -pose)
+            model_file = Path(model_name)
+            stem = model_file.stem.split('-')[0] # es. 'yolov8n' da 'yolov8n-seg'
+            
+            if task == 'segment' and not model_name.endswith('-seg.pt'):
+                model_name = f"{stem}-seg.pt"
+            elif task == 'pose' and not model_name.endswith('-pose.pt'):
+                model_name = f"{stem}-pose.pt"
+
+            # Logica per YOLO-World con classi custom (salva e ricarica)
+            if task == 'detect_custom' and custom_classes:
+                print(f"Configuring YOLO-World with custom classes: {custom_classes}")
+                base_model = YOLO(model_name)
+                base_model.set_classes(custom_classes)
+                
+                # Salva il modello custom in una cartella temporanea
+                temp_dir = Path(tempfile.gettempdir())
+                custom_model_path = temp_dir / f"yolo_world_custom_{'_'.join(custom_classes)}.pt"
+                
+                print(f"Saving custom model to: {custom_model_path}")
+                base_model.save(custom_model_path)
+                
+                # Ricarica il modello custom per l'inferenza
+                self.yolo_model = YOLO(custom_model_path)
+            else:
+                # Caricamento standard per tutti gli altri casi
+                print(f"Loading standard YOLO model: {model_name}")
+                self.yolo_model = YOLO(model_name)
+            
+            print("YOLO model initialized successfully.")
+        except Exception as e:
+            print(f"CRITICAL ERROR: Failed to initialize YOLO model: {e}")
+            self.yolo_model = None
 
     def connect(self, mock_device=None):
         if mock_device:
@@ -121,18 +155,27 @@ class RealtimeNeonAnalyzer:
         self.last_eye_frame = self.device.receive_eyes_video_frame()
         self.last_gaze = self.device.receive_gaze_datum()
         return self.last_scene_frame, self.last_eye_frame, self.last_gaze
-        
-    def get_gazed_object(self, scene_img, gaze):
-        if self.yolo_model is None or scene_img is None or gaze is None: return "N/A", scene_img
+
+    def _run_yolo_inference(self, scene_img):
+        """Esegue il modello YOLO caricato sul frame e restituisce il frame annotato."""
+        if self.yolo_model is None:
+            return scene_img, "N/A"
+
         results = self.yolo_model.track(scene_img, persist=True, verbose=False)
-        gaze_point = (int(gaze.x), int(gaze.y))
         annotated_frame = results[0].plot()
-        for box in results[0].boxes:
-            x1, y1, x2, y2 = [int(i) for i in box.xyxy[0]]
-            if x1 <= gaze_point[0] <= x2 and y1 <= gaze_point[1] <= y2:
-                class_id = int(box.cls[0])
-                return self.yolo_model.names[class_id], annotated_frame
-        return "No object", annotated_frame
+
+        # Logica per trovare l'oggetto sotto lo sguardo (opzionale ma utile)
+        gazed_object_name = "No object"
+        if self.last_gaze and results[0].boxes:
+            gaze_point = (int(self.last_gaze.x), int(self.last_gaze.y))
+            for box in results[0].boxes:
+                x1, y1, x2, y2 = [int(i) for i in box.xyxy[0]]
+                if x1 <= gaze_point[0] <= x2 and y1 <= gaze_point[1] <= y2:
+                    class_id = int(box.cls[0])
+                    gazed_object_name = self.yolo_model.names[class_id]
+                    break
+        
+        return annotated_frame, gazed_object_name
 
     def start_recording(self, output_dir: str = "./realtime_recording"):
         if self.is_recording:
@@ -286,9 +329,8 @@ class RealtimeNeonAnalyzer:
                     break
         
         if show_yolo and self.last_gaze:
-            self.last_gazed_object, scene_img_yolo = self.get_gazed_object(scene_img.copy(), self.last_gaze)
-            # Usa l'immagine annotata da YOLO solo se YOLO è attivo
-            scene_img = scene_img_yolo
+            scene_img, gazed_name = self._run_yolo_inference(scene_img.copy())
+            self.last_gazed_object = gazed_name
         
         if self.last_gaze:
             gaze = self.last_gaze
