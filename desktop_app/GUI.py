@@ -30,6 +30,8 @@ from desktop_app.aoi_editor import AoiEditor
 from desktop_app.manual_aoi_editor import ManualAoiEditor
 from device_converter_window import DeviceConverterWindow
 from src.speed_analyzer import run_full_analysis
+from src.speed_analyzer import _prepare_working_directory # Importazione diretta
+from src.speed_analyzer.analysis_modules import video_generator # Importazione diretta
 from src.speed_analyzer.analysis_modules.realtime_analyzer import RealtimeNeonAnalyzer
 
 
@@ -565,7 +567,7 @@ YOLO_MODELS = {
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.0.1")
+        self.root.title("SPEED v5.0.2")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
@@ -1277,8 +1279,49 @@ class SpeedApp:
 
     def run_video_generation(self):
         common_paths = self._get_common_paths()
-        if not common_paths: return
-        messagebox.showinfo("Info", "Questa funzione andrebbe ricollegata al nuovo package.")
+        if not common_paths:
+            return
+        output_dir_path, subj_name = common_paths
+
+        raw_dir_str = self.raw_dir_var.get()
+        unenriched_dir_str = self.unenriched_dir_var.get()
+
+        if not all([raw_dir_str, unenriched_dir_str]):
+            messagebox.showerror("Error", "RAW and Un-enriched folders are mandatory for video generation.")
+            return
+
+        try:
+            # 1. Raccogli le opzioni dalla GUI
+            video_options = {key: var.get() for key, var in self.video_vars.items()}
+            video_options['output_filename'] = self.video_filename_var.get()
+            video_options['heatmap_window_seconds'] = self.heatmap_video_window_var.get()
+
+            # 2. Prepara la cartella di lavoro temporanea
+            final_events_df = self.events_df.copy()
+            if not final_events_df.empty and 'selected' in final_events_df.columns:
+                final_events_df = final_events_df[final_events_df['selected']]
+            
+            working_dir = _prepare_working_directory(
+                output_dir=output_dir_path,
+                raw_dir=Path(raw_dir_str),
+                unenriched_dir=Path(unenriched_dir_str),
+                enriched_dirs=self.enriched_dir_paths,
+                events_df=final_events_df
+            )
+
+            un_enriched_mode = not bool(self.enriched_dir_paths)
+            selected_event_names = final_events_df['name'].tolist() if not final_events_df.empty else []
+
+            messagebox.showinfo("In Progress", "Starting video generation...")
+            video_generator.create_custom_video(
+                data_dir=working_dir, output_dir=output_dir_path, subj_name=subj_name,
+                options=video_options, un_enriched_mode=un_enriched_mode,
+                selected_events=selected_event_names
+            )
+            messagebox.showinfo("Success", f"Video generation complete!\nFile saved in: {output_dir_path}")
+        except Exception as e:
+            logging.error(f"Video Generation Error: {e}\n{traceback.format_exc()}")
+            messagebox.showerror("Video Generation Error", f"An error occurred: {e}\n\nSee log for details.")
 
     def load_yolo_results(self):
         common_paths = self._get_common_paths()

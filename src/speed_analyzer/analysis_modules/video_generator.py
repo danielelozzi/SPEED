@@ -5,7 +5,7 @@ import cv2
 from pathlib import Path
 from tqdm import tqdm
 import traceback
-from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip # Aggiunto
+from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip # Importazione corretta
 
 # --- Constants ---
 NS_TO_S = 1e9 # Conversion factor from nanoseconds to seconds
@@ -262,6 +262,7 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
         return
 
     cap_int = None
+    fps_int = 0 # Inizializza la variabile per il frame rate del video interno
     if options.get('include_internal_cam'):
         internal_vid_path = data_dir / 'internal.mp4'
         if internal_vid_path.exists():
@@ -269,9 +270,16 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
             if not cap_int.isOpened():
                 print("WARNING: Cannot open internal video, PiP disabled.")
                 options['include_internal_cam'] = False
+            else:
+                # Leggi il frame rate del video interno
+                fps_int = cap_int.get(cv2.CAP_PROP_FPS)
+                if fps_int == 0: # Fallback se i metadati sono mancanti
+                    fps_int = 200
+                    logging.warning("Could not read internal video FPS, falling back to 200 Hz.")
         else:
             print("WARNING: Internal video not found, PiP disabled.")
             options['include_internal_cam'] = False
+
 
 
     total_frames = int(cap_ext.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -388,9 +396,6 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
             for start_frame, end_frame in frame_segments:
                 # Posiziona la testina di lettura del video all'inizio del segmento
                 cap_ext.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-                if cap_int:
-                    # Tenta di sincronizzare anche il video interno (potrebbe non essere perfetto)
-                    cap_int.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
                 for frame_idx in range(start_frame, end_frame):
                     ret_ext, frame = cap_ext.read()
@@ -457,8 +462,14 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                             current_event_name = active_events.iloc[-1]['name']
 
                     if options.get('include_internal_cam') and cap_int is not None:
+                        # --- NUOVA LOGICA DI SINCRONIZZAZIONE TEMPORALE ---
+                        # Calcola il frame interno corrispondente in base al tempo del video esterno
+                        current_time_sec = frame_idx / fps
+                        target_int_frame_idx = int(current_time_sec * fps_int)
+                        cap_int.set(cv2.CAP_PROP_POS_FRAMES, target_int_frame_idx)
                         ret_int, frame_int = cap_int.read()
                         if ret_int:
+                            # Disegna il frame interno come Picture-in-Picture
                             pip_h = int(out_h * PIP_SCALE)
                             pip_w = int(frame_int.shape[1] * (pip_h / frame_int.shape[0]))
                             frame[10:10+pip_h, 10:10+pip_w] = cv2.resize(frame_int, (pip_w, pip_h))
@@ -564,18 +575,17 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                     start_frame, end_frame = frame_segments[0]
                     start_time = start_frame / fps
                     end_time = end_frame / fps
-                    trimmed_audio = original_audio_clip.subclip(start_time, end_time)
-                    final_clip = video_clip.set_audio(trimmed_audio)
+                    final_audio = original_audio_clip.subclip(start_time, end_time) # Corretto
                 else:
-                    final_clip = video_clip.set_audio(original_audio_clip)
+                    final_audio = original_audio_clip # Corretto
+                final_clip = video_clip.set_audio(final_audio) # Corretto
 
                 # Salva il video finale
                 final_clip.write_videofile(str(video_out_path), codec='libx264', audio_codec='aac', logger=None)
                 
-                video_clip.close()
-                original_audio_clip.close()
-                if 'trimmed_audio' in locals():
-                    trimmed_audio.close()
+                final_clip.close()
+                if 'final_audio' in locals():
+                    final_audio.close()
                 
                 # Rimuovi il file temporaneo senza audio
                 temp_video_path.unlink(missing_ok=True)

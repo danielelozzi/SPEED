@@ -305,11 +305,11 @@ def run_yolo_analysis(
             hits_df = pd.DataFrame(fixation_hits)
             logging.info("Calculating statistics for fixations...")            
             
-            stats_instance = hits_df.groupby('instance_name').agg(
-                n_fixations=('fixation id', 'nunique'),
-                avg_pupil_diameter_mm=('pupil diameter left [mm]', 'mean'),
-                avg_keypoint_confidence=('avg_kp_confidence', 'mean') # NUOVA RIGA
-            ).reset_index()
+            # --- MODIFICA: Aggregazione condizionale per evitare KeyError ---
+            agg_dict_instance = {'n_fixations': ('fixation id', 'nunique'), 'avg_pupil_diameter_mm': ('pupil diameter left [mm]', 'mean')}
+            if 'avg_kp_confidence' in hits_df.columns:
+                agg_dict_instance['avg_kp_confidence'] = ('avg_kp_confidence', 'mean')
+            stats_instance = hits_df.groupby('instance_name').agg(**agg_dict_instance).reset_index()
 
             # Arrotonda il risultato per una migliore leggibilità
             if 'avg_keypoint_confidence' in stats_instance.columns:
@@ -319,11 +319,11 @@ def run_yolo_analysis(
             stats_instance = pd.merge(stats_instance, total_detections_instance, on='instance_name')
             stats_instance['normalized_fixation_count'] = stats_instance['n_fixations'] / stats_instance['total_frames_detected']
             
-            stats_class = hits_df.groupby('class_name').agg(
-                n_fixations=('fixation id', 'nunique'),
-                avg_pupil_diameter_mm=('pupil diameter left [mm]', 'mean'),
-                avg_keypoint_confidence=('avg_kp_confidence', 'mean') # NUOVA RIGA
-            ).reset_index()
+            # Aggregazione per classe (anch'essa condizionale)
+            agg_dict_class = {'n_fixations': ('fixation id', 'nunique'), 'avg_pupil_diameter_mm': ('pupil diameter left [mm]', 'mean')}
+            if 'avg_kp_confidence' in hits_df.columns:
+                agg_dict_class['avg_keypoint_confidence'] = ('avg_kp_confidence', 'mean')
+            stats_class = hits_df.groupby('class_name').agg(**agg_dict_class).reset_index()
 
             # Arrotonda il risultato per una migliore leggibilità
             if 'avg_keypoint_confidence' in stats_class.columns:
@@ -337,6 +337,7 @@ def run_yolo_analysis(
             stats_class_df = stats_class
             id_map_df = hits_df[['track_id', 'class_id', 'class_name', 'instance_name']].drop_duplicates()
             logging.info("Fixation-based statistics calculated.")
+        # --- FINE MODIFICA ---
         else:
             logging.warning("No fixations were found inside any detected object bounding boxes.")
     else:

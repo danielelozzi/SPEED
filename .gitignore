@@ -3,3 +3,7 @@ yolov8n.pt
 yolov8n-pose.pt
 yolov8n-seg.pt
 yolov8s-world.pt
+yolov8s-worldv2.pt
+yolov8x-pose.pt
+yolov8x-seg.pt
+yolov8x-worldv2.pt
