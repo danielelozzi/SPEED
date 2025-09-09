@@ -69,13 +69,28 @@ class DataViewerWindow(tk.Toplevel):
 
         # Dizionario dei modelli YOLO specifico per questa finestra
         self.YOLO_MODELS = {
-            'detect': ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt'],
-            'detect_custom': ['yolov8s-world.pt', 'yolov8s-worldv2.pt', 'yolov8m-world.pt', 'yolov8x-world.pt', 'yolov8x-worldv2.pt'],
-            'segment': ['yolov8n-seg.pt', 'yolov8s-seg.pt', 'yolov8m-seg.pt', 'yolov8l-seg.pt', 'yolov8x-seg.pt'],
-            'pose': ['yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt', 'yolov8x-pose-p6.pt']
+            # Detection Models
+            'detect_v11': ['yolov11n.pt', 'yolov11s.pt', 'yolov11m.pt', 'yolov11l.pt', 'yolov11x.pt'],
+            'detect_v10': ['yolov10n.pt', 'yolov10s.pt', 'yolov10m.pt', 'yolov10b.pt', 'yolov10l.pt', 'yolov10x.pt'],
+            'detect_v9': ['yolov9c.pt', 'yolov9e.pt'],
+            'detect_v8': ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt'],
+            'detect_v5': ['yolov5n.pt', 'yolov5s.pt', 'yolov5m.pt', 'yolov5l.pt', 'yolov5x.pt'],
+            'detect_v3': ['yolov3-tiny.pt', 'yolov3.pt'],
+            'detect_nas': ['yolo_nas_s.pt', 'yolo_nas_m.pt', 'yolo_nas_l.pt'],
+            'detect_world': ['yolov8s-world.pt', 'yolov8m-world.pt', 'yolov8l.pt', 'yolov8x-world.pt'],
+
+            # Segmentation Models
+            'segment_v8': ['yolov8n-seg.pt', 'yolov8s-seg.pt', 'yolov8m-seg.pt', 'yolov8l.pt', 'yolov8x-seg.pt'],
+            'segment_sam': ['sam_b.pt', 'sam_l.pt'],
+            'segment_fastsam': ['FastSAM-s.pt', 'FastSAM-x.pt'],
+            'segment_mobilesam': ['mobile_sam.pt'],
+
+            # Pose Estimation Models
+            'pose_v8': ['yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt']
         }
         self.data_folder = None
         self.dataframe_cache = {}
+        self.yolo_model_cache = {} # NUOVO: Cache per i modelli YOLO
         self.cap = None
         # NUOVO: Cache per i dati YOLO
         self.yolo_detections_df = pd.DataFrame()
@@ -150,7 +165,7 @@ class DataViewerWindow(tk.Toplevel):
         yolo_live_frame = tk.LabelFrame(left_panel, text="YOLO Live Analysis")
         yolo_live_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        self.yolo_task_var = tk.StringVar(value='detect')
+        self.yolo_task_var = tk.StringVar(value='detect_v8')
         self.yolo_model_var = tk.StringVar()
         self.yolo_classes_var = tk.StringVar()
 
@@ -243,7 +258,7 @@ class DataViewerWindow(tk.Toplevel):
             self.yolo_model_var.set(available_models[0])
         else:
             self.yolo_model_var.set('')
-        is_custom_detect_task = (selected_task == 'detect_custom')
+        is_custom_detect_task = (selected_task == 'detect_world')
         self.yolo_classes_entry.config(state=tk.NORMAL if is_custom_detect_task else tk.DISABLED)
 
     def run_live_yolo(self):
@@ -252,27 +267,43 @@ class DataViewerWindow(tk.Toplevel):
         custom_classes_str = self.yolo_classes_var.get().strip()
         custom_classes = [cls.strip() for cls in custom_classes_str.split(',') if cls.strip()] if custom_classes_str and custom_classes_str != "person, car, dog" else None
 
+        # Usa una chiave univoca per la cache, che includa le classi custom se presenti
+        cache_key = model_name
+        if task == 'detect_world' and custom_classes:
+            cache_key = f"{model_name}_{'_'.join(sorted(custom_classes))}"
+
+        # Controlla se il modello è già in cache
+        if cache_key in self.yolo_model_cache:
+            self.yolo_model = self.yolo_model_cache[cache_key]
+            self.is_yolo_live = True
+            self.status_label.config(text=f"YOLO model '{model_name}' loaded from cache. Live analysis is ON.")
+            self.update_frame(self.current_frame_idx)
+            return
+
         self.status_label.config(text=f"Loading YOLO model: {model_name}...")
         self.update()
 
         try:
-            if task == 'detect_custom' and custom_classes:
+            loaded_model = None
+            if task == 'detect_world' and custom_classes:
                 base_model = YOLO(model_name)
                 base_model.set_classes(custom_classes)
                 temp_dir = Path(tempfile.gettempdir())
                 custom_model_path = temp_dir / f"yolo_world_custom_viewer_{'_'.join(custom_classes)}.pt"
                 base_model.save(custom_model_path)
-                self.yolo_model = YOLO(custom_model_path)
+                loaded_model = YOLO(custom_model_path)
             else:
-                self.yolo_model = YOLO(model_name)
+                loaded_model = YOLO(model_name)
             
+            self.yolo_model = loaded_model
+            self.yolo_model_cache[cache_key] = loaded_model # Salva il modello in cache
             self.is_yolo_live = True
             self.status_label.config(text=f"YOLO model '{model_name}' loaded. Live analysis is ON.")
             self.update_frame(self.current_frame_idx) # Force refresh
         except Exception as e:
             self.is_yolo_live = False
             self.yolo_model = None
-            messagebox.showerror("YOLO Error", f"Failed to load model: {e}", parent=self)
+            messagebox.showerror("YOLO Error", f"Failed to load model '{model_name}':\n\n{e}\n\nThis may be due to a network issue or a corrupted model file. Please check your internet connection and try again.", parent=self)
 
     def _prepare_sync_data(self):
         if not self.data_folder: return

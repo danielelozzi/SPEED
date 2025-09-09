@@ -198,8 +198,8 @@ def run_yolo_analysis(
                 class_ids = results[0].boxes.cls.int().cpu().numpy()
 
                 # Estrai dati specifici per task
-                masks = results[0].masks if yolo_task == 'segment' and hasattr(results[0], 'masks') and results[0].masks is not None else None
-                keypoints_data = results[0].keypoints if yolo_task == 'pose' and hasattr(results[0], 'keypoints') and results[0].keypoints is not None else None
+                masks = results[0].masks if yolo_task.startswith('segment') and hasattr(results[0], 'masks') and results[0].masks is not None else None
+                keypoints_data = results[0].keypoints if yolo_task.startswith('pose') and hasattr(results[0], 'keypoints') and results[0].keypoints is not None else None
 
                 for i, (box, track_id, class_id) in enumerate(zip(boxes, track_ids, class_ids)):
                     detection_data = {
@@ -282,7 +282,7 @@ def run_yolo_analysis(
             is_hit = False
 
             # Se il task è segmentazione e la maschera esiste
-            if yolo_task == 'segment' and 'mask_contours' in row and pd.notna(row['mask_contours']):
+            if yolo_task.startswith('segment') and 'mask_contours' in row and pd.notna(row['mask_contours']):
                 try:
                     # Converte la stringa JSON di contorni in un array NumPy di interi
                     contour_points = np.array(json.loads(row['mask_contours'])).astype(np.int32)
@@ -362,7 +362,7 @@ def run_yolo_analysis(
             px, py = row['gaze x [px]'], row['gaze y [px]']
             
             # Se il task è segmentazione e la maschera esiste
-            if yolo_task == 'segment' and 'mask_contours' in row and pd.notna(row['mask_contours']):
+            if yolo_task.startswith('segment') and 'mask_contours' in row and pd.notna(row['mask_contours']):
                 try:
                     contour_points = np.array(json.loads(row['mask_contours'])).astype(np.int32)
                     if cv2.pointPolygonTest(contour_points, (px, py), False) >= 0:

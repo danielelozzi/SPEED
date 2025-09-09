@@ -100,14 +100,14 @@ class RealtimeNeonAnalyzer:
             # Gestione dei modelli specifici per task (es. -seg, -pose)
             model_file = Path(model_name)
             stem = model_file.stem.split('-')[0] # es. 'yolov8n' da 'yolov8n-seg'
-            
-            if task == 'segment' and not model_name.endswith('-seg.pt'):
+
+            if task.startswith('segment') and not model_name.endswith('-seg.pt'):
                 model_name = f"{stem}-seg.pt"
-            elif task == 'pose' and not model_name.endswith('-pose.pt'):
+            elif task.startswith('pose') and not model_name.endswith('-pose.pt'):
                 model_name = f"{stem}-pose.pt"
 
             # Logica per YOLO-World con classi custom (salva e ricarica)
-            if task == 'detect_custom' and custom_classes:
+            if task == 'detect_world' and custom_classes:
                 print(f"Configuring YOLO-World with custom classes: {custom_classes}")
                 base_model = YOLO(model_name)
                 base_model.set_classes(custom_classes)

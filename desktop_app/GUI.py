@@ -187,7 +187,7 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.yolo_config_frame = tk.LabelFrame(main_control_frame, text="YOLO Real-Time Controls", padx=10, pady=10)
         self.yolo_config_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
         
-        self.yolo_task_var = tk.StringVar(value='detect')
+        self.yolo_task_var = tk.StringVar(value='detect_v8')
         self.yolo_model_var = tk.StringVar()
         self.yolo_classes_var = tk.StringVar()
 
@@ -243,7 +243,7 @@ class RealtimeDisplayWindow(tk.Toplevel):
             self.yolo_model_var.set('')
             
         # Abilita/disabilita l'entry per le classi custom
-        is_custom_detect_task = (selected_task == 'detect_custom')
+        is_custom_detect_task = (selected_task == 'detect_world')
         self.yolo_classes_entry.config(state=tk.NORMAL if is_custom_detect_task else tk.DISABLED)
 
     def connect_to_device(self):
@@ -558,16 +558,30 @@ class EventManagerWindow(tk.Toplevel):
 
 # --- COSTANTE GLOBALE PER I MODELLI YOLO ---
 YOLO_MODELS = {
-    'detect': ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt'],
-    'detect_custom': ['yolov8s-world.pt', 'yolov8s-worldv2.pt', 'yolov8m-world.pt', 'yolov8x-world.pt', 'yolov8x-worldv2.pt'],
-    'segment': ['yolov8n-seg.pt', 'yolov8s-seg.pt', 'yolov8m-seg.pt', 'yolov8l-seg.pt', 'yolov8x-seg.pt'],
-    'pose': ['yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt', 'yolov8x-pose-p6.pt']
+    # Detection Models
+    'detect_v11': ['yolov11n.pt', 'yolov11s.pt', 'yolov11m.pt', 'yolov11l.pt', 'yolov11x.pt'],
+    'detect_v10': ['yolov10n.pt', 'yolov10s.pt', 'yolov10m.pt', 'yolov10b.pt', 'yolov10l.pt', 'yolov10x.pt'],
+    'detect_v9': ['yolov9c.pt', 'yolov9e.pt'],
+    'detect_v8': ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt'],
+    'detect_v5': ['yolov5n.pt', 'yolov5s.pt', 'yolov5m.pt', 'yolov5l.pt', 'yolov5x.pt'],
+    'detect_v3': ['yolov3-tiny.pt', 'yolov3.pt'],
+    'detect_nas': ['yolo_nas_s.pt', 'yolo_nas_m.pt', 'yolo_nas_l.pt'],
+    'detect_world': ['yolov8s-world.pt', 'yolov8m-world.pt', 'yolov8l.pt', 'yolov8x-world.pt'],
+
+    # Segmentation Models
+    'segment_v8': ['yolov8n-seg.pt', 'yolov8s-seg.pt', 'yolov8m-seg.pt', 'yolov8l.pt', 'yolov8x-seg.pt'],
+    'segment_sam': ['sam_b.pt', 'sam_l.pt'],
+    'segment_fastsam': ['FastSAM-s.pt', 'FastSAM-x.pt'],
+    'segment_mobilesam': ['mobile_sam.pt'],
+
+    # Pose Estimation Models
+    'pose_v8': ['yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt']
 }
 
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.0.2")
+        self.root.title("SPEED v5.0.3")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
