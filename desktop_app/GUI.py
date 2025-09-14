@@ -671,7 +671,7 @@ YOLO_MODELS = {
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.0.4")
+        self.root.title("SPEED v5.1.0")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
