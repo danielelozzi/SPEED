@@ -107,9 +107,8 @@ class AoiEditor(tk.Toplevel):
         self.save_button = tk.Button(self, text="Save AOI", command=self.save_and_close, font=('Helvetica', 10, 'bold'))
         self.save_button.pack(pady=10)
 
+        self.after(50, self._initialize_ui_and_video) # Ritarda per permettere alla UI di disegnarsi
         self._load_audio()
-        self.update_frame(0)
-        self.after(100, self.update_ui_for_mode) # Ritarda per permettere alla UI di disegnarsi
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _load_audio(self):
@@ -130,6 +129,11 @@ class AoiEditor(tk.Toplevel):
             logging.error(f"Could not load audio: {e}")
         finally:
             self.update_mute_button_text()
+
+    def _initialize_ui_and_video(self):
+        """Carica il primo frame e imposta la modalità UI iniziale."""
+        self.update_frame(0)
+        self.update_ui_for_mode()
 
     def on_close(self):
         self.is_playing = False
@@ -224,7 +228,8 @@ class AoiEditor(tk.Toplevel):
         self.rect = None
         self.selected_track_id = None
         
-        self.update_frame(self.current_frame_idx) # Ridisegna il frame corrente
+        # Ridisegna il frame corrente senza ridisegnare gli overlay (che non sono ancora pronti)
+        self.update_frame(self.current_frame_idx, redraw_overlays=False)
 
         if mode == "static":
             self.yolo_filter_panel.pack_forget() # Nasconde il pannello YOLO
