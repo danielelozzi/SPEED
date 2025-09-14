@@ -1,1 +1,6 @@
 # git add . && git commit -m "v5.0.4" && git push origin main && git tag v5.0.4 && git push origin v5.0.4
+
+eventi salienti per sport
+audio on off
+selezionare e deselezionare classi e id per detect, pose, segment sia per editor, viewer che analisi
+sovrapposizione delle info dai tre modelli nel video
