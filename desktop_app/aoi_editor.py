@@ -71,11 +71,11 @@ class AoiEditor(tk.Toplevel):
         ttk.Radiobutton(top_frame, text="Dynamic AOI (Tracking)", variable=self.mode_var, value="dynamic_auto", command=self.update_ui_for_mode).pack(side=tk.LEFT, padx=10)
 
         # --- NUOVO: PanedWindow per video e filtri YOLO ---
-        main_pane = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
-        main_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.main_pane = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
+        self.main_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        video_frame = tk.Frame(main_pane)
-        main_pane.add(video_frame, stretch="always", minsize=400)
+        video_frame = tk.Frame(self.main_pane)
+        self.main_pane.add(video_frame, stretch="always", minsize=400)
 
         self.video_canvas = tk.Canvas(video_frame)
         self.video_canvas.pack(pady=5, expand=True)
@@ -84,9 +84,9 @@ class AoiEditor(tk.Toplevel):
         self.video_canvas.bind("<ButtonRelease-1>", self.on_button_release)
 
         # --- NUOVO: Pannello destro per i filtri YOLO ---
-        self.yolo_filter_panel = tk.Frame(main_pane, width=350)
+        self.yolo_filter_panel = tk.Frame(self.main_pane, width=350)
         self.yolo_filter_panel.pack_propagate(False)
-        main_pane.add(self.yolo_filter_panel)
+        self.main_pane.add(self.yolo_filter_panel)
         self.setup_yolo_filter_ui()
 
         # Controlli Video
@@ -216,11 +216,11 @@ class AoiEditor(tk.Toplevel):
         self.update_frame(self.current_frame_idx, redraw_overlays=False)
 
         if mode == "static":
-            self.yolo_filter_panel.pack_forget() # Nasconde il pannello YOLO
+            self.main_pane.forget(self.yolo_filter_panel) # Nasconde il pannello YOLO
             self.status_label.config(text="Draw a rectangle on the image to define the static AOI.")
             self.save_button.config(state=tk.NORMAL)
         elif mode == "dynamic_auto":
-            self.yolo_filter_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5,0)) # Mostra il pannello
+            self.main_pane.add(self.yolo_filter_panel) # Mostra il pannello
             self.status_label.config(text="Loading object data...")
             self.save_button.config(state=tk.DISABLED)
             self.after(100, self.load_and_display_yolo_results)
