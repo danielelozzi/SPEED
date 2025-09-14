@@ -162,26 +162,10 @@ class AoiEditor(tk.Toplevel):
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame_idx)
         ret, frame = self.cap.read()
         if ret:
-            self.original_frame = frame
-            self.display_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            self.display_image.thumbnail((960, 720))
-            
-            self.img_display_width, self.img_display_height = self.display_image.size
-            self.scale_x = self.video_width / self.img_display_width
-            self.scale_y = self.video_height / self.img_display_height
-
-            self.photo = ImageTk.PhotoImage(image=self.display_image)
-            self.video_canvas.config(width=self.img_display_width, height=self.img_display_height)
-            self.video_canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
+            self.draw_all_overlays_and_display(frame)
         else:
             # Se il video finisce, ferma la riproduzione
-            if self.is_playing:
-                self.toggle_play()
-            return # Esce per evitare di disegnare su un frame non valido
-        
-        # Disegna gli overlay dopo aver disegnato il frame
-        if self.mode_var.get() == "dynamic_auto" and redraw_overlays:
-            self.draw_yolo_overlays()
+            if self.is_playing: self.toggle_play()
 
     def toggle_play(self):
         self.is_playing = not self.is_playing
@@ -453,29 +437,49 @@ class AoiEditor(tk.Toplevel):
 
         self.update_frame(self.current_frame_idx) # Ridisegna il frame completo
 
-    def draw_yolo_overlays(self):
-        """Disegna tutti i bounding box, evidenziando quello selezionato."""
+    def draw_yolo_overlays(self, frame):
+        """Disegna tutti i bounding box sul frame fornito, evidenziando quello selezionato."""
         if self.yolo_detections_df.empty:
             return
             
-        self.video_canvas.delete("object_box")
         detections_on_current_frame = self.yolo_detections_df[self.yolo_detections_df['frame_idx'] == self.current_frame_idx]
 
         for _, det in detections_on_current_frame.iterrows():
             # Applica i filtri di visibilità
             if self.yolo_class_filter and det['class_name'] not in self.yolo_class_filter:
                 continue
-            if self.yolo_id_filter and det['track_id'] not in self.yolo_id_filter:
+            # Modifica: il filtro ID deve considerare che se la classe è disattivata, anche i suoi ID lo sono
+            if self.yolo_id_filter and det['track_id'] not in self.yolo_id_filter and (not self.yolo_class_filter or det['class_name'] in self.yolo_class_filter):
                 continue
 
-            display_box = (det['x1'] / self.scale_x, det['y1'] / self.scale_y,
-                           det['x2'] / self.scale_x, det['y2'] / self.scale_y)
+            x1, y1, x2, y2 = int(det['x1']), int(det['y1']), int(det['x2']), int(det['y2'])
 
             color = 'magenta' if det['track_id'] == self.selected_track_id else 'cyan'
+            bgr_color = (255, 0, 255) if color == 'magenta' else (255, 255, 0)
             label = f"{det['class_name']}_{int(det['track_id'])}"
             
-            self.video_canvas.create_rectangle(display_box, outline=color, width=3 if color=='magenta' else 2, tags="object_box")
-            self.video_canvas.create_text(display_box[0], display_box[1] - 10, text=label, fill=color, anchor='sw', tags="object_box")
+            cv2.rectangle(frame, (x1, y1), (x2, y2), bgr_color, 3 if color=='magenta' else 2)
+            cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, bgr_color, 2)
+
+    def draw_all_overlays_and_display(self, frame):
+        """Disegna tutti gli overlay sul frame e lo visualizza sul canvas."""
+        # Disegna gli overlay YOLO se in modalità dinamica
+        if self.mode_var.get() == "dynamic_auto":
+            self.draw_yolo_overlays(frame)
+
+        # Converti il frame finale (con overlay) per Tkinter
+        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        
+        # Ridimensiona per la visualizzazione
+        img.thumbnail((960, 720))
+        
+        self.img_display_width, self.img_display_height = img.size
+        self.scale_x = self.video_width / self.img_display_width
+        self.scale_y = self.video_height / self.img_display_height
+
+        self.photo = ImageTk.PhotoImage(image=img)
+        self.video_canvas.config(width=self.img_display_width, height=self.img_display_height)
+        self.video_canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
 
     def save_and_close(self):
         mode = self.mode_var.get()
