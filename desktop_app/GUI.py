@@ -22,6 +22,11 @@ except ImportError:
     StreamInfo = None
     StreamOutlet = None
 
+# --- NUOVO: Gestione centralizzata dei modelli ---
+project_root = Path(__file__).resolve().parent.parent
+MODELS_DIR = project_root / 'models'
+MODELS_DIR.mkdir(exist_ok=True)
+
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -133,6 +138,11 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.is_running = False
         self.is_paused_for_drawing = False
         
+        # --- NUOVO: Filtri per la visualizzazione YOLO ---
+        self.yolo_class_filter = set() # Classi da mostrare (se vuoto, mostra tutto)
+        self.yolo_id_filter = set()    # ID da mostrare (se vuoto, mostra tutto)
+        self.detected_yolo_items = {} # Cache per {class_name: [id1, id2]}
+
         # --- NUOVO: Variabile per il ponte LSL ---
         self.lsl_bridge = None
 
@@ -143,8 +153,15 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
         self.temp_rect_id = None
         
-        main_control_frame = tk.Frame(self, pady=10)
-        main_control_frame.pack(fill=tk.X, padx=10)
+        # --- NUOVO: PanedWindow per controlli e status ---
+        bottom_pane = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
+        bottom_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        main_control_frame = tk.Frame(bottom_pane, pady=10)
+        bottom_pane.add(main_control_frame, stretch="always")
+
+        status_and_yolo_frame = tk.Frame(bottom_pane, padx=10)
+        bottom_pane.add(status_and_yolo_frame)
 
         # --- MODIFICA: Logica di connessione e avvio in due fasi ---
         connect_frame = tk.Frame(main_control_frame)
@@ -160,6 +177,10 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.record_button = tk.Button(record_frame, text="Start Recording", command=self.toggle_recording, font=('Helvetica', 10, 'bold'), bg='#c8e6c9', state=tk.DISABLED)
         self.record_button.pack(pady=(0,5))
         
+        # --- NUOVO: Checkbox per l'audio nella registrazione ---
+        self.include_audio_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(record_frame, text="Include Audio", variable=self.include_audio_var).pack(pady=(0,5))
+
         self.event_name_entry = tk.Entry(record_frame, width=25)
         self.event_name_entry.pack(pady=5)
         self.event_name_entry.insert(0, "New Event")
@@ -227,8 +248,17 @@ class RealtimeDisplayWindow(tk.Toplevel):
         tk.Checkbutton(vis_options_frame, text="AOIs", variable=self.overlay_vars["show_aois"]).pack(anchor='w')
         tk.Checkbutton(vis_options_frame, text="Heatmap", variable=self.overlay_vars["show_heatmap"]).pack(anchor='w')
 
-        self.status_label = tk.Label(main_control_frame, text="Ready. Configure and press 'Connect'.", font=('Helvetica', 10))
-        self.status_label.pack(side=tk.LEFT, padx=20, fill=tk.BOTH, expand=True)
+        # --- NUOVO: Spostato lo status label e aggiunto il treeview per i filtri YOLO ---
+        self.status_label = tk.Label(status_and_yolo_frame, text="Ready. Configure and press 'Connect'.", font=('Helvetica', 10), wraplength=400, justify=tk.LEFT)
+        self.status_label.pack(side=tk.TOP, fill=tk.X, pady=(5,10))
+
+        yolo_filter_frame = tk.LabelFrame(status_and_yolo_frame, text="YOLO Object Filter")
+        yolo_filter_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True)
+        
+        self.yolo_filter_tree = ttk.Treeview(yolo_filter_frame, show="tree")
+        self.yolo_filter_tree.pack(fill=tk.BOTH, expand=True)
+        self.yolo_filter_tree.bind('<Button-1>', self.on_yolo_filter_click)
+        # --- FINE NUOVI WIDGET ---
 
         self.update_yolo_model_options() # Imposta i valori iniziali
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -282,7 +312,7 @@ class RealtimeDisplayWindow(tk.Toplevel):
 
         # Ora inizializza il modello YOLO nell'analizzatore esistente
         self.analyzer._initialize_yolo_model(
-            model_name=self.yolo_model_var.get(),
+            model_name=str(MODELS_DIR / self.yolo_model_var.get()), # --- MODIFICA: Usa il percorso completo
             task=self.yolo_task_var.get(),
             custom_classes=yolo_custom_classes)
         
@@ -313,12 +343,75 @@ class RealtimeDisplayWindow(tk.Toplevel):
         while self.is_running and self.analyzer:
             if not self.is_paused_for_drawing:
                 overlay_settings = {key: var.get() for key, var in self.overlay_vars.items()}
-                frame = self.analyzer.process_and_visualize(**overlay_settings)
+                
+                # --- NUOVO: Applica i filtri all'analizzatore ---
+                self.analyzer.set_yolo_filters(
+                    class_filter=self.yolo_class_filter,
+                    id_filter=self.yolo_id_filter
+                )
+
+                frame, detected_objects = self.analyzer.process_and_visualize(**overlay_settings)
+                
+                # --- NUOVO: Aggiorna la lista dei filtri se sono stati trovati nuovi oggetti ---
+                if detected_objects:
+                    self.update_yolo_filter_tree(detected_objects)
+
                 img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 img = Image.fromarray(img)
                 self.photo = ImageTk.PhotoImage(image=img)
                 self.canvas.after(0, self.update_canvas)
             time.sleep(1/60)
+
+    def update_yolo_filter_tree(self, detected_objects):
+        """Aggiorna il treeview con le classi e gli ID rilevati."""
+        for class_name, track_id in detected_objects:
+            if class_name not in self.detected_yolo_items:
+                self.detected_yolo_items[class_name] = set()
+                # Aggiunge il nodo genitore per la nuova classe
+                class_node = self.yolo_filter_tree.insert("", "end", text=f"Class: {class_name}", open=True, tags=('class', class_name))
+                self.yolo_filter_tree.item(class_node, values=(True,)) # True = checked
+
+            if track_id not in self.detected_yolo_items[class_name]:
+                self.detected_yolo_items[class_name].add(track_id)
+                # Trova il nodo genitore e aggiunge il figlio per l'ID
+                class_node_id = [item for item in self.yolo_filter_tree.get_children('') if self.yolo_filter_tree.item(item, 'tags')[1] == class_name][0]
+                id_node = self.yolo_filter_tree.insert(class_node_id, "end", text=f"  ID: {track_id}", tags=('id', track_id))
+                self.yolo_filter_tree.item(id_node, values=(True,)) # True = checked
+
+    def on_yolo_filter_click(self, event):
+        """Gestisce il click per attivare/disattivare i filtri."""
+        item_id = self.yolo_filter_tree.identify_row(event.y)
+        if not item_id: return
+
+        # Ottieni lo stato corrente e invertilo
+        is_checked = not self.yolo_filter_tree.item(item_id, 'values')[0]
+        self.yolo_filter_tree.item(item_id, values=(is_checked,))
+
+        # --- NUOVO: Logica a cascata ---
+        # Se un nodo 'classe' viene cliccato, aggiorna tutti i suoi figli (ID)
+        tags = self.yolo_filter_tree.item(item_id, 'tags')
+        if tags and tags[0] == 'class':
+            for child_id in self.yolo_filter_tree.get_children(item_id):
+                self.yolo_filter_tree.item(child_id, values=(is_checked,))
+        # --- FINE NUOVA LOGICA ---
+        
+        # Aggiorna i set di filtri
+        self.yolo_class_filter = {self.yolo_filter_tree.item(i, 'tags')[1] for i in self.yolo_filter_tree.get_children('') if self.yolo_filter_tree.item(i, 'values')[0] is True}
+        
+        self.yolo_id_filter = set()
+        for class_node in self.yolo_filter_tree.get_children(''):
+            if self.yolo_filter_tree.item(class_node, 'values')[0]: # Se la classe è attiva
+                for id_node in self.yolo_filter_tree.get_children(class_node):
+                    if self.yolo_filter_tree.item(id_node, 'values')[0]: # Se l'ID è attivo
+                        self.yolo_id_filter.add(int(self.yolo_filter_tree.item(id_node, 'tags')[1]))
+
+        # Se tutti sono checkati, il filtro è vuoto (mostra tutto)
+        if len(self.yolo_class_filter) == len(self.detected_yolo_items):
+            self.yolo_class_filter.clear()
+        
+        total_ids = sum(len(ids) for ids in self.detected_yolo_items.values())
+        if len(self.yolo_id_filter) == total_ids:
+            self.yolo_id_filter.clear()
 
     def update_canvas(self):
         try:
@@ -330,7 +423,9 @@ class RealtimeDisplayWindow(tk.Toplevel):
         if not self.analyzer.is_recording:
             folder_path = filedialog.askdirectory(title="Select Folder for Real-time Recording")
             if not folder_path: return
-            if self.analyzer.start_recording(folder_path):
+            # --- MODIFICA: Passa l'opzione per includere l'audio ---
+            include_audio = self.include_audio_var.get()
+            if self.analyzer.start_recording(folder_path, include_audio=include_audio):
                 self.record_button.config(text="Stop Recording", bg='#ffcdd2'); self.add_event_button.config(state=tk.NORMAL)
                 self.status_label.config(text=f"REC ● | Saving to: {folder_path}")
         else:
@@ -556,39 +651,33 @@ class EventManagerWindow(tk.Toplevel):
         self.saved_df = self.events_df
         self.destroy()
 
-# --- COSTANTE GLOBALE PER I MODELLI YOLO ---
+# --- MODIFICA: Ristrutturata la costante dei modelli per task ---
 YOLO_MODELS = {
-    # Detection Models
-    'detect_v11': ['yolov11n.pt', 'yolov11s.pt', 'yolov11m.pt', 'yolov11l.pt', 'yolov11x.pt'],
-    'detect_v10': ['yolov10n.pt', 'yolov10s.pt', 'yolov10m.pt', 'yolov10b.pt', 'yolov10l.pt', 'yolov10x.pt'],
-    'detect_v9': ['yolov9c.pt', 'yolov9e.pt'],
-    'detect_v8': ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt'],
-    'detect_v5': ['yolov5n.pt', 'yolov5s.pt', 'yolov5m.pt', 'yolov5l.pt', 'yolov5x.pt'],
-    'detect_v3': ['yolov3-tiny.pt', 'yolov3.pt'],
-    'detect_nas': ['yolo_nas_s.pt', 'yolo_nas_m.pt', 'yolo_nas_l.pt'],
-    'detect_world': ['yolov8s-world.pt', 'yolov8m-world.pt', 'yolov8l.pt', 'yolov8x-world.pt'],
-
-    # Segmentation Models
-    'segment_v8': ['yolov8n-seg.pt', 'yolov8s-seg.pt', 'yolov8m-seg.pt', 'yolov8l.pt', 'yolov8x-seg.pt'],
-    'segment_sam': ['sam_b.pt', 'sam_l.pt'],
-    'segment_fastsam': ['FastSAM-s.pt', 'FastSAM-x.pt'],
-    'segment_mobilesam': ['mobile_sam.pt'],
-
-    # Pose Estimation Models
-    'pose_v8': ['yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt']
+    'detect': [
+        'yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt',
+        'yolov9c.pt', 'yolov9e.pt', 'yolov10n.pt', 'yolov10s.pt', 'yolov10m.pt',
+        'yolov5n.pt', 'yolov5s.pt', 'yolov3.pt', 'yolo_nas_s.pt'
+    ],
+    'segment': [
+        'yolov8n-seg.pt', 'yolov8s-seg.pt', 'yolov8m-seg.pt', 'yolov8l-seg.pt', 'yolov8x-seg.pt',
+        'sam_b.pt', 'FastSAM-s.pt', 'mobile_sam.pt'
+    ],
+    'pose': [
+        'yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt'
+    ],
+    'detect_world': ['yolov8s-world.pt', 'yolov8m-world.pt', 'yolov8l-world.pt', 'yolov8x-world.pt']
 }
 
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.0.3")
+        self.root.title("SPEED v5.0.4")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
         self.unenriched_dir_var = tk.StringVar()
         self.enriched_dir_var = tk.StringVar()
         self.external_event_file_var = tk.StringVar()
-        self.yolo_task_var = tk.StringVar(value='detect')
         self.events_df = pd.DataFrame()
         self.world_timestamps_df = pd.DataFrame()
         
@@ -687,6 +776,8 @@ class SpeedApp:
         self.event_summary_label.pack(side=tk.LEFT, pady=5)
         self.edit_video_btn = tk.Button(event_buttons_frame, text="Edit on Video", command=self.open_event_manager_video, state=tk.DISABLED)
         self.edit_video_btn.pack(side=tk.RIGHT, padx=5)
+        self.edit_video_only_btn = tk.Button(event_buttons_frame, text="Open Video in Editor...", command=self.open_video_editor_standalone)
+        self.edit_video_only_btn.pack(side=tk.RIGHT, padx=5)
         self.edit_events_btn = tk.Button(event_buttons_frame, text="Edit in Table", command=self.open_event_manager_table, state=tk.DISABLED)
         self.edit_events_btn.pack(side=tk.RIGHT, padx=5)
 
@@ -696,29 +787,29 @@ class SpeedApp:
         yolo_checkbutton = tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (Required for Dynamic AOI, GPU Recommended)", variable=self.yolo_var, command=self.toggle_yolo_options)
         yolo_checkbutton.pack(anchor='w')
 
-        # --- NUOVI CONTROLLI YOLO ---
+        # --- MODIFICA: Controlli YOLO Multi-Task ---
         yolo_options_frame = tk.Frame(analysis_frame)
         yolo_options_frame.pack(fill=tk.X, padx=20, pady=5)
 
-        # Combobox per la selezione del modello
-        task_frame = tk.Frame(yolo_options_frame)
-        task_frame.pack(fill=tk.X, pady=2)
-        tk.Label(task_frame, text="YOLO Task:", width=28, anchor='w').pack(side=tk.LEFT)
-        self.yolo_task_combobox = ttk.Combobox(task_frame, textvariable=self.yolo_task_var, values=list(YOLO_MODELS.keys()), state='readonly')
-        self.yolo_task_combobox.pack(fill=tk.X, expand=True)
-        self.yolo_task_combobox.bind('<<ComboboxSelected>>', self.update_yolo_model_options)
+        self.yolo_model_vars = {
+            'detect': tk.StringVar(),
+            'segment': tk.StringVar(),
+            'pose': tk.StringVar(),
+            'detect_world': tk.StringVar()
+        }
+        self.yolo_model_combos = {}
 
-        # Combobox per il modello, ora dinamico
-        model_frame = tk.Frame(yolo_options_frame); model_frame.pack(fill=tk.X, pady=2)
-        tk.Label(model_frame, text="YOLO Model:", width=28, anchor='w').pack(side=tk.LEFT)
-        self.yolo_model_var = tk.StringVar(value='yolov8n.pt')
-        self.yolo_model_combobox = ttk.Combobox(model_frame, textvariable=self.yolo_model_var, state='readonly')
-        self.yolo_model_combobox.pack(fill=tk.X, expand=True)
+        for task, label in [('detect', 'Detection Model:'), ('segment', 'Segmentation Model:'), ('pose', 'Pose Model:'), ('detect_world', 'World Model (for custom classes):')]:
+            model_frame = tk.Frame(yolo_options_frame)
+            model_frame.pack(fill=tk.X, pady=2)
+            tk.Label(model_frame, text=label, width=28, anchor='w').pack(side=tk.LEFT)
+            combo = ttk.Combobox(model_frame, textvariable=self.yolo_model_vars[task], state='readonly')
+            combo.pack(fill=tk.X, expand=True)
+            self.yolo_model_combos[task] = combo
 
-        # Entry per le classi custom
         classes_frame = tk.Frame(yolo_options_frame)
         classes_frame.pack(fill=tk.X, pady=2)
-        tk.Label(classes_frame, text="Custom Classes (for -world models):", width=28, anchor='w').pack(side=tk.LEFT)
+        tk.Label(classes_frame, text="Custom Classes (for World Model):", width=28, anchor='w').pack(side=tk.LEFT)
         self.yolo_classes_var = tk.StringVar()
         self.yolo_classes_entry = tk.Entry(classes_frame, textvariable=self.yolo_classes_var)
         self.yolo_classes_entry.pack(fill=tk.X, expand=True)
@@ -726,7 +817,7 @@ class SpeedApp:
         
         # Imposta lo stato iniziale
         self.toggle_yolo_options()
-        # --- FINE NUOVI CONTROLLI ---
+        # --- FINE MODIFICA ---
 
         tk.Button(analysis_frame, text="RUN FULL ANALYSIS", command=self.run_full_analysis_wrapper, font=('Helvetica', 10, 'bold'), bg='#c5e1a5').pack(pady=5)
         
@@ -798,36 +889,43 @@ class SpeedApp:
     def toggle_yolo_options(self):
         """Abilita o disabilita tutti i widget delle opzioni YOLO in base al checkbutton principale."""
         is_enabled = self.yolo_var.get()
-        new_state = 'readonly' if is_enabled else 'disabled'
-        
-        self.yolo_task_combobox.config(state=new_state)
-        self.yolo_model_combobox.config(state=new_state)
-        
-        # Chiama l'altro metodo per gestire la logica specifica dell'entry delle classi custom
+        combo_state = 'readonly' if is_enabled else 'disabled'
+        entry_state = 'normal' if is_enabled else 'disabled'
+
+        for combo in self.yolo_model_combos.values():
+            combo.config(state=combo_state)
+        self.yolo_classes_entry.config(state=entry_state)
+
         self.update_yolo_model_options()
 
     def update_yolo_model_options(self, event=None):
-        """Aggiorna dinamicamente il combobox dei modelli e lo stato dell'entry per le classi custom."""
-        is_yolo_enabled = self.yolo_var.get()
-        selected_task = self.yolo_task_var.get()
-        
-        # Aggiorna la lista dei modelli disponibili
-        models_for_task = YOLO_MODELS.get(selected_task, [])
-        self.yolo_model_combobox['values'] = models_for_task
-        if models_for_task:
-            self.yolo_model_combobox.set(models_for_task[0])
-        else:
-            self.yolo_model_combobox.set('')
+        """Popola i combobox dei modelli YOLO con le opzioni corrette."""
+        for task, combo in self.yolo_model_combos.items():
+            models_for_task = [""] + YOLO_MODELS.get(task, []) # Aggiungi opzione vuota
+            combo['values'] = models_for_task
+            # Imposta un default o lascia vuoto
+            if self.yolo_model_vars[task].get() not in models_for_task:
+                self.yolo_model_vars[task].set(models_for_task[0])
 
-        # Abilita l'entry per le classi custom solo se YOLO è attivo E il task è quello giusto
-        # NOTA: Il nome del task nel dizionario è 'detect_custom', non 'Custom Classification'
-        if is_yolo_enabled and selected_task == 'detect_custom':
-            self.yolo_classes_entry.config(state='normal')
-        else:
-            self.yolo_classes_entry.config(state='disabled')
+
 
     def open_data_viewer(self):
         viewer_window = DataViewerWindow(self.root, defined_aois=self.user_defined_aois)
+
+    def load_video_only_viewer(self):
+        """
+        Apre un file dialog per selezionare un video e lo carica nel DataViewer.
+        """
+        video_path_str = filedialog.askopenfilename(
+            title="Select a video file to view",
+            filetypes=[("Video files", "*.mp4 *.avi *.mov"), ("All files", "*.*")]
+        )
+        if not video_path_str:
+            return
+
+        # Apre il viewer e poi chiama il metodo per caricare il video specifico
+        viewer = DataViewerWindow(self.root, defined_aois=self.user_defined_aois)
+        viewer.load_video_only(video_path_str)
 
     def open_device_converter(self):
         """
@@ -1007,11 +1105,27 @@ class SpeedApp:
 
     def setup_yolo_tab(self, parent_tab):
         tk.Button(parent_tab, text="Load/Refresh YOLO Results", command=self.load_yolo_results, font=('Helvetica', 10, 'bold'), bg='#ffcc80').pack(pady=10)
-        class_frame = tk.LabelFrame(parent_tab, text="Results per Class", padx=10, pady=10); class_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        self.class_treeview = ttk.Treeview(class_frame, show='headings'); self.class_treeview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        instance_frame = tk.LabelFrame(parent_tab, text="Results per Instance", padx=10, pady=10); instance_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        self.instance_treeview = ttk.Treeview(instance_frame, show='headings'); self.instance_treeview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # --- MODIFICA: Usa un PanedWindow per ridimensionare i riquadri ---
+        yolo_pane = tk.PanedWindow(parent_tab, orient=tk.VERTICAL, sashrelief=tk.RAISED)
+        yolo_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
+        class_frame = tk.LabelFrame(yolo_pane, text="Results per Class", padx=10, pady=10)
+        yolo_pane.add(class_frame, stretch="always")
+        self.class_treeview = ttk.Treeview(class_frame, show='headings')
+        self.class_treeview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        instance_frame = tk.LabelFrame(yolo_pane, text="Results per Instance (Filterable)", padx=10, pady=10)
+        yolo_pane.add(instance_frame, stretch="always")
+        
+        # --- NUOVO: Aggiunto Treeview con checkbox per il filtraggio ---
+        self.instance_treeview = ttk.Treeview(instance_frame, show='headings', columns=("Show", "Instance", "Fixations", "Avg Pupil", "Norm. Fixations"))
+        self.instance_treeview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.instance_treeview.heading("Show", text="Show")
+        self.instance_treeview.column("Show", width=50, anchor='center')
+        self.instance_treeview.bind('<Button-1>', self.on_instance_filter_click)
+        self.instance_stats_df = pd.DataFrame() # Cache per i dati
+        
     def select_folder(self, var, title):
         dir_path = filedialog.askdirectory(title=title)
         if dir_path: var.set(dir_path)
@@ -1102,12 +1216,40 @@ class SpeedApp:
 
     def open_event_manager_video(self):
         video_path = next(Path(self.unenriched_dir_var.get()).glob('*.mp4'))
-        manager = InteractiveVideoEditor(self.root, video_path, self.events_df, self.world_timestamps_df)
+        # --- MODIFICA: Passa anche i risultati YOLO se disponibili ---
+        yolo_results_path = Path(self.output_dir_entry.get()) / 'yolo_detections_cache.csv'
+        yolo_df = pd.read_csv(yolo_results_path) if yolo_results_path.exists() else None
+        manager = InteractiveVideoEditor(self.root, video_path, self.events_df, self.world_timestamps_df, yolo_df)
         self.root.wait_window(manager)
         if manager.saved_df is not None:
             self.events_df = manager.saved_df.reset_index(drop=True)
             self.update_event_summary_display()
             logging.info("Event list updated via video editor.")
+
+    def open_video_editor_standalone(self):
+        """
+        Apre l'editor video interattivo con solo un file video,
+        senza dati di eye-tracking pre-caricati.
+        """
+        video_path_str = filedialog.askopenfilename(
+            title="Select a video file",
+            filetypes=[("Video files", "*.mp4 *.avi *.mov"), ("All files", "*.*")]
+        )
+        if not video_path_str:
+            return
+
+        editor = InteractiveVideoEditor(self.root, Path(video_path_str))
+        self.root.wait_window(editor)
+
+        if editor.saved_df is not None and not editor.saved_df.empty:
+            save_path = filedialog.asksaveasfilename(
+                title="Save new events to CSV",
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv")]
+            )
+            if save_path:
+                editor.saved_df.to_csv(save_path, index=False)
+                messagebox.showinfo("Success", f"Events saved successfully to:\n{save_path}")
 
     def update_aoi_list_display(self):
         self.aoi_listbox.delete(0, tk.END)
@@ -1196,25 +1338,6 @@ class SpeedApp:
             
             self.update_aoi_list_display()
 
-    def update_yolo_model_options(self, event=None):
-        """
-        Aggiorna il combobox dei modelli in base al task selezionato e gestisce
-        lo stato dell'entry per le classi custom.
-        """
-        selected_task = self.yolo_task_var.get()
-        
-        # Aggiorna i modelli disponibili
-        models_for_task = YOLO_MODELS.get(selected_task, [])
-        self.yolo_model_combobox['values'] = models_for_task
-        if models_for_task:
-            self.yolo_model_combobox.set(models_for_task[0])
-        else:
-            self.yolo_model_combobox.set('')
-            
-        # Abilita/disabilita l'entry per le classi custom
-        is_custom_detect_task = (selected_task == 'detect_custom')
-        self.yolo_classes_entry.config(state=tk.NORMAL if is_custom_detect_task else tk.DISABLED)
-        
     def run_full_analysis_wrapper(self):
         output_dir = self.output_dir_entry.get().strip()
         subj_name = self.participant_name_var.get().strip()
@@ -1239,15 +1362,13 @@ class SpeedApp:
                 enriched_path_to_use = None
                 logging.info("User-defined AOIs are present. Ignoring 'Enriched Data Folder' and generating new enriched data.")
 
-            # Recupera i valori dai widget YOLO
-            yolo_model_selection = self.yolo_model_var.get() # Già corretto
-            yolo_task_selection = self.yolo_task_var.get()
+            # --- MODIFICA: Recupera i modelli selezionati per ogni task ---
+            yolo_models_to_run = {task: var.get() for task, var in self.yolo_model_vars.items() if var.get()}
             custom_classes_str = self.yolo_classes_var.get().strip()
-            
-            # Prepara la lista delle classi custom
             yolo_custom_classes = None
             if custom_classes_str and custom_classes_str != "person, car, dog": # Ignora il placeholder
                 yolo_custom_classes = [cls.strip() for cls in custom_classes_str.split(',') if cls.strip()]
+            # --- FINE MODIFICA ---
 
             run_full_analysis(
                 raw_data_path=self.raw_dir_var.get(),
@@ -1256,9 +1377,7 @@ class SpeedApp:
                 output_path=output_dir,
                 subject_name=subj_name,
                 events_df=final_events_df,
-                run_yolo=self.yolo_var.get(),
-                yolo_model_name=yolo_model_selection,
-                yolo_task=yolo_task_selection,
+                yolo_models=yolo_models_to_run if self.yolo_var.get() else None,
                 yolo_custom_classes=yolo_custom_classes, # Nuovo
                 defined_aois=self.user_defined_aois
             )
@@ -1344,13 +1463,46 @@ class SpeedApp:
         try:
             class_csv = output_dir_path / 'stats_per_class.csv'
             if class_csv.exists(): self._populate_treeview(self.class_treeview, pd.read_csv(class_csv))
-            else: messagebox.showinfo("Info", "stats_per_class.csv not found. Run Analysis with YOLO enabled.")
+            else: self._clear_treeview(self.class_treeview); messagebox.showinfo("Info", "stats_per_class.csv not found. Run Analysis with YOLO enabled.")
+            
             instance_csv = output_dir_path / 'stats_per_instance.csv'
-            if instance_csv.exists(): self._populate_treeview(self.instance_treeview, pd.read_csv(instance_csv))
-            else: messagebox.showinfo("Info", "stats_per_instance.csv not found. Run Analysis with YOLO enabled.")
+            if instance_csv.exists():
+                self.instance_stats_df = pd.read_csv(instance_csv)
+                self._populate_instance_treeview()
+            else:
+                self._clear_treeview(self.instance_treeview)
+                self.instance_stats_df = pd.DataFrame()
+                messagebox.showinfo("Info", "stats_per_instance.csv not found. Run Analysis with YOLO enabled.")
         except Exception as e:
             logging.error(f"Could not read YOLO results: {e}")
             messagebox.showerror("Read Error", f"Could not read YOLO results: {e}")
+
+    def _populate_instance_treeview(self, df_to_show=None):
+        """Popola il treeview delle istanze, con checkbox."""
+        self._clear_treeview(self.instance_treeview)
+        df = df_to_show if df_to_show is not None else self.instance_stats_df
+        
+        for col in self.instance_treeview['columns']:
+            if col != "Show": self.instance_treeview.heading(col, text=col.replace('_', ' ').title())
+
+        for _, row in df.iterrows():
+            values = ["☑"] + [f"{row.get(c, ''):.3f}" if isinstance(row.get(c), float) else row.get(c, '') for c in ['instance_name', 'n_fixations', 'avg_pupil_diameter_mm', 'normalized_fixation_count']]
+            self.instance_treeview.insert("", "end", values=values, tags=(row['instance_name'],))
+
+    def on_instance_filter_click(self, event):
+        """Gestisce il click sulla colonna 'Show' per filtrare i risultati."""
+        region = self.instance_treeview.identify("region", event.x, event.y)
+        column = self.instance_treeview.identify_column(event.x)
+        if region != "cell" or column != "#1": return
+
+        item_id = self.instance_treeview.identify_row(event.y)
+        current_val = self.instance_treeview.item(item_id, 'values')[0]
+        new_val = "☐" if current_val == "☑" else "☑"
+        self.instance_treeview.set(item_id, column, new_val)
+        
+        shown_instances = {self.instance_treeview.item(i, 'tags')[0] for i in self.instance_treeview.get_children() if self.instance_treeview.item(i, 'values')[0] == "☑"}
+        filtered_df = self.instance_stats_df[self.instance_stats_df['instance_name'].isin(shown_instances)]
+        # Potresti usare filtered_df per aggiornare altri grafici o analisi in futuro.
 
     def _populate_treeview(self, treeview, dataframe):
         treeview.delete(*treeview.get_children())
@@ -1360,6 +1512,11 @@ class SpeedApp:
             treeview.column(col, width=120, anchor='center')
         for index, row in dataframe.iterrows():
             treeview.insert("", "end", values=list(row))
+
+    def _clear_treeview(self, treeview):
+        treeview.delete(*treeview.get_children())
+        treeview["columns"] = (" ")
+        treeview.heading("#1", text="")
 
     def load_bids_data(self):
         bids_root_path = filedialog.askdirectory(title="Select the root BIDS directory (containing sub-...)")

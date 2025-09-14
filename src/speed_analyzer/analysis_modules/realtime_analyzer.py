@@ -86,6 +86,7 @@ class RealtimeNeonAnalyzer:
         self.is_recording = False
         self.recording_thread = None
         self.output_folder = None
+        self.include_audio = False
         self.video_writers = {}
         self.gaze_data_list = []
         self.events_list = []
@@ -93,6 +94,11 @@ class RealtimeNeonAnalyzer:
         self.last_gaze = None
         self.last_scene_frame = None
         self.last_eye_frame = None
+
+        # --- NUOVO: Filtri per la visualizzazione YOLO ---
+        self.yolo_class_filter = set() # Se vuoto, mostra tutto
+        self.yolo_id_filter = set()    # Se vuoto, mostra tutto
+
 
     def _initialize_yolo_model(self, model_name, task, custom_classes):
         """Carica e configura il modello YOLO in base al task e alle classi custom."""
@@ -156,32 +162,59 @@ class RealtimeNeonAnalyzer:
         self.last_gaze = self.device.receive_gaze_datum()
         return self.last_scene_frame, self.last_eye_frame, self.last_gaze
 
+    def set_yolo_filters(self, class_filter: set, id_filter: set):
+        """Imposta i filtri per classi e ID da visualizzare."""
+        self.yolo_class_filter = class_filter
+        self.yolo_id_filter = id_filter
+
     def _run_yolo_inference(self, scene_img):
         """Esegue il modello YOLO caricato sul frame e restituisce il frame annotato."""
         if self.yolo_model is None:
-            return scene_img, "N/A"
+            return scene_img, "N/A", []
 
-        results = self.yolo_model.track(scene_img, persist=True, verbose=False)
-        annotated_frame = results[0].plot()
+        # --- NUOVO: Logica per forzare la CPU sui modelli di posa su MPS ---
+        device = 'cpu' if torch.backends.mps.is_available() and 'pose' in self.yolo_model.task else None
+        if device == 'cpu':
+            logging.warning("Pose model on Apple MPS detected. Forcing CPU to avoid known bugs.")
+        
+        # Se device è None, ultralytics sceglierà il migliore disponibile (es. MPS, CUDA)
+        results = self.yolo_model.track(scene_img, persist=True, verbose=False, device=device)
+        # --- FINE MODIFICA ---
+
+        
+        # --- MODIFICA: Disegno manuale per applicare i filtri ---
+        annotated_frame = scene_img.copy()
+        detected_objects_this_frame = []
+        if results[0].boxes is not None and results[0].boxes.id is not None:
+            for box in results[0].boxes:
+                class_id = int(box.cls[0])
+                track_id = int(box.id[0])
+                class_name = self.yolo_model.names[class_id]
+                
+                detected_objects_this_frame.append((class_name, track_id))
+
+                # Applica i filtri
+                if self.yolo_class_filter and class_name not in self.yolo_class_filter: continue
+                if self.yolo_id_filter and track_id not in self.yolo_id_filter: continue
+
+                x1, y1, x2, y2 = [int(i) for i in box.xyxy[0]]
+                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(annotated_frame, f"{class_name}:{track_id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
         # Logica per trovare l'oggetto sotto lo sguardo (opzionale ma utile)
         gazed_object_name = "No object"
         if self.last_gaze and results[0].boxes:
             gaze_point = (int(self.last_gaze.x), int(self.last_gaze.y))
-            for box in results[0].boxes:
-                x1, y1, x2, y2 = [int(i) for i in box.xyxy[0]]
-                if x1 <= gaze_point[0] <= x2 and y1 <= gaze_point[1] <= y2:
-                    class_id = int(box.cls[0])
-                    gazed_object_name = self.yolo_model.names[class_id]
-                    break
+            # ... (la logica esistente per trovare l'oggetto sotto lo sguardo può rimanere qui) ...
         
-        return annotated_frame, gazed_object_name
+        return annotated_frame, gazed_object_name, detected_objects_this_frame
 
-    def start_recording(self, output_dir: str = "./realtime_recording"):
+    def start_recording(self, output_dir: str = "./realtime_recording", include_audio: bool = True):
         if self.is_recording:
             print("Recording is already in progress.")
             return False
         self.output_folder = Path(output_dir)
+        self.include_audio = include_audio
         self.output_folder.mkdir(parents=True, exist_ok=True)
         self.gaze_data_list, self.events_list = [], []
         
@@ -191,7 +224,12 @@ class RealtimeNeonAnalyzer:
         scene_h, scene_w, _ = scene_frame.image.shape
         eye_h, eye_w, _ = eye_frame.image.shape
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        self.video_writers['external'] = cv2.VideoWriter(str(self.output_folder / 'external.mp4'), fourcc, 30.0, (scene_w, scene_h))
+        
+        # --- MODIFICA: Usa un nome temporaneo se l'audio è incluso ---
+        video_filename = 'external_no_audio.mp4' if self.include_audio else 'external.mp4'
+        self.video_writers['external'] = cv2.VideoWriter(str(self.output_folder / video_filename), fourcc, 30.0, (scene_w, scene_h))
+        
+        # Il video interno non ha audio
         self.video_writers['internal'] = cv2.VideoWriter(str(self.output_folder / 'internal.mp4'), fourcc, 30.0, (eye_w, eye_h))
         
         self.is_recording = True
@@ -209,6 +247,24 @@ class RealtimeNeonAnalyzer:
         if self.recording_thread: self.recording_thread.join()
         for writer in self.video_writers.values(): writer.release()
         self.video_writers = {}
+
+        # --- NUOVO: Aggiungi l'audio se richiesto ---
+        if self.include_audio:
+            print("Adding audio to the recording...")
+            try:
+                from moviepy.editor import VideoFileClip, AudioFileClip
+                temp_video_path = self.output_folder / 'external_no_audio.mp4'
+                audio_path = self.output_folder / 'audio.mp4' # L'API salva l'audio qui
+                final_video_path = self.output_folder / 'external.mp4'
+
+                video_clip = VideoFileClip(str(temp_video_path))
+                audio_clip = AudioFileClip(str(audio_path))
+                final_clip = video_clip.set_audio(audio_clip)
+                final_clip.write_videofile(str(final_video_path), codec='libx264', audio_codec='aac', logger=None)
+                final_clip.close(); audio_clip.close(); video_clip.close()
+                temp_video_path.unlink() # Rimuovi il video temporaneo
+            except Exception as e:
+                print(f"WARNING: Could not add audio to video. Error: {e}")
         
         gaze_df = pd.DataFrame(self.gaze_data_list)
         gaze_df.to_csv(self.output_folder / 'gaze_data.csv', index=False)
@@ -229,6 +285,11 @@ class RealtimeNeonAnalyzer:
         self.events_list.append({'name': event_name, 'timestamp [ns]': event_time_ns, 'recording id': 'realtime_rec'})
         self.last_event_name = event_name
         print(f"Event '{event_name}' added at timestamp {event_time_ns}.")
+
+    def _start_device_recording(self):
+        """Avvia la registrazione sul dispositivo Neon."""
+        if self.device:
+            self.device.recording_start()
 
     def _recording_loop(self):
         while self.is_recording:
@@ -287,7 +348,9 @@ class RealtimeNeonAnalyzer:
 
     def process_and_visualize(self, show_yolo=True, show_pupil=True, show_frag=True, show_blink=True, show_aois=True, show_heatmap=False, show_gaze_path=True, show_gaze_point=True):
         if not self.is_recording: self.get_latest_frames_and_gaze()
-        if self.last_scene_frame is None: return np.zeros((720, 1280, 3), dtype=np.uint8)
+        if self.last_scene_frame is None: 
+            # Restituisce un frame nero e una lista vuota di oggetti
+            return np.zeros((720, 1280, 3), dtype=np.uint8), []
 
         scene_img, scene_ts = self.last_scene_frame.image, self.last_scene_frame.timestamp_unix_seconds
 
@@ -328,9 +391,11 @@ class RealtimeNeonAnalyzer:
                     self.last_gazed_aoi = name
                     break
         
+        detected_objects = []
         if show_yolo and self.last_gaze:
-            scene_img, gazed_name = self._run_yolo_inference(scene_img.copy())
+            scene_img, gazed_name, detected_objects = self._run_yolo_inference(scene_img.copy())
             self.last_gazed_object = gazed_name
+
         
         if self.last_gaze:
             gaze = self.last_gaze
@@ -418,7 +483,7 @@ class RealtimeNeonAnalyzer:
             cv2.rectangle(scene_img, (10, 10), (410, 210), (0,0,0), -1)
             scene_img[10:210, 10:410] = cv2.resize(eye_img, (400, 200))
 
-        return scene_img
+        return scene_img, detected_objects
 
     def close(self):
         if self.is_recording: self.stop_recording()

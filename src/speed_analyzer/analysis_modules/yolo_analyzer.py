@@ -6,8 +6,8 @@ from pathlib import Path
 from tqdm import tqdm
 import logging
 import torch
-from typing import Optional, List
-import json
+from typing import Optional, List, Dict
+import json, typing
 
 try:
     from ultralytics import YOLO
@@ -126,16 +126,18 @@ def run_yolo_analysis(
     data_dir: Path, 
     output_dir: Path, 
     subj_name: str,
-    yolo_task: str,
-    yolo_model_name: str,
+    yolo_models: Optional[typing.Dict[str, str]] = None,
     custom_classes: Optional[List[str]] = None
 ):
     """
     Runs YOLO object detection, correlates with fixations, and saves statistics.
-    MODIFIED for multi-task (detect, detect_custom, segment, pose) and flexible model loading.
+    MODIFIED for multi-task (detect, segment, pose) and flexible model loading.
     """
     if YOLO is None:
         logging.warning("Skipping YOLO analysis because Ultralytics is not installed.")
+        return
+    if not yolo_models:
+        logging.warning("Skipping YOLO analysis because no models were selected.")
         return
 
     video_path = next(data_dir.glob('*.mp4'), None)
@@ -144,17 +146,18 @@ def run_yolo_analysis(
         return
 
     yolo_device = _get_yolo_device()
-
+    models = {}
     try:
-        model = YOLO(yolo_model_name)
-        logging.info(f"Loaded YOLO model '{yolo_model_name}' for task '{yolo_task}'.")
+        for task, model_name in yolo_models.items():
+            models[task] = YOLO(model_name)
+            logging.info(f"Loaded YOLO model '{model_name}' for task '{task}'.")
 
-        if yolo_task == 'detect_custom' and custom_classes: # Handles -world models
+        if 'detect_world' in models and custom_classes:
             logging.info(f"Setting custom classes for zero-shot detection: {custom_classes}")
-            model.set_classes(custom_classes)
+            models['detect_world'].set_classes(custom_classes)
 
     except Exception as e:
-        logging.error(f"Error loading YOLO model ({yolo_model_name}): {e}. Skipping YOLO analysis.")
+        logging.error(f"Error loading one or more YOLO models: {e}. Skipping YOLO analysis.")
         return
 
     try:
@@ -182,52 +185,60 @@ def run_yolo_analysis(
             if not ret: break
             
             try:
-                results = model.track(frame, persist=True, verbose=False, device=effective_device)
+                all_results = {}
+                for task, model in models.items():
+                    # --- NUOVO: Logica per forzare la CPU sui modelli di posa su MPS ---
+                    device_for_task = effective_device
+                    if task == 'pose' and effective_device == 'mps':
+                        logging.warning("Pose model on Apple MPS detected. Forcing CPU to avoid known bugs.")
+                        device_for_task = 'cpu'
+                    all_results[task] = model.track(frame, persist=True, verbose=False, device=device_for_task)
             except NotImplementedError as e:
                 if "torchvision::nms" in str(e) and effective_device != 'cpu':
                     logging.warning(f"GPU operation failed: {e}. Falling back to CPU.")
                     effective_device = 'cpu'
                     pbar.set_description(f"YOLO Tracking on {effective_device.upper()} (Fallback)")
-                    results = model.track(frame, persist=True, verbose=False, device=effective_device)
+                    for task, model in models.items():
+                        all_results[task] = model.track(frame, persist=True, verbose=False, device=effective_device)
                 else:
                     raise e
 
-            if results[0].boxes is not None and results[0].boxes.id is not None:
-                boxes = results[0].boxes.xyxy.cpu().numpy()
-                track_ids = results[0].boxes.id.int().cpu().numpy()
-                class_ids = results[0].boxes.cls.int().cpu().numpy()
+            # Usa il modello di detection come riferimento per il tracking
+            primary_task = 'detect_world' if 'detect_world' in all_results else 'detect'
+            if primary_task in all_results and all_results[primary_task][0].boxes is not None and all_results[primary_task][0].boxes.id is not None:
+                det_results = all_results[primary_task][0]
+                seg_results = all_results.get('segment', [None])[0]
+                pose_results = all_results.get('pose', [None])[0]
 
-                # Estrai dati specifici per task
-                masks = results[0].masks if yolo_task.startswith('segment') and hasattr(results[0], 'masks') and results[0].masks is not None else None
-                keypoints_data = results[0].keypoints if yolo_task.startswith('pose') and hasattr(results[0], 'keypoints') and results[0].keypoints is not None else None
+                for i, box in enumerate(det_results.boxes):
+                    track_id = int(box.id[0])
+                    class_id = int(box.cls[0])
+                    xyxy = box.xyxy[0].cpu().numpy()
 
-                for i, (box, track_id, class_id) in enumerate(zip(boxes, track_ids, class_ids)):
                     detection_data = {
                         'frame_idx': frame_idx, 
                         'track_id': track_id, 
                         'class_id': class_id, 
-                        'x1': box[0], 'y1': box[1], 'x2': box[2], 'y2': box[3]
+                        'x1': xyxy[0], 'y1': xyxy[1], 'x2': xyxy[2], 'y2': xyxy[3]
                     }
 
                     # Salva i dati della maschera se il task è 'segment' o 'pose' con maschere
-                    if masks and masks.xy and i < len(masks.xy):
+                    if seg_results and seg_results.masks and i < len(seg_results.masks.xy):
                         try:
                             # Ultralytics restituisce un array di contorni per maschera
-                            contour = masks.xy[i] 
+                            contour = seg_results.masks.xy[i] 
                             # Salva i contorni come stringa JSON per robustezza nel CSV
                             detection_data['mask_contours'] = json.dumps(contour.tolist())
                         except IndexError:
                             pass # No mask for this specific detection
 
                     # Salva i dati dei keypoint se il task è 'pose'
-                    if keypoints_data and keypoints_data.xy and i < len(keypoints_data.xy):
+                    if pose_results and pose_results.keypoints and i < len(pose_results.keypoints.xy):
                         try:
                             avg_kp_confidence = 0.0
                             # Estrai i keypoint per l'istanza corrente e salvali come JSON
-                            # keypoints_data.xy contiene le coordinate (x, y)
-                            # keypoints_data.conf contiene le confidenze
-                            keypoints_xy = keypoints_data.xy[i].cpu().numpy()
-                            keypoints_conf_tensor = keypoints_data.conf[i] if keypoints_data.conf is not None else torch.ones(len(keypoints_xy))
+                            keypoints_xy = pose_results.keypoints.xy[i].cpu().numpy()
+                            keypoints_conf_tensor = pose_results.keypoints.conf[i] if pose_results.keypoints.conf is not None else torch.ones(len(keypoints_xy))
                             
                             # Calcola la confidenza media dei keypoint visibili
                             visible_keypoints_conf = keypoints_conf_tensor[keypoints_conf_tensor > 0]
@@ -262,8 +273,9 @@ def run_yolo_analysis(
     id_map_df = pd.DataFrame(columns=['track_id', 'class_id', 'class_name', 'instance_name'])
 
     if not detections_df.empty:
+        primary_task = 'detect_world' if 'detect_world' in models else 'detect'
         # Crea la mappa delle classi una sola volta
-        class_map = {int(k): v for k, v in model.names.items()}
+        class_map = {int(k): v for k, v in models[primary_task].names.items()}
         detections_df['class_name'] = detections_df['class_id'].map(class_map)
         # Gestisci il caso in cui una class_id non sia nella mappa
         detections_df['class_name'].fillna('unknown', inplace=True)
@@ -282,7 +294,7 @@ def run_yolo_analysis(
             is_hit = False
 
             # Se il task è segmentazione e la maschera esiste
-            if yolo_task.startswith('segment') and 'mask_contours' in row and pd.notna(row['mask_contours']):
+            if 'segment' in models and 'mask_contours' in row and pd.notna(row['mask_contours']):
                 try:
                     # Converte la stringa JSON di contorni in un array NumPy di interi
                     contour_points = np.array(json.loads(row['mask_contours'])).astype(np.int32)
@@ -361,8 +373,7 @@ def run_yolo_analysis(
 
             px, py = row['gaze x [px]'], row['gaze y [px]']
             
-            # Se il task è segmentazione e la maschera esiste
-            if yolo_task.startswith('segment') and 'mask_contours' in row and pd.notna(row['mask_contours']):
+            if 'segment' in models and 'mask_contours' in row and pd.notna(row['mask_contours']):
                 try:
                     contour_points = np.array(json.loads(row['mask_contours'])).astype(np.int32)
                     if cv2.pointPolygonTest(contour_points, (px, py), False) >= 0:

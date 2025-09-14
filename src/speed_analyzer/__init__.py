@@ -167,9 +167,8 @@ def _prepare_working_directory(output_dir: Path, raw_dir: Path, unenriched_dir: 
 
 def run_full_analysis(
     raw_data_path: str, unenriched_data_path: str, output_path: str, subject_name: str,
-    enriched_data_paths: Optional[List[str]] = None, events_df: Optional[pd.DataFrame] = None,
-    run_yolo: bool = False, yolo_model_name: str = 'yolov8n.pt', yolo_task: str = 'detect',
-    yolo_custom_classes: Optional[List[str]] = None, # Aggiunto
+    enriched_data_paths: Optional[List[str]] = None, events_df: Optional[pd.DataFrame] = None, 
+    yolo_models: Optional[Dict[str, str]] = None, yolo_custom_classes: Optional[List[str]] = None,
     generate_plots: bool = True, plot_selections: Optional[Dict[str, bool]] = None,
     generate_video: bool = True, video_options: Optional[Dict[str, bool]] = None,
     defined_aois: Optional[List[Dict[str, Any]]] = None
@@ -188,15 +187,13 @@ def run_full_analysis(
         events_file = unenriched_dir / 'events.csv'
         events_df = pd.read_csv(events_file) if events_file.exists() else pd.DataFrame()
 
-    # Esegui YOLO prima se necessario per le AOI dinamiche
-    if run_yolo or (defined_aois and any(aoi['type'] == 'dynamic_auto' for aoi in defined_aois)):
+    if yolo_models or (defined_aois and any(aoi['type'] == 'dynamic_auto' for aoi in defined_aois)):
         logging.info("--- STARTING YOLO ANALYSIS ---")
         yolo_analyzer.run_yolo_analysis(
             data_dir=unenriched_dir,
             output_dir=output_dir,
             subj_name=subject_name,
-            yolo_task=yolo_task, # Nuovo
-            yolo_model_name=yolo_model_name,
+            yolo_models=yolo_models,
             custom_classes=yolo_custom_classes # Nuovo
         )
         logging.info("--- YOLO ANALYSIS COMPLETE ---")

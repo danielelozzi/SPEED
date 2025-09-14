@@ -1,6 +1,6 @@
 # desktop_app/data_viewer.py
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, filedialog, messagebox, simpledialog, Toplevel
 import json
 from pathlib import Path
 import pandas as pd
@@ -10,7 +10,11 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 from ultralytics import YOLO
+from moviepy import VideoFileClip, AudioFileClip
 import tempfile
+import threading
+import pygame
+import torch
 import logging
 
 # Importa le funzioni di conversione e le utility di disegno
@@ -22,6 +26,27 @@ from src.speed_analyzer.analysis_modules.video_generator import (
     FRAG_LINE_COLOR, FRAG_BG_COLOR, GAZE_COLOR, GAZE_RADIUS, GAZE_THICKNESS,
     _overlay_transparent
 )
+
+# --- NUOVO: Gestione centralizzata dei modelli ---
+project_root = Path(__file__).resolve().parent.parent
+MODELS_DIR = project_root / 'models'
+MODELS_DIR.mkdir(exist_ok=True)
+
+def _get_yolo_device():
+    """Determina il dispositivo ottimale per l'inferenza YOLO (CUDA, MPS o CPU)."""
+    if torch.cuda.is_available():
+        logging.info("CUDA GPU detected. Using 'cuda' for YOLO.")
+        return 'cuda'
+    # Controlla la disponibilità di MPS e se è stato compilato correttamente
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        if not torch.backends.mps.is_built():
+            logging.warning("MPS is available but not built. Falling back to CPU.")
+            return 'cpu'
+        logging.info("Apple MPS detected. Using 'mps' for YOLO.")
+        return 'mps'
+    else:
+        logging.info("No compatible GPU detected. Using 'cpu' for YOLO.")
+        return 'cpu'
 
 def _overlay_transparent(background, overlay, x, y):
     """
@@ -65,6 +90,7 @@ class DataViewerWindow(tk.Toplevel):
         self.title("Interactive Data Viewer")
         self.geometry("1280x900")
         self.transient(parent)
+        self.root = parent
         self.grab_set()
 
         # Dizionario dei modelli YOLO specifico per questa finestra
@@ -90,124 +116,76 @@ class DataViewerWindow(tk.Toplevel):
         }
         self.data_folder = None
         self.dataframe_cache = {}
-        self.yolo_model_cache = {} # NUOVO: Cache per i modelli YOLO
+        self.yolo_model_cache = {}
         self.cap = None
-        # NUOVO: Cache per i dati YOLO
+        
+        # --- MODIFICA: Unificazione gestione dati ---
+        self.events_df = pd.DataFrame(columns=['name', 'timestamp [ns]', 'selected', 'source', 'recording id'])
+        self.world_ts = pd.DataFrame()
         self.yolo_detections_df = pd.DataFrame()
         self.sync_data = pd.DataFrame()
+        self.saved_df = None
+        self.selected_event_index = None
+        self.dragged_event_index = None
+        
         self.is_playing = False
         self.total_frames = 0
         self.fps = 30
+        
+        # --- NUOVO: Gestione Audio ---
+        self.audio_clip = None
+        self.audio_thread = None
+        self.is_muted = tk.BooleanVar(value=True)
+
+        self.video_path = None
         self.is_updating_slider = False
         self.yolo_model = None
         self.is_yolo_live = False
+        self.yolo_class_filter = set()
+        self.yolo_id_filter = set()
 
         self.defined_aois = defined_aois if defined_aois else []
         self.aoi_positions_per_frame = {}
         self.aoi_colors = {aoi['name']: tuple(np.random.randint(100, 256, 3).tolist()) for aoi in self.defined_aois}
 
-        main_frame = tk.Frame(self)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # --- MODIFICA: Layout con PanedWindow ---
+        main_pane = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
+        main_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        top_frame = tk.Frame(main_frame)
-        top_frame.pack(fill=tk.X, pady=5)
-        
-        # --- MODIFICA: Aggiunto pulsante per Un-enriched ---
-        tk.Button(top_frame, text="Load Un-enriched Folder...", command=self.load_unenriched_folder).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="Load BIDS Directory...", command=self.load_bids).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="Load DICOM File...", command=self.load_dicom).pack(side=tk.LEFT, padx=5)
-        self.status_label = tk.Label(top_frame, text="Please load a data source to begin.")
-        self.status_label.pack(side=tk.LEFT, padx=10)
+        # --- Pannello Sinistro (Video e Tabelle) ---
+        left_pane_content = tk.Frame(main_pane)
+        main_pane.add(left_pane_content, stretch="always")
 
-        left_panel = tk.Frame(main_frame, width=350, relief=tk.SUNKEN, borderwidth=1)
-        left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
-        left_panel.pack_propagate(False)
-        
-        metadata_frame = tk.LabelFrame(left_panel, text="File Metadata")
-        metadata_frame.pack(fill=tk.X, padx=5, pady=5)
-        self.metadata_tree = ttk.Treeview(metadata_frame, columns=("Property", "Value"), show="headings", height=8)
-        self.metadata_tree.heading("Property", text="Property")
-        self.metadata_tree.heading("Value", text="Value")
-        self.metadata_tree.column("Property", width=120)
-        self.metadata_tree.pack(fill=tk.X, expand=True)
-
-        overlay_controls_frame = tk.LabelFrame(left_panel, text="Video Overlay Controls")
-        overlay_controls_frame.pack(fill=tk.X, padx=5, pady=5)
-        self.overlay_vars = {
-            "gaze": tk.BooleanVar(value=True), "pupil_plot": tk.BooleanVar(value=False),
-            "frag_plot": tk.BooleanVar(value=False), "aois": tk.BooleanVar(value=True), "gaze_path": tk.BooleanVar(value=True), 
-            "heatmap": tk.BooleanVar(value=False), 
-            "segmentation": tk.BooleanVar(value=True), # NUOVO
-            "pose": tk.BooleanVar(value=True) # NUOVO
-        }
-        for key, text in {"gaze": "Show Gaze Point", "gaze_path": "Show Gaze Path", 
-                           "pupil_plot": "Show Pupil Plot", "frag_plot": "Show Fragmentation Plot", 
-                           "aois": "Show Defined AOIs", "segmentation": "Show Segmentation", 
-                           "pose": "Show Pose Estimation"}.items():
-            tk.Checkbutton(overlay_controls_frame, text=text, variable=self.overlay_vars[key], 
-                           command=self.update_current_frame_display).pack(anchor='w')
-        
-        heatmap_frame = tk.Frame(overlay_controls_frame)
-        heatmap_frame.pack(fill=tk.X, pady=(5,0))
-        tk.Checkbutton(heatmap_frame, text="Dynamic Gaze Heatmap", variable=self.overlay_vars["heatmap"], 
-                       command=self.update_current_frame_display).pack(anchor='w')
-        
-        slider_frame = tk.Frame(heatmap_frame)
-        slider_frame.pack(fill=tk.X, padx=(18, 0))
-        self.heatmap_window_var = tk.DoubleVar(value=2.0)
-        self.heatmap_label_var = tk.StringVar(value=f"{self.heatmap_window_var.get():.1f} s")
-        tk.Label(slider_frame, text="Window:").pack(side=tk.LEFT)
-        ttk.Scale(slider_frame, from_=0.5, to=10.0, variable=self.heatmap_window_var, 
-                  orient=tk.HORIZONTAL, command=self.on_heatmap_slider_change).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=5)
-        tk.Label(slider_frame, textvariable=self.heatmap_label_var, width=5).pack(side=tk.RIGHT)
-
-        # --- NUOVO: Interfaccia di controllo YOLO ---
-        yolo_live_frame = tk.LabelFrame(left_panel, text="YOLO Live Analysis")
-        yolo_live_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        self.yolo_task_var = tk.StringVar(value='detect_v8')
-        self.yolo_model_var = tk.StringVar()
-        self.yolo_classes_var = tk.StringVar()
-
-        tk.Label(yolo_live_frame, text="Task:").pack(anchor='w')
-        self.yolo_task_combo = ttk.Combobox(yolo_live_frame, textvariable=self.yolo_task_var, values=list(self.YOLO_MODELS.keys()), state='readonly', width=25)
-        self.yolo_task_combo.pack(pady=(0,5), fill=tk.X)
-        self.yolo_task_combo.bind('<<ComboboxSelected>>', self.update_yolo_model_options)
-
-        tk.Label(yolo_live_frame, text="Model:").pack(anchor='w')
-        self.yolo_model_combo = ttk.Combobox(yolo_live_frame, textvariable=self.yolo_model_var, state='readonly', width=25)
-        self.yolo_model_combo.pack(fill=tk.X)
-
-        tk.Label(yolo_live_frame, text="Custom Classes:").pack(anchor='w', pady=(5,0))
-        self.yolo_classes_entry = tk.Entry(yolo_live_frame, textvariable=self.yolo_classes_var, width=28, state=tk.DISABLED)
-        self.yolo_classes_entry.pack(fill=tk.X)
-        self.add_placeholder(self.yolo_classes_entry, "person, car, dog")
-
-        self.run_yolo_btn = tk.Button(yolo_live_frame, text="Run Live YOLO", command=self.run_live_yolo, state=tk.DISABLED)
-        self.run_yolo_btn.pack(pady=5, fill=tk.X)
-
-        right_panel = tk.Frame(main_frame)
-        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-        
-        self.notebook = ttk.Notebook(right_panel)
+        self.notebook = ttk.Notebook(left_pane_content)
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
         self.video_tab = ttk.Frame(self.notebook)
         self.table_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.video_tab, text="Video Player")
         self.notebook.add(self.table_tab, text="Data Tables")
-        
+
         self.video_canvas = tk.Canvas(self.video_tab, bg="black")
         self.video_canvas.pack(fill=tk.BOTH, expand=True)
-        
+
         video_controls = tk.Frame(self.video_tab)
         video_controls.pack(fill=tk.X, pady=5)
         self.play_pause_btn = tk.Button(video_controls, text="▶ Play", command=self.toggle_play, state=tk.DISABLED)
         self.play_pause_btn.pack(side=tk.LEFT)
+
+        # --- NUOVO: Pulsante Mute/Unmute ---
+        self.mute_btn = tk.Button(video_controls, text="🔇 Unmute", command=self.toggle_mute)
+        self.mute_btn.pack(side=tk.LEFT, padx=5)
+
         self.frame_scale = ttk.Scale(video_controls, from_=0, to=100, orient=tk.HORIZONTAL, command=self.seek_frame, state=tk.DISABLED)
         self.frame_scale.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=5)
         self.time_label = tk.Label(video_controls, text="Frame: 0 / 0", width=20)
         self.time_label.pack(side=tk.RIGHT)
+
+        self.timeline_canvas = tk.Canvas(self.video_tab, height=80, bg='lightgrey')
+        self.timeline_canvas.pack(fill=tk.X, padx=10, pady=5)
+        self.timeline_canvas.bind("<Button-1>", self.handle_timeline_click)
+        self.timeline_canvas.bind("<B1-Motion>", self.handle_timeline_drag)
+        self.timeline_canvas.bind("<ButtonRelease-1>", self.handle_timeline_release)
 
         table_controls = tk.Frame(self.table_tab)
         table_controls.pack(fill=tk.X, pady=5)
@@ -217,9 +195,74 @@ class DataViewerWindow(tk.Toplevel):
         self.table_selector.bind("<<ComboboxSelected>>", self.display_table)
         self.table_tree = ttk.Treeview(self.table_tab, show="headings")
         self.table_tree.pack(fill=tk.BOTH, expand=True)
+
+        # --- Pannello Destro (Controlli) ---
+        right_panel = tk.Frame(main_pane, width=350, relief=tk.SUNKEN, borderwidth=1)
+        right_panel.pack_propagate(False)
+        main_pane.add(right_panel)
+
+        load_frame = tk.LabelFrame(right_panel, text="Data Loading")
+        load_frame.pack(fill=tk.X, padx=5, pady=5)
+        tk.Button(load_frame, text="Load Un-enriched Folder...", command=self.load_unenriched_folder).pack(fill=tk.X, pady=2)
+        tk.Button(load_frame, text="Load BIDS Directory...", command=self.load_bids).pack(fill=tk.X, pady=2)
+        tk.Button(load_frame, text="Load DICOM File...", command=self.load_dicom).pack(fill=tk.X, pady=2)
+        tk.Button(load_frame, text="Load Video Only...", command=self.load_video_only).pack(fill=tk.X, pady=2)
+        self.status_label = tk.Label(load_frame, text="Please load a data source.", wraplength=330)
+        self.status_label.pack(pady=5)
+
+        event_frame = tk.LabelFrame(right_panel, text="Event Management")
+        event_frame.pack(fill=tk.X, padx=5, pady=5)
+        tk.Button(event_frame, text="Add Event at Frame", command=self.add_event_at_frame, bg='#c8e6c9').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        tk.Button(event_frame, text="Remove Selected", command=self.remove_selected_event, bg='#ffcdd2').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        overlay_controls_frame = tk.LabelFrame(right_panel, text="Video Overlay Controls")
+        overlay_controls_frame.pack(fill=tk.X, padx=5, pady=5)
+        self.overlay_vars = {
+            "gaze": tk.BooleanVar(value=True), "pupil_plot": tk.BooleanVar(value=False),
+            "frag_plot": tk.BooleanVar(value=False), "aois": tk.BooleanVar(value=True), "gaze_path": tk.BooleanVar(value=True), 
+            "heatmap": tk.BooleanVar(value=False)
+        }
+        for key, text in {"gaze": "Show Gaze Point", "gaze_path": "Show Gaze Path", 
+                           "pupil_plot": "Show Pupil Plot", "frag_plot": "Show Fragmentation Plot", 
+                           "aois": "Show Defined AOIs"}.items():
+            tk.Checkbutton(overlay_controls_frame, text=text, variable=self.overlay_vars[key], 
+                           command=self.update_current_frame_display).pack(anchor='w')
+        
+        yolo_run_frame = tk.LabelFrame(right_panel, text="YOLO Analysis")
+        yolo_run_frame.pack(fill=tk.X, padx=5, pady=5)
+        self.yolo_model_vars = {'detect': tk.StringVar(), 'segment': tk.StringVar(), 'pose': tk.StringVar()}
+        self.yolo_model_combos = {}
+        for task in ['detect', 'segment', 'pose']:
+            tk.Label(yolo_run_frame, text=f"{task.capitalize()} Model:").pack(anchor='w', pady=(5,0))
+            combo = ttk.Combobox(yolo_run_frame, textvariable=self.yolo_model_vars[task], state='readonly')
+            combo.pack(fill=tk.X)
+            self.yolo_model_combos[task] = combo
+        self.run_yolo_btn = tk.Button(yolo_run_frame, text="Run YOLO on Video", command=self.run_yolo_analysis, state=tk.DISABLED)
+        self.run_yolo_btn.pack(pady=5, fill=tk.X)
+        if YOLO is None: self.run_yolo_btn.config(text="YOLO not installed", state=tk.DISABLED)
+
+        yolo_filter_frame = tk.LabelFrame(right_panel, text="YOLO Object Filter")
+        yolo_filter_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.yolo_filter_tree = ttk.Treeview(yolo_filter_frame, show="tree")
+        self.yolo_filter_tree.pack(fill=tk.BOTH, expand=True)
+        self.yolo_filter_tree.bind('<Button-1>', self.on_yolo_filter_click)
+
+        metadata_frame = tk.LabelFrame(right_panel, text="File Metadata")
+        metadata_frame.pack(fill=tk.X, padx=5, pady=5)
+        self.metadata_tree = ttk.Treeview(metadata_frame, columns=("Property", "Value"), show="headings", height=5)
+        self.metadata_tree.heading("Property", text="Property"); self.metadata_tree.heading("Value", text="Value")
+        self.metadata_tree.column("Property", width=120)
+        self.metadata_tree.pack(fill=tk.X, expand=True)
+
+        export_frame = tk.Frame(right_panel)
+        export_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
+        tk.Button(export_frame, text="Export Video...", command=self.export_video_dialog, bg='#ffcc80').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        tk.Button(export_frame, text="Save & Close", command=self.save_and_close, font=('Helvetica', 10, 'bold')).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
         
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.update_yolo_model_options()
+        # Inizializza pygame mixer
+        pygame.mixer.init()
 
     def on_heatmap_slider_change(self, value):
         self.heatmap_label_var.set(f"{float(value):.1f} s")
@@ -228,9 +271,42 @@ class DataViewerWindow(tk.Toplevel):
 
     def on_close(self):
         self.is_playing = False
+        if self.audio_thread and self.audio_thread.is_alive():
+            pygame.mixer.music.stop()
         if self.cap:
+            self.saved_df = self.events_df # Salva lo stato corrente in caso di chiusura
             self.cap.release()
         self.destroy()
+
+    def _load_audio(self):
+        """Carica la traccia audio dal file video in memoria."""
+        if not self.video_path:
+            self.audio_clip = None
+            return
+        try:
+            video = VideoFileClip(str(self.video_path))
+            if video.audio:
+                self.audio_clip = video.audio
+                logging.info("Traccia audio caricata con successo.")
+            else:
+                self.audio_clip = None
+                logging.warning("Il video non contiene una traccia audio.")
+        except Exception as e:
+            self.audio_clip = None
+            logging.error(f"Impossibile caricare l'audio: {e}")
+        finally:
+            self.update_mute_button_text()
+
+    def toggle_mute(self):
+        self.is_muted.set(not self.is_muted.get())
+        self.update_mute_button_text()
+        if not self.is_muted.get() and self.is_playing:
+            self.play_audio()
+
+    def update_mute_button_text(self):
+        self.mute_btn.config(text="🔇 Unmute" if self.is_muted.get() else "🔊 Mute")
+        if not self.audio_clip:
+            self.mute_btn.config(state=tk.DISABLED, text="No Audio")
 
     def add_placeholder(self, entry_widget, placeholder_text):
         """Aggiunge un testo di placeholder a un widget Entry di Tkinter."""
@@ -251,60 +327,19 @@ class DataViewerWindow(tk.Toplevel):
         entry_widget.bind("<FocusOut>", on_focus_out)
 
     def update_yolo_model_options(self, event=None):
-        selected_task = self.yolo_task_var.get()
-        available_models = self.YOLO_MODELS.get(selected_task, [])
-        self.yolo_model_combo['values'] = available_models
-        if available_models:
-            self.yolo_model_var.set(available_models[0])
-        else:
-            self.yolo_model_var.set('')
-        is_custom_detect_task = (selected_task == 'detect_world')
-        self.yolo_classes_entry.config(state=tk.NORMAL if is_custom_detect_task else tk.DISABLED)
-
-    def run_live_yolo(self):
-        task = self.yolo_task_var.get()
-        model_name = self.yolo_model_var.get()
-        custom_classes_str = self.yolo_classes_var.get().strip()
-        custom_classes = [cls.strip() for cls in custom_classes_str.split(',') if cls.strip()] if custom_classes_str and custom_classes_str != "person, car, dog" else None
-
-        # Usa una chiave univoca per la cache, che includa le classi custom se presenti
-        cache_key = model_name
-        if task == 'detect_world' and custom_classes:
-            cache_key = f"{model_name}_{'_'.join(sorted(custom_classes))}"
-
-        # Controlla se il modello è già in cache
-        if cache_key in self.yolo_model_cache:
-            self.yolo_model = self.yolo_model_cache[cache_key]
-            self.is_yolo_live = True
-            self.status_label.config(text=f"YOLO model '{model_name}' loaded from cache. Live analysis is ON.")
-            self.update_frame(self.current_frame_idx)
-            return
-
-        self.status_label.config(text=f"Loading YOLO model: {model_name}...")
-        self.update()
-
-        try:
-            loaded_model = None
-            if task == 'detect_world' and custom_classes:
-                base_model = YOLO(model_name)
-                base_model.set_classes(custom_classes)
-                temp_dir = Path(tempfile.gettempdir())
-                custom_model_path = temp_dir / f"yolo_world_custom_viewer_{'_'.join(custom_classes)}.pt"
-                base_model.save(custom_model_path)
-                loaded_model = YOLO(custom_model_path)
-            else:
-                loaded_model = YOLO(model_name)
+        """Popola i combobox dei modelli YOLO con le opzioni corrette."""
+        for task, combo in self.yolo_model_combos.items():
+            # --- NUOVA LOGICA: Raccoglie tutti i modelli per un task base (es. 'detect') ---
+            all_task_models = []
+            for model_key, model_list in self.YOLO_MODELS.items():
+                if model_key.startswith(task):
+                    all_task_models.extend(model_list)
             
-            self.yolo_model = loaded_model
-            self.yolo_model_cache[cache_key] = loaded_model # Salva il modello in cache
-            self.is_yolo_live = True
-            self.status_label.config(text=f"YOLO model '{model_name}' loaded. Live analysis is ON.")
-            self.update_frame(self.current_frame_idx) # Force refresh
-        except Exception as e:
-            self.is_yolo_live = False
-            self.yolo_model = None
-            messagebox.showerror("YOLO Error", f"Failed to load model '{model_name}':\n\n{e}\n\nThis may be due to a network issue or a corrupted model file. Please check your internet connection and try again.", parent=self)
-
+            # Rimuovi duplicati e ordina, aggiungendo l'opzione vuota
+            task_models = [""] + sorted(list(set(all_task_models)))
+            combo['values'] = task_models
+            if self.yolo_model_vars[task].get() not in task_models:
+                self.yolo_model_vars[task].set(task_models[0])
     def _prepare_sync_data(self):
         if not self.data_folder: return
         try:
@@ -359,16 +394,40 @@ class DataViewerWindow(tk.Toplevel):
             self.aoi_positions_per_frame[aoi_name] = coords
         logging.info("AOI positions pre-calculation complete.")
 
+    def load_video_only(self, video_path_str=None):
+        """Carica un singolo file video senza una struttura di cartelle."""
+        if not video_path_str:
+            video_path_str = filedialog.askopenfilename(
+                title="Select a video file",
+                filetypes=[("Video files", "*.mp4 *.avi *.mov"), ("All files", "*.*")],
+                parent=self
+            )
+
+        if not video_path_str: return
+
+        try:
+            self.video_path = Path(video_path_str)
+            self.data_folder = self.video_path.parent
+            self.status_label.config(text=f"Loaded: {self.video_path.name}")
+            self._reset_and_load_data()
+            video_file = self.video_path
+            self._populate_all_views() # Carica tabelle
+            self._load_video_and_data(video_file) # Carica video e dati sincronizzati
+
+        except Exception as e:
+            messagebox.showerror("Error Loading Video", str(e), parent=self)
+
     def load_unenriched_folder(self):
         folder_path = filedialog.askdirectory(title="Select the un-enriched data folder")
         if not folder_path: return
 
         try:
             self.data_folder = Path(folder_path)
+            self._reset_and_load_data()
             self.status_label.config(text=f"Loaded: {self.data_folder.name}")
             self._populate_all_views()
             
-            video_file = next(self.data_folder.glob('*.mp4'))
+            video_file = next(self.data_folder.glob('*.mp4'), None)
             self._load_video_and_data(video_file)
         except StopIteration:
             messagebox.showerror("Video Error", f"No .mp4 file found in folder:\n{self.data_folder}", parent=self)
@@ -388,6 +447,7 @@ class DataViewerWindow(tk.Toplevel):
 
         try:
             self.data_folder = load_from_bids(Path(bids_root_path), subject_id, session_id, task_name)
+            self._reset_and_load_data()
             self.status_label.config(text=f"Loaded BIDS: sub-{subject_id}_ses-{session_id}")
             self._populate_all_views()
             
@@ -410,6 +470,7 @@ class DataViewerWindow(tk.Toplevel):
         
         try:
             self.data_folder = load_from_dicom(Path(dicom_path))
+            self._reset_and_load_data()
             ds = pydicom.dcmread(dicom_path, force=True)
             self.status_label.config(text=f"Loaded DICOM: {Path(dicom_path).name}")
             self._populate_all_views()
@@ -423,6 +484,37 @@ class DataViewerWindow(tk.Toplevel):
         except Exception as e:
             messagebox.showerror("Error Loading DICOM", str(e), parent=self)
 
+    def _reset_and_load_data(self):
+        """Resetta lo stato e carica i dati base come events.csv."""
+        self.events_df = pd.DataFrame(columns=['name', 'timestamp [ns]', 'selected', 'source', 'recording id'])
+        self.yolo_detections_df = pd.DataFrame()
+        self.yolo_filter_tree.delete(*self.yolo_filter_tree.get_children())
+        self.selected_event_index = None
+        self.is_playing = False
+
+        if not self.data_folder: return
+
+        # Carica events.csv se esiste
+        events_path = self.data_folder / 'events.csv'
+        if events_path.exists():
+            try:
+                self.events_df = pd.read_csv(events_path)
+                if 'selected' not in self.events_df.columns:
+                    self.events_df['selected'] = True
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not read events.csv:\n{e}", parent=self)
+
+        # Carica world_timestamps.csv se esiste
+        world_ts_path = self.data_folder / 'world_timestamps.csv'
+        if world_ts_path.exists():
+            try:
+                self.world_ts = pd.read_csv(world_ts_path)
+                if 'frame' not in self.world_ts.columns:
+                    self.world_ts['frame'] = self.world_ts.index
+            except Exception:
+                self.world_ts = pd.DataFrame()
+
+
     def _populate_all_views(self):
         self._clear_views()
         if not self.data_folder: return
@@ -434,12 +526,25 @@ class DataViewerWindow(tk.Toplevel):
             self.display_table()
 
     def _load_video_and_data(self, video_path):
+        if not video_path or not video_path.exists():
+            self.play_pause_btn.config(state=tk.DISABLED)
+            self.run_yolo_btn.config(state=tk.DISABLED)
+            self.audio_clip = None
+            self.update_mute_button_text()
+            return
+
+        self.video_path = video_path
         self._prepare_sync_data()
         self.cap = cv2.VideoCapture(str(video_path))
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) if self.cap.get(cv2.CAP_PROP_FPS) > 0 else 30
 
-        # --- NUOVO: Caricamento dei dati di detection YOLO ---
+        # Carica l'audio
+        self._load_audio()
+
+        if self.world_ts.empty:
+            timestamps_ns = (np.arange(self.total_frames) * (1e9 / self.fps)).astype('int64')
+            self.world_ts = pd.DataFrame({'timestamp [ns]': timestamps_ns, 'frame': np.arange(self.total_frames)})
         # Cerca il file nella cartella di output, che si presume sia la parente della cartella dati
         potential_output_dir = self.data_folder.parent
         yolo_cache_path = potential_output_dir / 'yolo_detections_cache.csv'
@@ -447,6 +552,7 @@ class DataViewerWindow(tk.Toplevel):
             try:
                 self.yolo_detections_df = pd.read_csv(yolo_cache_path)
                 logging.info(f"Loaded YOLO detection data from: {yolo_cache_path}")
+                self.process_yolo_data()
             except Exception as e:
                 logging.error(f"Failed to load YOLO cache file: {e}")
                 self.yolo_detections_df = pd.DataFrame()
@@ -477,18 +583,10 @@ class DataViewerWindow(tk.Toplevel):
         ret, frame = self.cap.read()
         if ret:
             self.draw_overlays(frame)
+        self.draw_timeline()
 
     def draw_overlays(self, frame):
-        # Esegui l'inferenza YOLO live se il modello è attivo
-        if hasattr(self, 'is_yolo_live') and self.is_yolo_live and hasattr(self, 'yolo_model') and self.yolo_model is not None:
-            try:
-                # Usiamo track per coerenza, anche se qui non sfruttiamo il tracking tra frame
-                results = self.yolo_model.track(frame, persist=False, verbose=False)
-                frame = results[0].plot() # Sovrascrivi il frame con quello annotato da YOLO
-            except Exception as e:
-                print(f"Errore durante l'inferenza YOLO live: {e}")
-
-        if self.sync_data.empty:
+        if self.sync_data.empty and self.yolo_detections_df.empty:
             self.update_current_frame_display(frame)
             return
 
@@ -511,47 +609,16 @@ class DataViewerWindow(tk.Toplevel):
                 frame = _overlay_transparent(frame, heatmap_rgba, 0, 0)
         
         # --- MODIFICATO: Disegno dei risultati YOLO (Segmentazione e Posa) ---
-        if not self.yolo_detections_df.empty:
-            detections_for_frame = self.yolo_detections_df[self.yolo_detections_df['frame_idx'] == self.current_frame_idx]
-            
-            if not detections_for_frame.empty:
-                # Disegna le maschere di segmentazione
-                if self.overlay_vars["segmentation"].get() and 'mask_contours' in detections_for_frame.columns:
-                    overlay_mask = np.zeros_like(frame, dtype=np.uint8)
-                    for _, det in detections_for_frame.iterrows():
-                        if pd.notna(det['mask_contours']):
-                            try:
-                                # La colonna ora contiene una stringa JSON di un singolo contorno
-                                contour = json.loads(det['mask_contours'])
-                                color = self.aoi_colors.get(det.get('track_id', 0), (0, 255, 0)) # Colore casuale per maschera
-                                contour_np = np.array(contour, dtype=np.int32)
-                                cv2.fillPoly(overlay_mask, [contour_np], color)
-                            except (json.JSONDecodeError, TypeError):
-                                continue # Ignora se il formato non è corretto
-                    frame = cv2.addWeighted(frame, 1.0, overlay_mask, 0.4, 0)
+        self.draw_yolo_overlays(frame)
+        
+        # Disegna overlay Eventi
+        if not self.world_ts.empty and self.current_frame_idx < len(self.world_ts):
+            current_ts = self.world_ts.iloc[self.current_frame_idx]['timestamp [ns]']
+            self.draw_event_overlay(frame, current_ts)
 
-                # Disegna gli scheletri della posa
-                if self.overlay_vars["pose"].get() and 'keypoints' in detections_for_frame.columns:
-                    # Definisci le connessioni dello scheletro (es. COCO)
-                    skeleton_connections = [
-                        (0, 1), (0, 2), (1, 3), (2, 4), # Testa
-                        (5, 6), (5, 7), (7, 9), (6, 8), (8, 10), # Corpo
-                        (11, 12), (5, 11), (6, 12), # Spalle
-                        (11, 13), (13, 15), (12, 14), (14, 16) # Braccia
-                    ]
-                    for _, det in detections_for_frame.iterrows():
-                        if pd.notna(det['keypoints']):
-                            try:
-                                keypoints = np.array(json.loads(det['keypoints']))
-                                for i, (x, y, conf) in enumerate(keypoints):
-                                    if conf > 0.5: cv2.circle(frame, (int(x), int(y)), 3, (0, 0, 255), -1) # Disegna solo se confident
-                                for start_idx, end_idx in skeleton_connections:
-                                    if start_idx < len(keypoints) and end_idx < len(keypoints) and keypoints[start_idx][2] > 0.5 and keypoints[end_idx][2] > 0.5:
-                                        start_point = tuple(keypoints[start_idx][:2])
-                                        end_point = tuple(keypoints[end_idx][:2])
-                                        cv2.line(frame, start_point, end_point, (0, 255, 0), 1)
-                            except (json.JSONDecodeError, TypeError, IndexError):
-                                continue
+        if self.sync_data.empty:
+            self.update_current_frame_display(frame)
+            return
 
         frame_data_row = self.sync_data.iloc[min(self.current_frame_idx, len(self.sync_data)-1)]
         if self.overlay_vars["aois"].get():
@@ -595,6 +662,142 @@ class DataViewerWindow(tk.Toplevel):
 
         self.update_current_frame_display(frame)
 
+    # --- NUOVE FUNZIONI DALL'EDITOR ---
+    def draw_yolo_overlays(self, frame):
+        if self.yolo_detections_df.empty: return
+
+        detections_for_frame = self.yolo_detections_df[self.yolo_detections_df['frame_idx'] == self.current_frame_idx]
+
+        # --- MODIFICA: Applica i filtri per nascondere gli elementi deselezionati ---
+        # Se il set di filtri non è vuoto, significa che alcuni elementi sono stati deselezionati.
+        # Quindi, mostriamo solo gli elementi che sono ancora nei nostri set di filtri.
+        # Se un set di filtri è vuoto, significa che tutti gli elementi di quel tipo sono selezionati, quindi non applichiamo quel filtro.
+        if self.yolo_class_filter: # Se non è vuoto, applica il filtro
+            detections_for_frame = detections_for_frame[detections_for_frame['class_name'].isin(self.yolo_class_filter)].copy()
+        
+        if self.yolo_id_filter: # Se non è vuoto, applica il filtro
+            detections_for_frame = detections_for_frame[detections_for_frame['track_id'].isin(self.yolo_id_filter)].copy()
+        # --- FINE MODIFICA ---
+
+        # --- NUOVO: Crea un'immagine di overlay per le maschere ---
+        overlay_mask = frame.copy()
+        if detections_for_frame.empty: return
+
+        for _, det in detections_for_frame.iterrows():
+            x1, y1, x2, y2 = int(det['x1']), int(det['y1']), int(det['x2']), int(det['y2'])
+            color = (0, 255, 255) # Ciano per i box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
+            label = f"{det.get('class_name', 'Obj')}:{int(det['track_id'])}"
+            cv2.putText(frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+            if 'mask_contours' in det and pd.notna(det['mask_contours']):
+                try:
+                    contour = np.array(json.loads(det['mask_contours'])).astype(np.int32)
+                    # Disegna la maschera sull'immagine di overlay separata
+                    cv2.fillPoly(overlay_mask, [contour], (0, 255, 0)) # Verde per le maschere
+                except Exception: pass
+
+            if 'keypoints' in det and pd.notna(det['keypoints']) and det['keypoints'] != '[]':
+                try:
+                    keypoints = np.array(json.loads(det['keypoints']))
+                    for x, y, conf in keypoints:
+                        if conf > 0.5: cv2.circle(frame, (int(x), int(y)), 2, (0, 0, 255), -1) # Rosso per i keypoint
+                except Exception: pass
+
+        # --- NUOVO: Applica l'overlay delle maschere una sola volta alla fine ---
+        cv2.addWeighted(overlay_mask, 0.3, frame, 0.7, 0, dst=frame)
+
+    def draw_event_overlay(self, frame, current_ts):
+        if self.events_df.empty: return
+        active_events = self.events_df[self.events_df['timestamp [ns]'] <= current_ts]
+        if not active_events.empty:
+            current_event_name = active_events.iloc[-1]['name']
+            cv2.putText(frame, current_event_name, (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+
+    def draw_timeline(self):
+        self.timeline_canvas.delete("all")
+        canvas_width = self.timeline_canvas.winfo_width()
+        if canvas_width <= 1: return
+        
+        color_map = {'default': 'red', 'optional': 'purple', 'manual': 'green'}
+        for index, event in self.events_df.iterrows():
+            frame_idx = self.get_frame_from_ts(event['timestamp [ns]'])
+            x_pos = (frame_idx / self.total_frames) * canvas_width
+            base_color = color_map.get(event.get('source', 'manual'), 'black')
+            final_color = "blue" if index == self.selected_event_index else base_color
+            self.timeline_canvas.create_line(x_pos, 10, x_pos, 50, fill=final_color, width=3 if final_color=="blue" else 2, tags=f"event_{index}")
+            self.timeline_canvas.create_text(x_pos, 60, text=event['name'], anchor=tk.N, fill=final_color, tags=f"event_{index}")
+
+        cursor_x = (self.current_frame_idx / self.total_frames) * canvas_width
+        self.timeline_canvas.create_line(cursor_x, 0, cursor_x, 80, fill='dark green', width=2)
+
+    def get_frame_from_ts(self, ts):
+        if self.world_ts.empty: return 0
+        match_index = (self.world_ts['timestamp [ns]'] - ts).abs().idxmin()
+        return self.world_ts.loc[match_index, 'frame']
+
+    def get_event_at_pos(self, x):
+        canvas_width = self.timeline_canvas.winfo_width()
+        for index, event in self.events_df.iterrows():
+            if abs(x - ((self.get_frame_from_ts(event['timestamp [ns]']) / self.total_frames) * canvas_width)) < 5:
+                return index
+        return None
+
+    def handle_timeline_click(self, event):
+        clicked_event = self.get_event_at_pos(event.x)
+        self.selected_event_index = clicked_event
+        self.dragged_event_index = clicked_event
+        if clicked_event is None:
+            self.update_frame((event.x / self.timeline_canvas.winfo_width()) * self.total_frames)
+        self.draw_timeline()
+
+    def handle_timeline_drag(self, event):
+        if self.dragged_event_index is not None:
+            canvas_width = self.timeline_canvas.winfo_width()
+            new_frame = max(0, min(int((event.x / canvas_width) * self.total_frames), self.total_frames - 1))
+            if new_frame < len(self.world_ts):
+                self.events_df.loc[self.dragged_event_index, 'timestamp [ns]'] = self.world_ts.iloc[new_frame]['timestamp [ns]']
+                self.update_frame(new_frame)
+            
+    def handle_timeline_release(self, event):
+        if self.dragged_event_index is not None:
+            self.dragged_event_index = None
+            self.events_df.sort_values('timestamp [ns]', inplace=True)
+            self.events_df = self.events_df.reset_index(drop=True)
+            self.selected_event_index = None
+            self.draw_timeline()
+
+    def add_event_at_frame(self):
+        if not self.video_path:
+            messagebox.showwarning("Warning", "Please load a video first.", parent=self)
+            return
+        name = simpledialog.askstring("Add Event", "Enter event name:", parent=self)
+        if name and self.current_frame_idx < len(self.world_ts):
+            ts = self.world_ts.iloc[self.current_frame_idx]['timestamp [ns]']
+            new_row = {'name': name, 'timestamp [ns]': ts, 'selected': True, 'source': 'manual', 'recording id': 'rec_001'}
+            self.events_df = pd.concat([self.events_df, pd.DataFrame([new_row])], ignore_index=True)
+            self.events_df.sort_values('timestamp [ns]', inplace=True)
+            self.events_df = self.events_df.reset_index(drop=True)
+            self.draw_timeline()
+
+    def remove_selected_event(self):
+        if self.selected_event_index is None:
+            messagebox.showinfo("Info", "Click on an event on the timeline to select it first.", parent=self)
+            return
+        event_name = self.events_df.loc[self.selected_event_index, 'name']
+        if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to remove the event '{event_name}'?", parent=self):
+            self.events_df.drop(self.selected_event_index, inplace=True)
+            self.events_df = self.events_df.reset_index(drop=True)
+            self.selected_event_index = None
+            self.draw_timeline()
+
+    def save_and_close(self):
+        self.is_playing = False
+        cols_to_save = ['name', 'timestamp [ns]', 'recording id', 'selected', 'source']
+        self.saved_df = self.events_df[[col for col in cols_to_save if col in self.events_df.columns]]
+        self.on_close()
+    # --- FINE NUOVE FUNZIONI ---
+
     def update_current_frame_display(self, frame=None):
         if frame is None: 
             if not self.cap or not self.cap.isOpened(): return
@@ -616,9 +819,30 @@ class DataViewerWindow(tk.Toplevel):
 
     def toggle_play(self):
         self.is_playing = not self.is_playing
-        self.play_pause_btn.config(text="❚❚ Pause" if self.is_playing else "▶ Play")
         if self.is_playing:
+            self.play_pause_btn.config(text="❚❚ Pause")
             self.play_video()
+            self.play_audio()
+        else:
+            self.play_pause_btn.config(text="▶ Play")
+            if self.audio_thread and self.audio_thread.is_alive():
+                pygame.mixer.music.stop()
+
+    def play_audio(self):
+        """Riproduce l'audio in un thread separato."""
+        if self.is_playing and self.audio_clip and not self.is_muted.get():
+            
+            def audio_worker():
+                try:
+                    start_time = self.current_frame_idx / self.fps
+                    temp_audio_file = self.audio_clip.subclip(start_time).to_soundarray(fps=44100)
+                    pygame.mixer.music.load(pygame.sndarray.make_sound(temp_audio_file))
+                    pygame.mixer.music.play()
+                except Exception as e:
+                    logging.error(f"Errore durante la riproduzione audio: {e}")
+
+            self.audio_thread = threading.Thread(target=audio_worker, daemon=True)
+            self.audio_thread.start()
 
     def play_video(self):
         if self.is_playing and self.current_frame_idx < self.total_frames - 1:
@@ -660,3 +884,211 @@ class DataViewerWindow(tk.Toplevel):
         self.play_pause_btn.config(state=tk.DISABLED)
         self.frame_scale.config(state=tk.DISABLED)
         self.run_yolo_btn.config(state=tk.DISABLED)
+
+    # --- NUOVE FUNZIONI YOLO ---
+    def run_yolo_analysis(self):
+        if YOLO is None: return
+        
+        selected_models = {task: name for task, name in self.yolo_model_vars.items() if name.get()}
+        if not selected_models:
+            messagebox.showerror("Error", "Please select at least one YOLO model to run.", parent=self)
+            return
+
+        try:
+            self.yolo_models = {}
+            for task, model_name_var in selected_models.items(): # model_name_var is a StringVar
+                model_path = MODELS_DIR / model_name_var.get()
+                self.yolo_models[task] = YOLO(model_path)
+                logging.info(f"Loaded {task} model: {model_name_var.get()}")
+        except Exception as e:
+            logging.error(f"Failed to load/download one or more YOLO models: {e}")
+            messagebox.showerror("YOLO Error", f"Failed to load model: {e}", parent=self)
+            return
+
+        self.run_yolo_btn.config(text="Analyzing...", state=tk.DISABLED)
+        self.root.update_idletasks()
+
+        import threading
+        threading.Thread(target=self._yolo_thread_worker, daemon=True).start()
+
+    def _yolo_thread_worker(self):
+        cap = cv2.VideoCapture(str(self.video_path))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        detections = []
+        effective_device = _get_yolo_device()
+        
+        pbar_desc = f"YOLO Tracking on {effective_device.upper()}"
+
+        for frame_idx in range(total_frames):
+            ret, frame = cap.read()
+            if not ret: break
+
+            try:
+                # Esegui tutti i modelli selezionati
+                all_results = {}
+                for task, model in self.yolo_models.items():
+                    # --- NUOVO: Logica per forzare la CPU sui modelli di posa su MPS ---
+                    device_for_task = effective_device
+                    if task == 'pose' and effective_device == 'mps':
+                        logging.warning("Pose model on Apple MPS detected. Forcing CPU to avoid known bugs.")
+                        device_for_task = 'cpu'
+                    all_results[task] = model.track(frame, persist=True, verbose=False, device=device_for_task)
+
+            except Exception as e:
+                # Fallback alla CPU se l'accelerazione GPU/MPS fallisce
+                if effective_device != 'cpu':
+                    logging.warning(f"Inference on '{effective_device}' failed: {e}. Falling back to CPU.")
+                    effective_device = 'cpu'
+                    pbar_desc = f"YOLO Tracking on {effective_device.upper()} (Fallback)"
+                    for task, model in self.yolo_models.items():
+                        all_results[task] = model.track(frame, persist=True, verbose=False, device=effective_device)
+                else:
+                    raise e # Se fallisce anche sulla CPU, l'errore è più grave
+
+            # --- NUOVA LOGICA DI UNIONE RISULTATI ---
+            frame_detections = {}
+
+            for task, results in all_results.items():
+                res = results[0]
+                if res.boxes is None or res.boxes.id is None: continue
+
+                for i, box in enumerate(res.boxes):
+                    track_id = int(box.id[0])
+                    
+                    if track_id not in frame_detections:
+                        frame_detections[track_id] = {'frame_idx': frame_idx, 'track_id': track_id}
+
+                    if 'class_id' not in frame_detections[track_id]:
+                        class_id = int(box.cls[0])
+                        class_name = self.yolo_models[task].names[class_id]
+                        xyxy = box.xyxy[0].cpu().numpy()
+                        frame_detections[track_id].update({
+                            'class_id': class_id, 'class_name': class_name,
+                            'x1': xyxy[0], 'y1': xyxy[1], 'x2': xyxy[2], 'y2': xyxy[3]
+                        })
+
+                    if task == 'segment' and res.masks and i < len(res.masks.xy):
+                        frame_detections[track_id]['mask_contours'] = json.dumps(res.masks.xy[i].tolist())
+
+                    if task == 'pose' and res.keypoints and i < len(res.keypoints.xy):
+                        kpts_xy = res.keypoints.xy[i].cpu().numpy()
+                        kpts_conf_tensor = res.keypoints.conf[i] if res.keypoints.conf is not None else torch.ones(len(kpts_xy))
+                        kpts_conf = kpts_conf_tensor.cpu().numpy()[:, None]
+                        kpts_with_conf = np.hstack((kpts_xy, kpts_conf))
+                        frame_detections[track_id]['keypoints'] = json.dumps(kpts_with_conf.tolist())
+
+            detections.extend(frame_detections.values())
+            # --- FINE NUOVA LOGICA ---
+
+        cap.release()
+        self.yolo_detections_df = pd.DataFrame(detections)
+        # --- CORREZIONE: Controlla se la finestra esiste ancora prima di aggiornare la UI ---
+        if self.winfo_exists():
+            self.after(0, self.process_yolo_data)
+            self.after(0, lambda: self.run_yolo_btn.config(text="Run YOLO on Video", state=tk.NORMAL))
+        # --- FINE CORREZIONE ---
+
+    def process_yolo_data(self):
+        if self.yolo_detections_df.empty: return
+        self.detected_yolo_items = self.yolo_detections_df.groupby('class_name')['track_id'].unique().apply(list).to_dict()
+        self.yolo_filter_tree.delete(*self.yolo_filter_tree.get_children())
+        for class_name, ids in sorted(self.detected_yolo_items.items()):
+            class_node = self.yolo_filter_tree.insert("", "end", text=f"Class: {class_name}", open=True, tags=('class', class_name))
+            self.yolo_filter_tree.item(class_node, values=(True,))
+            for track_id in sorted(ids):
+                id_node = self.yolo_filter_tree.insert(class_node, "end", text=f"  ID: {track_id}", tags=('id', track_id))
+                self.yolo_filter_tree.item(id_node, values=(True,))
+        self.update_frame(self.current_frame_idx)
+
+    def on_yolo_filter_click(self, event):
+        item_id = self.yolo_filter_tree.identify_row(event.y)
+        if not item_id: return
+        is_checked = not self.yolo_filter_tree.item(item_id, 'values')[0]
+        self.yolo_filter_tree.item(item_id, values=(is_checked,))
+        tags = self.yolo_filter_tree.item(item_id, 'tags')
+        if tags and tags[0] == 'class':
+            for child_id in self.yolo_filter_tree.get_children(item_id):
+                self.yolo_filter_tree.item(child_id, values=(is_checked,))
+        
+        # Aggiorna i filtri e ridisegna
+        self.update_yolo_filters_and_redraw()
+
+    def update_yolo_filters_and_redraw(self):
+        """Aggiorna i set di filtri in base allo stato delle checkbox e ridisegna il frame."""
+        self.yolo_class_filter = set()
+        self.yolo_id_filter = set()
+        all_classes = set()
+        all_ids = set()
+
+        for class_node in self.yolo_filter_tree.get_children(''):
+            class_name = self.yolo_filter_tree.item(class_node, 'tags')[1]
+            all_classes.add(class_name)
+            if self.yolo_filter_tree.item(class_node, 'values')[0]:
+                self.yolo_class_filter.add(class_name)
+                for id_node in self.yolo_filter_tree.get_children(class_node):
+                    track_id = int(self.yolo_filter_tree.item(id_node, 'tags')[1] )
+                    all_ids.add(track_id)
+                    if self.yolo_filter_tree.item(id_node, 'values')[0]:
+                        self.yolo_id_filter.add(track_id)
+
+        # Se tutti gli elementi sono selezionati, il set di filtri dovrebbe essere vuoto per non filtrare nulla.
+        if len(self.yolo_class_filter) == len(all_classes):
+            self.yolo_class_filter.clear()
+        if len(self.yolo_id_filter) == len(all_ids):
+            self.yolo_id_filter.clear()
+
+        self.update_frame(self.current_frame_idx)
+
+    def export_video_dialog(self):
+        dialog = Toplevel(self); dialog.title("Export Video Options"); dialog.geometry("400x150"); dialog.transient(self); dialog.grab_set()
+        tk.Label(dialog, text="Configure video export:", pady=10).pack()
+        include_audio_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(dialog, text="Include Audio from Original Video", variable=include_audio_var).pack(pady=5)
+        def on_export():
+            output_path = filedialog.asksaveasfilename(title="Save Video As", defaultextension=".mp4", filetypes=[("MP4 Video", "*.mp4")])
+            if not output_path: return
+            dialog.destroy()
+            self.export_video(output_path, include_audio_var.get())
+        tk.Button(dialog, text="Export", command=on_export, font=('Helvetica', 10, 'bold')).pack(pady=10)
+
+    def export_video(self, output_path, include_audio):
+        temp_video_path = Path(output_path).with_suffix('.temp.mp4')
+        original_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)); original_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        writer = cv2.VideoWriter(str(temp_video_path), cv2.VideoWriter_fourcc(*'mp4v'), self.fps, (original_w, original_h))
+        
+        progress_win = Toplevel(self); progress_win.title("Exporting Video"); progress_win.geometry("300x80")
+        tk.Label(progress_win, text="Export in progress...").pack(pady=10)
+        progress_bar = ttk.Progressbar(progress_win, orient='horizontal', length=280, mode='determinate', maximum=self.total_frames)
+        progress_bar.pack(pady=5)
+
+        try:
+            for frame_idx in range(self.total_frames):
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = self.cap.read()
+                if not ret: break
+                self.draw_yolo_overlays(frame)
+                if not self.world_ts.empty and frame_idx < len(self.world_ts):
+                    current_ts = self.world_ts.iloc[frame_idx]['timestamp [ns]']
+                    self.draw_event_overlay(frame, current_ts)
+                writer.write(frame)
+                progress_bar['value'] = frame_idx + 1
+                progress_win.update_idletasks()
+        finally:
+            writer.release()
+            progress_win.destroy()
+
+        if include_audio and self.video_path:
+            try:
+                video_clip = VideoFileClip(str(temp_video_path)); audio_clip = AudioFileClip(str(self.video_path))
+                final_clip = video_clip.set_audio(audio_clip)
+                final_clip.write_videofile(str(output_path), codec='libx264', audio_codec='aac', logger=None)
+                final_clip.close(); audio_clip.close(); video_clip.close()
+                temp_video_path.unlink()
+                messagebox.showinfo("Success", f"Video exported with audio to:\n{output_path}", parent=self)
+            except Exception as e:
+                temp_video_path.rename(output_path)
+                messagebox.showwarning("Audio Error", f"Could not add audio: {e}\nVideo saved without audio.", parent=self)
+        else:
+            temp_video_path.rename(output_path)
+            messagebox.showinfo("Success", f"Video exported without audio to:\n{output_path}", parent=self)
