@@ -7,3 +7,5 @@ yolov8s-worldv2.pt
 yolov8x-pose.pt
 yolov8x-seg.pt
 yolov8x-worldv2.pt
+*.pyc
+*.log
