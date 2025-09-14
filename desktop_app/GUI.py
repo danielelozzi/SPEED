@@ -679,6 +679,8 @@ class SpeedApp:
         self.enriched_dir_var = tk.StringVar()
         self.external_event_file_var = tk.StringVar()
         self.events_df = pd.DataFrame()
+        self.plot_vars = {}
+        self.video_vars = {}
         self.world_timestamps_df = pd.DataFrame()
         
         self.user_defined_aois = []
@@ -825,6 +827,33 @@ class SpeedApp:
         realtime_frame.pack(fill=tk.X, pady=5, padx=10)
         tk.Button(realtime_frame, text="START REAL-TIME STREAM", command=self.start_realtime_stream, font=('Helvetica', 10, 'bold'), bg='#a5d6a7').pack(pady=5)
 
+        # --- NUOVO: Frame per il filtraggio dei risultati YOLO ---
+        yolo_filter_frame = tk.LabelFrame(main_frame, text="4. YOLO Results & Filtering", padx=10, pady=10)
+        yolo_filter_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        yolo_filter_controls = tk.Frame(yolo_filter_frame)
+        yolo_filter_controls.pack(fill=tk.X, pady=5)
+        tk.Button(yolo_filter_controls, text="Load/Refresh YOLO Results", command=self.load_yolo_results_for_filtering, font=('Helvetica', 10, 'bold'), bg='#ffcc80').pack(side=tk.LEFT)
+
+        self.yolo_filter_notebook = ttk.Notebook(yolo_filter_frame)
+        self.yolo_filter_notebook.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        self.yolo_filter_trees = {}
+        self.yolo_detections_df = pd.DataFrame()
+        self.yolo_class_filter = set()
+        self.yolo_id_filter = set()
+
+        for task in ['detection', 'segmentation', 'pose']:
+            tab = ttk.Frame(self.yolo_filter_notebook)
+            tree = ttk.Treeview(tab, columns=("#1"), show="tree headings")
+            tree.heading("#0", text="Object")
+            tree.heading("#1", text="Show")
+            tree.column("#1", width=50, anchor='center')
+            tree.pack(fill=tk.BOTH, expand=True)
+            tree.bind('<Button-1>', self.on_yolo_filter_click)
+            self.yolo_filter_trees[task] = {'tab': tab, 'tree': tree}
+        # --- FINE NUOVO FRAME ---
+
         bids_frame = tk.LabelFrame(main_frame, text="4. Data Export", padx=10, pady=10)
         bids_frame.pack(fill=tk.X, pady=5, padx=10)
         export_buttons_frame = tk.Frame(bids_frame)
@@ -844,8 +873,6 @@ class SpeedApp:
         notebook.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
         plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='5. Generate Plots')
         video_tab = tk.Frame(notebook); notebook.add(video_tab, text='6. Generate Videos')
-        self.plot_vars = {}
-        self.video_vars = {}
         yolo_tab = tk.Frame(notebook); notebook.add(yolo_tab, text='7. YOLO Results')
         self.setup_plot_tab(plot_tab)
         self.setup_video_tab(video_tab)
@@ -1307,13 +1334,14 @@ class SpeedApp:
     def launch_specific_aoi_editor(self, mode):
         try:
             video_path = next(Path(self.unenriched_dir_var.get()).glob('*.mp4'))
+            analysis_output_path = Path(self.output_dir_entry.get()) if self.output_dir_entry.get() else None
         except StopIteration:
             messagebox.showerror("Error", "No .mp4 video file found in the Un-enriched folder.")
             return
 
         editor = None
         if mode == 'static' or mode == 'dynamic_auto':
-            editor = AoiEditor(self.root, video_path)
+            editor = AoiEditor(self.root, video_path, analysis_output_path=analysis_output_path)
             editor.mode_var.set(mode)
             editor.update_ui_for_mode()
         elif mode == 'dynamic_manual':
@@ -1356,6 +1384,7 @@ class SpeedApp:
         
         try:
             output_dir_path = Path(output_dir)
+            output_dir_path.mkdir(parents=True, exist_ok=True)
             final_events_df = self.events_df.copy()
             if not final_events_df.empty:
                 cols_to_save = ['name', 'timestamp [ns]', 'recording id', 'selected']
@@ -1379,15 +1408,18 @@ class SpeedApp:
                 yolo_custom_classes = [cls.strip() for cls in custom_classes_str.split(',') if cls.strip()]
             # --- FINE MODIFICA ---
             
-            # --- NUOVO: Usa il DataFrame YOLO filtrato se esiste ---
-            yolo_df_to_use = None
-            if hasattr(self, 'yolo_detections_df') and not self.yolo_detections_df.empty:
-                yolo_df_to_use = self.yolo_detections_df
-
             # --- NUOVO: Passa il DataFrame YOLO filtrato se esiste ---
             yolo_df_to_use = None
             if hasattr(self, 'yolo_detections_df') and not self.yolo_detections_df.empty:
-                yolo_df_to_use = self.yolo_detections_df
+                yolo_cache_path = output_dir_path / 'yolo_detections_cache.csv'
+                if yolo_cache_path.exists():
+                    full_yolo_df = pd.read_csv(yolo_cache_path)
+                    # Mantieni solo le istanze (track_id) che sono presenti nel dataframe filtrato dalla GUI,
+                    # ma usa le colonne del file di cache completo per evitare errori di colonne mancanti.
+                    yolo_df_to_use = full_yolo_df[full_yolo_df['track_id'].isin(self.yolo_detections_df['track_id'])]
+                else:
+                    # Se il file di cache non esiste, usa il dataframe in memoria così com'è.
+                    yolo_df_to_use = self.yolo_detections_df
 
             run_full_analysis(
                 raw_data_path=self.raw_dir_var.get(),
@@ -1448,6 +1480,11 @@ class SpeedApp:
             video_options = {key: var.get() for key, var in self.video_vars.items()}
             video_options['output_filename'] = self.video_filename_var.get()
             video_options['heatmap_window_seconds'] = self.heatmap_video_window_var.get()
+            
+            # --- NUOVO: Passa i filtri YOLO al generatore video ---
+            video_options['yolo_class_filter'] = self.yolo_class_filter
+            video_options['yolo_id_filter'] = self.yolo_id_filter
+            # --- FINE NUOVO ---
 
             # 2. Prepara la cartella di lavoro temporanea
             final_events_df = self.events_df.copy()
@@ -1476,19 +1513,85 @@ class SpeedApp:
             logging.error(f"Video Generation Error: {e}\n{traceback.format_exc()}")
             messagebox.showerror("Video Generation Error", f"An error occurred: {e}\n\nSee log for details.")
 
+    def load_yolo_results_for_filtering(self):
+        """Carica i risultati YOLO e popola i treeview per il filtraggio."""
+        common_paths = self._get_common_paths()
+        if not common_paths: return
+        output_dir_path, _ = common_paths
+
+        yolo_cache_path = output_dir_path / 'yolo_detections_cache.csv'
+        if not yolo_cache_path.exists():
+            messagebox.showinfo("Info", "yolo_detections_cache.csv not found. Run Analysis with YOLO enabled first.", parent=self)
+            return
+
+        try:
+            self.yolo_detections_df = pd.read_csv(yolo_cache_path)
+            self._reset_yolo_filter_ui()
+
+            for task, group_df in self.yolo_detections_df.groupby('task'):
+                task_name_map = {'detect': 'detection', 'segment': 'segmentation', 'pose': 'pose'}
+                task_key = task_name_map.get(task)
+                if task_key not in self.yolo_filter_trees: continue
+
+                tree = self.yolo_filter_trees[task_key]['tree']
+                tab = self.yolo_filter_trees[task_key]['tab']
+                self.yolo_filter_notebook.add(tab, text=task.capitalize())
+
+                detected_items = group_df.groupby('class_name')['track_id'].unique().apply(list).to_dict()
+                for class_name, ids in sorted(detected_items.items()):
+                    class_node = tree.insert("", "end", text=f"Class: {class_name}", open=True, values=("☑",), tags=('class', class_name))
+                    for track_id in sorted(ids):
+                        tree.insert(class_node, "end", text=f"  ID: {track_id}", values=("☑",), tags=('id', track_id))
+            
+            self.update_yolo_filters() # Imposta i filtri iniziali (tutto selezionato)
+
+        except Exception as e:
+            logging.error(f"Could not load or process YOLO results: {e}")
+            messagebox.showerror("Error", f"Could not load or process YOLO results: {e}", parent=self)
+
+    def on_yolo_filter_click(self, event):
+        tree = event.widget
+        item_id = tree.identify_row(event.y)
+        column = tree.identify_column(event.x)
+        if not item_id or column != "#1": return
+
+        current_val = tree.item(item_id, 'values')[0]
+        new_val = "☐" if current_val == "☑" else "☑"
+        tree.set(item_id, column, new_val)
+
+        tags = tree.item(item_id, 'tags')
+        if tags and tags[0] == 'class':
+            for child_id in tree.get_children(item_id):
+                tree.set(child_id, column, new_val)
+        
+        self.update_yolo_filters()
+
+    def _reset_yolo_filter_ui(self):
+        for task_key, data in self.yolo_filter_trees.items():
+            data['tree'].delete(*data['tree'].get_children())
+            try:
+                self.yolo_filter_notebook.hide(data['tab'])
+            except tk.TclError: pass
+
     def load_yolo_results(self):
         common_paths = self._get_common_paths()
         if not common_paths: return
         output_dir_path, _ = common_paths
         try:
-            class_csv = output_dir_path / 'stats_per_class.csv'
-            if class_csv.exists(): self._populate_treeview(self.class_treeview, pd.read_csv(class_csv))
-            else: self._clear_treeview(self.class_treeview); messagebox.showinfo("Info", "stats_per_class.csv not found. Run Analysis with YOLO enabled.")
-            
-            instance_csv = output_dir_path / 'stats_per_instance.csv'
-            if instance_csv.exists():
-                self.instance_stats_df = pd.read_csv(instance_csv)
-                self._populate_instance_treeview()
+            try:
+                class_csv = output_dir_path / 'stats_per_class.csv'
+                if class_csv.exists(): self._populate_treeview(self.class_treeview, pd.read_csv(class_csv))
+                else: self._clear_treeview(self.class_treeview); messagebox.showinfo("Info", "stats_per_class.csv not found. Run Analysis with YOLO enabled.")
+                
+                instance_csv = output_dir_path / 'stats_per_instance.csv'
+                if instance_csv.exists():
+                    self.instance_stats_df = pd.read_csv(instance_csv)
+                    self._populate_instance_treeview()
+                else:
+                    self._clear_treeview(self.instance_treeview); self.instance_stats_df = pd.DataFrame()
+            except pd.errors.EmptyDataError:
+                self._clear_treeview(self.class_treeview); self._clear_treeview(self.instance_treeview)
+                messagebox.showinfo("Info", "YOLO results files are empty. No objects were detected or fixated upon.", parent=self)
             else:
                 self._clear_treeview(self.instance_treeview)
                 self.instance_stats_df = pd.DataFrame()
@@ -1523,6 +1626,25 @@ class SpeedApp:
         shown_instances = {self.instance_treeview.item(i, 'tags')[0] for i in self.instance_treeview.get_children() if self.instance_treeview.item(i, 'values')[0] == "☑"}
         filtered_df = self.instance_stats_df[self.instance_stats_df['instance_name'].isin(shown_instances)]
         # Potresti usare filtered_df per aggiornare altri grafici o analisi in futuro.
+
+    def update_yolo_filters(self):
+        """Aggiorna i set di filtri globali in base allo stato dei treeview."""
+        self.yolo_class_filter.clear()
+        self.yolo_id_filter.clear()
+        
+        for task_key, data in self.yolo_filter_trees.items():
+            tree = data['tree']
+            for class_node in tree.get_children(''):
+                if tree.item(class_node, 'values')[0] == "☑":
+                    self.yolo_class_filter.add(tree.item(class_node, 'tags')[1])
+                    for id_node in tree.get_children(class_node):
+                        if tree.item(id_node, 'values')[0] == "☑":
+                            self.yolo_id_filter.add(int(tree.item(id_node, 'tags')[1]))
+
+        if not self.yolo_detections_df.empty:
+            if len(self.yolo_class_filter) == len(self.yolo_detections_df['class_name'].unique()): self.yolo_class_filter.clear()
+            if len(self.yolo_id_filter) == len(self.yolo_detections_df['track_id'].unique()): self.yolo_id_filter.clear()
+        logging.info(f"YOLO filters updated. Classes: {len(self.yolo_class_filter) or 'All'}, IDs: {len(self.yolo_id_filter) or 'All'}")
 
     def _populate_treeview(self, treeview, dataframe):
         treeview.delete(*treeview.get_children())

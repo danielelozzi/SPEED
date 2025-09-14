@@ -245,13 +245,22 @@ class DataViewerWindow(tk.Toplevel):
 
         yolo_filter_frame = tk.LabelFrame(right_panel, text="YOLO Object Filter")
         yolo_filter_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        # --- MODIFICA: Aggiunta colonna per checkbox ---
-        self.yolo_filter_tree = ttk.Treeview(yolo_filter_frame, columns=("#1"), show="tree headings")
-        self.yolo_filter_tree.heading("#0", text="Object")
-        self.yolo_filter_tree.heading("#1", text="Show")
-        self.yolo_filter_tree.column("#1", width=50, anchor='center')
-        self.yolo_filter_tree.pack(fill=tk.BOTH, expand=True)
-        self.yolo_filter_tree.bind('<Button-1>', self.on_yolo_filter_click) # Associazione evento
+        
+        # --- MODIFICA: Sostituzione del Treeview singolo con un Notebook a schede ---
+        self.yolo_filter_notebook = ttk.Notebook(yolo_filter_frame)
+        self.yolo_filter_notebook.pack(fill=tk.BOTH, expand=True)
+        self.yolo_filter_trees = {}
+
+        for task in ['detection', 'segmentation', 'pose']:
+            tab = ttk.Frame(self.yolo_filter_notebook)
+            # Non aggiungiamo le schede subito, ma solo se ci sono dati per quel task
+            tree = ttk.Treeview(tab, columns=("#1"), show="tree headings")
+            tree.heading("#0", text="Object")
+            tree.heading("#1", text="Show")
+            tree.column("#1", width=50, anchor='center')
+            tree.pack(fill=tk.BOTH, expand=True)
+            tree.bind('<Button-1>', self.on_yolo_filter_click)
+            self.yolo_filter_trees[task] = {'tab': tab, 'tree': tree}
 
         metadata_frame = tk.LabelFrame(right_panel, text="File Metadata")
         metadata_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -507,8 +516,8 @@ class DataViewerWindow(tk.Toplevel):
     def _reset_and_load_data(self):
         """Resetta lo stato e carica i dati base come events.csv."""
         self.events_df = pd.DataFrame(columns=['name', 'timestamp [ns]', 'selected', 'source', 'recording id'])
-        self.yolo_detections_df = pd.DataFrame()
-        self.yolo_filter_tree.delete(*self.yolo_filter_tree.get_children())
+        self.yolo_detections_df = pd.DataFrame() # Resetta il dataframe
+        self._reset_yolo_filter_ui() # Resetta la UI dei filtri
         self.selected_event_index = None
         self.is_playing = False
 
@@ -768,6 +777,8 @@ class DataViewerWindow(tk.Toplevel):
         self.selected_event_index = clicked_event
         self.dragged_event_index = clicked_event
         if clicked_event is None:
+            # Se si clicca sulla timeline, ferma la riproduzione
+            if self.is_playing: self.toggle_play()
             self.update_frame((event.x / self.timeline_canvas.winfo_width()) * self.total_frames)
         self.draw_timeline()
 
@@ -970,92 +981,109 @@ class DataViewerWindow(tk.Toplevel):
                     raise e # Se fallisce anche sulla CPU, l'errore è più grave
 
             # --- NUOVA LOGICA DI UNIONE RISULTATI ---
-            frame_detections = {}
+            frame_detections_list = []
 
             for task, results in all_results.items():
                 res = results[0]
                 if res.boxes is None or res.boxes.id is None: continue
 
+                # Usa il nome del task base (es. 'detect' da 'detect_v8')
+                task_base_name = task.split('_')[0]
+
                 for i, box in enumerate(res.boxes):
                     track_id = int(box.id[0])
+                    class_id = int(box.cls[0])
+                    class_name = self.yolo_models[task].names[class_id]
+                    xyxy = box.xyxy[0].cpu().numpy()
+
+                    detection_data = {
+                        'frame_idx': frame_idx, 'track_id': track_id, 'task': task_base_name,
+                        'class_id': class_id, 'class_name': class_name,
+                        'x1': xyxy[0], 'y1': xyxy[1], 'x2': xyxy[2], 'y2': xyxy[3]
+                    }
                     
-                    if track_id not in frame_detections:
-                        frame_detections[track_id] = {'frame_idx': frame_idx, 'track_id': track_id}
-
-                    if 'class_id' not in frame_detections[track_id]:
-                        class_id = int(box.cls[0])
-                        class_name = self.yolo_models[task].names[class_id]
-                        xyxy = box.xyxy[0].cpu().numpy()
-                        frame_detections[track_id].update({
-                            'class_id': class_id, 'class_name': class_name,
-                            'x1': xyxy[0], 'y1': xyxy[1], 'x2': xyxy[2], 'y2': xyxy[3]
-                        })
-
                     if task == 'segment' and res.masks and i < len(res.masks.xy):
-                        frame_detections[track_id]['mask_contours'] = json.dumps(res.masks.xy[i].tolist())
+                        detection_data['mask_contours'] = json.dumps(res.masks.xy[i].tolist())
 
                     if task == 'pose' and res.keypoints and i < len(res.keypoints.xy):
                         kpts_xy = res.keypoints.xy[i].cpu().numpy()
                         kpts_conf_tensor = res.keypoints.conf[i] if res.keypoints.conf is not None else torch.ones(len(kpts_xy))
                         kpts_conf = kpts_conf_tensor.cpu().numpy()[:, None]
                         kpts_with_conf = np.hstack((kpts_xy, kpts_conf))
-                        frame_detections[track_id]['keypoints'] = json.dumps(kpts_with_conf.tolist())
+                        detection_data['keypoints'] = json.dumps(kpts_with_conf.tolist())
+                    
+                    frame_detections_list.append(detection_data)
 
-            detections.extend(frame_detections.values())
+            detections.extend(frame_detections_list)
             # --- FINE NUOVA LOGICA ---
 
         cap.release()
         self.yolo_detections_df = pd.DataFrame(detections)
         # --- CORREZIONE: Controlla se la finestra esiste ancora prima di aggiornare la UI ---
         if self.winfo_exists():
-            self.after(0, self.process_yolo_data)
+            self.after(0, self.process_yolo_data) # Chiama la funzione aggiornata
             self.after(0, lambda: self.run_yolo_btn.config(text="Run YOLO on Video", state=tk.NORMAL))
         # --- FINE CORREZIONE ---
 
     def process_yolo_data(self):
         if self.yolo_detections_df.empty: return
-        self.detected_yolo_items = self.yolo_detections_df.groupby('class_name')['track_id'].unique().apply(list).to_dict()
-        self.yolo_filter_tree.delete(*self.yolo_filter_tree.get_children())
-        for class_name, ids in sorted(self.detected_yolo_items.items()):
-            # --- MODIFICA: Inserimento con valore per checkbox ---
-            class_node = self.yolo_filter_tree.insert("", "end", text=f"Class: {class_name}", open=True, values=("☑",), tags=('class', class_name))
-            for track_id in sorted(ids):
-                self.yolo_filter_tree.insert(class_node, "end", text=f"  ID: {track_id}", values=("☑",), tags=('id', track_id))
+        
+        self._reset_yolo_filter_ui()
+
+        # Raggruppa per task e popola ogni scheda/treeview
+        for task, group_df in self.yolo_detections_df.groupby('task'):
+            task_name_map = {'detect': 'detection', 'segment': 'segmentation', 'pose': 'pose'}
+            task_key = task_name_map.get(task)
+            if task_key not in self.yolo_filter_trees: continue
+
+            tree = self.yolo_filter_trees[task_key]['tree']
+            tab = self.yolo_filter_trees[task_key]['tab']
+            
+            # Aggiungi la scheda al notebook solo se ci sono dati
+            self.yolo_filter_notebook.add(tab, text=task.capitalize())
+
+            detected_items = group_df.groupby('class_name')['track_id'].unique().apply(list).to_dict()
+            
+            for class_name, ids in sorted(detected_items.items()):
+                class_node = tree.insert("", "end", text=f"Class: {class_name}", open=True, values=("☑",), tags=('class', class_name))
+                for track_id in sorted(ids):
+                    tree.insert(class_node, "end", text=f"  ID: {track_id}", values=("☑",), tags=('id', track_id))
+
         self.update_frame(self.current_frame_idx)
 
     def on_yolo_filter_click(self, event):
         # --- MODIFICA: Logica per gestire il click sulla colonna checkbox ---
-        item_id = self.yolo_filter_tree.identify_row(event.y)
-        column = self.yolo_filter_tree.identify_column(event.x)
+        # Identifica quale treeview è stato cliccato
+        tree = event.widget
+        item_id = tree.identify_row(event.y)
+        column = tree.identify_column(event.x)
         
         # Agisci solo se si clicca sulla colonna "Show"
         if not item_id or column != "#1":
             return
 
-        current_val = self.yolo_filter_tree.item(item_id, 'values')[0]
+        current_val = tree.item(item_id, 'values')[0]
         new_val = "☐" if current_val == "☑" else "☑"
-        self.yolo_filter_tree.set(item_id, column, new_val)
+        tree.set(item_id, column, new_val)
 
-        tags = self.yolo_filter_tree.item(item_id, 'tags')
+        tags = tree.item(item_id, 'tags')
         if tags and tags[0] == 'class':
             # Se si clicca su una classe, aggiorna tutti i suoi figli (ID)
-            for child_id in self.yolo_filter_tree.get_children(item_id):
-                self.yolo_filter_tree.set(child_id, column, new_val)
+            for child_id in tree.get_children(item_id):
+                tree.set(child_id, column, new_val)
         
         self.update_yolo_filters_and_redraw()
 
-    def on_yolo_filter_click_old(self, event):
-        item_id = self.yolo_filter_tree.identify_row(event.y)
-        if not item_id: return
-        is_checked = not self.yolo_filter_tree.item(item_id, 'values')[0]
-        self.yolo_filter_tree.item(item_id, values=(is_checked,))
-        tags = self.yolo_filter_tree.item(item_id, 'tags')
-        if tags and tags[0] == 'class':
-            for child_id in self.yolo_filter_tree.get_children(item_id):
-                self.yolo_filter_tree.item(child_id, values=(is_checked,))
-        
-        # Aggiorna i filtri e ridisegna
-        self.update_yolo_filters_and_redraw()
+    def _reset_yolo_filter_ui(self):
+        """Pulisce tutti i treeview e nasconde tutte le schede."""
+        for task_key, data in self.yolo_filter_trees.items():
+            data['tree'].delete(*data['tree'].get_children())
+            try:
+                # Nasconde la scheda se è già visibile
+                self.yolo_filter_notebook.hide(data['tab'])
+            except tk.TclError:
+                # La scheda non era ancora stata aggiunta, va bene
+                pass
 
     def update_yolo_filters_and_redraw(self):
         """Aggiorna i set di filtri in base allo stato delle checkbox e ridisegna il frame."""
@@ -1063,24 +1091,30 @@ class DataViewerWindow(tk.Toplevel):
         self.yolo_id_filter = set()
         all_classes = set()
         all_ids = set()
-
-        for class_node in self.yolo_filter_tree.get_children(''):
-            class_name = self.yolo_filter_tree.item(class_node, 'tags')[1]
-            all_classes.add(class_name)
-            # --- MODIFICA: Controlla il testo del checkbox ---
-            if self.yolo_filter_tree.item(class_node, 'values')[0] == "☑":
-                self.yolo_class_filter.add(class_name)
-                for id_node in self.yolo_filter_tree.get_children(class_node):
-                    track_id = int(self.yolo_filter_tree.item(id_node, 'tags')[1] )
-                    all_ids.add(track_id)
-                    if self.yolo_filter_tree.item(id_node, 'values')[0] == "☑":
-                        self.yolo_id_filter.add(track_id)
+        
+        # Itera su ogni treeview nel notebook
+        for task_key, data in self.yolo_filter_trees.items():
+            tree = data['tree']
+            for class_node in tree.get_children(''):
+                class_name = tree.item(class_node, 'tags')[1]
+                all_classes.add(class_name)
+                
+                if tree.item(class_node, 'values')[0] == "☑":
+                    self.yolo_class_filter.add(class_name)
+                    for id_node in tree.get_children(class_node):
+                        track_id = int(tree.item(id_node, 'tags')[1])
+                        all_ids.add(track_id)
+                        if tree.item(id_node, 'values')[0] == "☑":
+                            self.yolo_id_filter.add(track_id)
 
         # Se tutti gli elementi sono selezionati, il set di filtri dovrebbe essere vuoto per non filtrare nulla.
-        if len(self.yolo_class_filter) == len(all_classes):
-            self.yolo_class_filter.clear()
-        if len(self.yolo_id_filter) == len(all_ids):
-            self.yolo_id_filter.clear()
+        # Questa logica potrebbe essere imprecisa con più treeview, ma per ora la manteniamo semplice.
+        # Un approccio migliore sarebbe non filtrare se i set sono vuoti.
+        if not self.yolo_detections_df.empty:
+            if len(self.yolo_class_filter) == len(self.yolo_detections_df['class_name'].unique()):
+                self.yolo_class_filter.clear()
+            if len(self.yolo_id_filter) == len(self.yolo_detections_df['track_id'].unique()):
+                self.yolo_id_filter.clear()
 
         self.update_frame(self.current_frame_idx)
 

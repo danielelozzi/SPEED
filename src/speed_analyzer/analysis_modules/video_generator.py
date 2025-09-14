@@ -4,8 +4,8 @@ import numpy as np
 import cv2
 from pathlib import Path
 from tqdm import tqdm
-import traceback
-from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip # Importazione corretta
+import traceback, logging
+from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip
 
 # --- Constants ---
 NS_TO_S = 1e9 # Conversion factor from nanoseconds to seconds
@@ -310,16 +310,17 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
     yolo_detections = pd.DataFrame()
     yolo_class_map = {}
     if options.get('overlay_yolo'):
-        print("YOLO overlay enabled. Attempting to load detection data...")
         yolo_cache_path = output_dir / 'yolo_detections_cache.csv'
-        id_map_path = output_dir / 'class_id_map.csv'
         try:
             yolo_detections = pd.read_csv(yolo_cache_path)
-            id_map = pd.read_csv(id_map_path)
-            yolo_class_map = pd.Series(id_map.class_name.values, index=id_map.track_id).to_dict()
-            print("Successfully loaded YOLO detection data and class map.")
+            # --- NUOVO: Applica i filtri se forniti ---
+            if options.get('yolo_class_filter'):
+                yolo_detections = yolo_detections[yolo_detections['class_name'].isin(options['yolo_class_filter'])]
+            if options.get('yolo_id_filter'):
+                yolo_detections = yolo_detections[yolo_detections['track_id'].isin(options['yolo_id_filter'])]
+            print(f"YOLO overlay enabled. Loaded and filtered {len(yolo_detections)} detections.")
         except FileNotFoundError:
-            print(f"WARNING: YOLO overlay is ON, but a required file was not found: {yolo_cache_path} or {id_map_path}")
+            print(f"WARNING: YOLO overlay is ON, but 'yolo_detections_cache.csv' was not found in {output_dir}")
             options['overlay_yolo'] = False
     
     # Setup for pupil plot
@@ -488,8 +489,7 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                             
                             cv2.rectangle(frame, (x1, y1), (x2, y2), YOLO_BOX_COLOR, YOLO_THICKNESS)
                             track_id = int(det['track_id'])
-                            class_name = yolo_class_map.get(track_id, f"ID:{track_id}")
-                            cv2.putText(frame, class_name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, YOLO_TEXT_COLOR, 2)
+                            cv2.putText(frame, f"{det['class_name']}:{track_id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, YOLO_TEXT_COLOR, 2)
 
                     if options.get('overlay_gaze') and pd.notna(frame_data.get('gaze x [px]')):
                         gaze_x, gaze_y = frame_data['gaze x [px]'], frame_data['gaze y [px]']
@@ -569,23 +569,22 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                 print("Adding audio to the generated video...")
                 video_clip = VideoFileClip(str(temp_video_path))
                 original_audio_clip = AudioFileClip(str(external_vid_path))
-                
-                # Taglia l'audio in base ai segmenti di trimming, se l'opzione è attiva
-                if options.get('trim_to_events') and frame_segments:
-                    start_frame, end_frame = frame_segments[0]
-                    start_time = start_frame / fps
-                    end_time = end_frame / fps
-                    final_audio = original_audio_clip.subclip(start_time, end_time) # Corretto
-                else:
-                    final_audio = original_audio_clip # Corretto
-                final_clip = video_clip.set_audio(final_audio) # Corretto
+
+                # Se il video è stato tagliato, taglia anche l'audio per farlo corrispondere
+                if options.get('trim_to_events') and frame_segments and sum(end - start for start, end in frame_segments) < total_frames:
+                    # Crea una lista di clip audio tagliati e concatenali
+                    audio_segments = [original_audio_clip.subclip(start/fps, end/fps) for start, end in frame_segments]
+                    final_audio = CompositeAudioClip(audio_segments)
+                else: # Altrimenti usa l'audio completo
+                    final_audio = original_audio_clip
+
+                final_clip = video_clip.set_audio(final_audio)
 
                 # Salva il video finale
                 final_clip.write_videofile(str(video_out_path), codec='libx264', audio_codec='aac', logger=None)
                 
-                final_clip.close()
-                if 'final_audio' in locals():
-                    final_audio.close()
+                # Chiudi tutte le clip
+                final_clip.close(); video_clip.close(); original_audio_clip.close()
                 
                 # Rimuovi il file temporaneo senza audio
                 temp_video_path.unlink(missing_ok=True)

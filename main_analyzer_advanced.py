@@ -131,12 +131,18 @@ def run_core_analysis(
         # --- MODIFIED: Actual execution of YOLO analysis ---
         if run_yolo:
             print("\n>>> RUNNING YOLO OBJECT DETECTION AND CORRELATION...")
-            yolo_analyzer.run_yolo_analysis(
-                data_dir=working_data_dir,
-                output_dir=output_dir,
-                subj_name=subj_name
-            )
-            print(">>> YOLO analysis finished.")
+            try:
+                yolo_analyzer.run_yolo_analysis(
+                    data_dir=working_data_dir,
+                    output_dir=output_dir,
+                    subj_name=subj_name
+                )
+                print(">>> YOLO analysis finished.")
+            except KeyError as ke:
+                print(f"!!! A KeyError occurred during YOLO analysis: {ke}")
+                print("!!! This might be due to an outdated 'yolo_detections_cache.csv' file.")
+                print("!!! Please try deleting the cache file in the output directory and run the analysis again.")
+                raise
         # ------------------------------------------------------
         
         print(f"\n--- CORE ANALYSIS FOR {subj_name} COMPLETED ---")

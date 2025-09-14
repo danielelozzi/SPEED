@@ -98,6 +98,7 @@ class RealtimeNeonAnalyzer:
         # --- NUOVO: Filtri per la visualizzazione YOLO ---
         self.yolo_class_filter = set() # Se vuoto, mostra tutto
         self.yolo_id_filter = set()    # Se vuoto, mostra tutto
+        self.logged_mps_pose_warning = False
 
 
     def _initialize_yolo_model(self, model_name, task, custom_classes):
@@ -174,8 +175,9 @@ class RealtimeNeonAnalyzer:
 
         # --- NUOVO: Logica per forzare la CPU sui modelli di posa su MPS ---
         device = 'cpu' if torch.backends.mps.is_available() and 'pose' in self.yolo_model.task else None
-        if device == 'cpu':
+        if device == 'cpu' and not self.logged_mps_pose_warning:
             logging.warning("Pose model on Apple MPS detected. Forcing CPU to avoid known bugs.")
+            self.logged_mps_pose_warning = True
         
         # Se device è None, ultralytics sceglierà il migliore disponibile (es. MPS, CUDA)
         results = self.yolo_model.track(scene_img, persist=True, verbose=False, device=device)
@@ -252,7 +254,7 @@ class RealtimeNeonAnalyzer:
         if self.include_audio:
             print("Adding audio to the recording...")
             try:
-                from moviepy.editor import VideoFileClip, AudioFileClip
+                from moviepy import VideoFileClip, AudioFileClip
                 temp_video_path = self.output_folder / 'external_no_audio.mp4'
                 audio_path = self.output_folder / 'audio.mp4' # L'API salva l'audio qui
                 final_video_path = self.output_folder / 'external.mp4'

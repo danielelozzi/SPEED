@@ -4,6 +4,9 @@ from tkinter import ttk, messagebox, simpledialog
 import cv2
 from PIL import Image, ImageTk
 import numpy as np
+import pygame
+from moviepy import VideoFileClip
+from pathlib import Path
 
 class ManualAoiEditor(tk.Toplevel):
     """
@@ -12,7 +15,7 @@ class ManualAoiEditor(tk.Toplevel):
     """
     def __init__(self, parent, video_path):
         super().__init__(parent)
-        self.title("Manual Dynamic AOI Editor (Keyframes)")
+        self.title("Manual Dynamic AOI Editor")
         self.geometry("1000x800")
         self.transient(parent)
         self.grab_set()
@@ -22,6 +25,7 @@ class ManualAoiEditor(tk.Toplevel):
             self.destroy()
             return
 
+        self.video_path = video_path
         self.cap = cv2.VideoCapture(str(video_path))
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) if self.cap.get(cv2.CAP_PROP_FPS) > 0 else 30
@@ -39,7 +43,13 @@ class ManualAoiEditor(tk.Toplevel):
         self.start_x = None
         self.start_y = None
         self.current_frame_idx = 0
-        self.is_updating = False
+        self.is_updating_slider = False
+        self.is_playing = False
+
+        # Audio
+        self.audio_clip = None
+        self.temp_audio_file_path = None
+        self.is_muted = tk.BooleanVar(value=True)
 
         # --- GUI Setup ---
         main_frame = tk.Frame(self)
@@ -57,6 +67,11 @@ class ManualAoiEditor(tk.Toplevel):
 
         controls_frame = tk.Frame(main_frame)
         controls_frame.pack(fill=tk.X, padx=10, side=tk.BOTTOM)
+
+        self.play_pause_btn = tk.Button(controls_frame, text="▶ Play", command=self.toggle_play)
+        self.play_pause_btn.pack(side=tk.LEFT, padx=5)
+        self.mute_btn = tk.Button(controls_frame, text="🔇 Unmute", command=self.toggle_mute)
+        self.mute_btn.pack(side=tk.LEFT, padx=5)
         
         self.frame_scale = ttk.Scale(controls_frame, from_=0, to=self.total_frames - 1, orient=tk.HORIZONTAL, command=self.seek_frame)
         self.frame_scale.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=5)
@@ -70,22 +85,87 @@ class ManualAoiEditor(tk.Toplevel):
         tk.Button(action_frame, text="Save & Close", command=self.save_and_close, font=('Helvetica', 10, 'bold')).pack(side=tk.RIGHT, padx=10)
         
         self.update_frame(0)
+        self._load_audio()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
+    def _load_audio(self):
+        try:
+            pygame.mixer.init()
+            video = VideoFileClip(str(self.video_path))
+            if video.audio:
+                self.audio_clip = video.audio
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    self.temp_audio_file_path = Path(f.name)
+                self.audio_clip.write_audiofile(str(self.temp_audio_file_path), logger=None)
+                pygame.mixer.music.load(str(self.temp_audio_file_path))
+            else:
+                self.audio_clip = None
+        except Exception as e:
+            self.audio_clip = None
+        finally:
+            self.update_mute_button_text()
+
     def on_close(self):
+        self.is_playing = False
+        pygame.mixer.music.stop()
         self.cap.release()
+        if self.temp_audio_file_path and self.temp_audio_file_path.exists():
+            try:
+                self.temp_audio_file_path.unlink()
+            except OSError:
+                pass
         self.destroy()
 
     def seek_frame(self, frame_idx_str):
-        if self.is_updating: return
+        if self.is_updating_slider: return
+        if self.is_playing: self.toggle_play()
         self.update_frame(int(float(frame_idx_str)))
 
-    def update_frame(self, frame_idx):
-        if self.is_updating: return
-        self.is_updating = True
+    def toggle_play(self):
+        self.is_playing = not self.is_playing
+        if self.is_playing:
+            self.play_pause_btn.config(text="❚❚ Pause")
+            self.play_video()
+            if not self.is_muted.get():
+                self.play_audio()
+        else:
+            self.play_pause_btn.config(text="▶ Play")
+            pygame.mixer.music.stop()
 
+    def play_video(self):
+        if self.is_playing and self.current_frame_idx < self.total_frames - 1:
+            self.update_frame(self.current_frame_idx + 1)
+            self.after(int(1000 / self.fps), self.play_video)
+        else:
+            self.is_playing = False
+            self.play_pause_btn.config(text="▶ Play")
+
+    def play_audio(self):
+        if self.is_playing and self.audio_clip and not self.is_muted.get():
+            start_time = self.current_frame_idx / self.fps
+            try:
+                pygame.mixer.music.play(start=start_time)
+            except pygame.error as e:
+                # A volte pygame non è pronto, specialmente dopo un seek. Ignora l'errore.
+                logging.warning(f"Pygame audio error (ignorable): {e}")
+
+    def toggle_mute(self):
+        self.is_muted.set(not self.is_muted.get())
+        self.update_mute_button_text()
+        if self.is_playing:
+            if self.is_muted.get(): pygame.mixer.music.stop()
+            else: self.play_audio()
+
+    def update_mute_button_text(self):
+        self.mute_btn.config(text="🔇 Unmute" if self.is_muted.get() else "🔊 Mute")
+        if not self.audio_clip: self.mute_btn.config(state=tk.DISABLED, text="No Audio")
+
+    def update_frame(self, frame_idx):
         self.current_frame_idx = max(0, min(int(frame_idx), self.total_frames - 1))
+        self.is_updating_slider = True
         self.frame_scale.set(self.current_frame_idx)
+        self.is_updating_slider = False
         self.time_label.config(text=f"Frame: {self.current_frame_idx} / {self.total_frames}")
 
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame_idx)
@@ -104,8 +184,6 @@ class ManualAoiEditor(tk.Toplevel):
             
             self.draw_current_rect()
             self.draw_timeline()
-
-        self.is_updating = False
 
     def draw_current_rect(self):
         self.video_canvas.delete("rect")
@@ -148,6 +226,7 @@ class ManualAoiEditor(tk.Toplevel):
         self.timeline_canvas.create_line(cursor_x, 0, cursor_x, 60, fill='red', width=2)
 
     def handle_timeline_click(self, event):
+        if self.is_playing: self.toggle_play()
         new_frame = int((event.x / self.timeline_canvas.winfo_width()) * self.total_frames)
         self.update_frame(new_frame)
 
