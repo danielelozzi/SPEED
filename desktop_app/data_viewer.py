@@ -136,6 +136,7 @@ class DataViewerWindow(tk.Toplevel):
         # --- NUOVO: Gestione Audio ---
         self.audio_clip = None
         self.audio_thread = None
+        self.temp_audio_file_path = None
         self.is_muted = tk.BooleanVar(value=True)
 
         self.video_path = None
@@ -279,6 +280,8 @@ class DataViewerWindow(tk.Toplevel):
         if self.audio_thread and self.audio_thread.is_alive():
             pygame.mixer.music.stop()
         if self.cap:
+            if self.temp_audio_file_path and self.temp_audio_file_path.exists():
+                self.temp_audio_file_path.unlink() # Pulisce il file audio temporaneo
             self.saved_df = self.events_df # Salva lo stato corrente in caso di chiusura
             self.cap.release()
         self.destroy()
@@ -287,17 +290,25 @@ class DataViewerWindow(tk.Toplevel):
         """Carica la traccia audio dal file video in memoria."""
         if not self.video_path:
             self.audio_clip = None
+            self.temp_audio_file_path = None
             return
         try:
             video = VideoFileClip(str(self.video_path))
             if video.audio:
                 self.audio_clip = video.audio
+                # --- MODIFICA: Salva l'audio in un file temporaneo una sola volta ---
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    self.temp_audio_file_path = Path(f.name)
+                self.audio_clip.write_audiofile(str(self.temp_audio_file_path), logger=None)
+                pygame.mixer.music.load(str(self.temp_audio_file_path))
                 logging.info("Traccia audio caricata con successo.")
             else:
                 self.audio_clip = None
+                self.temp_audio_file_path = None
                 logging.warning("Il video non contiene una traccia audio.")
         except Exception as e:
             self.audio_clip = None
+            self.temp_audio_file_path = None
             logging.error(f"Impossibile caricare l'audio: {e}")
         finally:
             self.update_mute_button_text()
@@ -305,8 +316,12 @@ class DataViewerWindow(tk.Toplevel):
     def toggle_mute(self):
         self.is_muted.set(not self.is_muted.get())
         self.update_mute_button_text()
-        if not self.is_muted.get() and self.is_playing:
-            self.play_audio()
+        if self.is_playing:
+            if self.is_muted.get():
+                pygame.mixer.music.stop()
+            else:
+                # Se si sta già suonando, riavvia l'audio dal punto giusto
+                self.play_audio()
 
     def update_mute_button_text(self):
         self.mute_btn.config(text="🔇 Unmute" if self.is_muted.get() else "🔊 Mute")
@@ -834,27 +849,23 @@ class DataViewerWindow(tk.Toplevel):
         if self.is_playing:
             self.play_pause_btn.config(text="❚❚ Pause")
             self.play_video()
-            self.play_audio()
+            if not self.is_muted.get():
+                self.play_audio()
         else:
             self.play_pause_btn.config(text="▶ Play")
-            if self.audio_thread and self.audio_thread.is_alive():
-                pygame.mixer.music.stop()
+            pygame.mixer.music.stop()
 
     def play_audio(self):
         """Riproduce l'audio in un thread separato."""
-        if self.is_playing and self.audio_clip and not self.is_muted.get():
-            
-            def audio_worker():
-                try:
-                    start_time = self.current_frame_idx / self.fps
-                    temp_audio_file = self.audio_clip.subclip(start_time).to_soundarray(fps=44100)
-                    pygame.mixer.music.load(pygame.sndarray.make_sound(temp_audio_file))
-                    pygame.mixer.music.play()
-                except Exception as e:
-                    logging.error(f"Errore durante la riproduzione audio: {e}")
+        if not (self.is_playing and self.audio_clip and not self.is_muted.get()):
+            return
 
-            self.audio_thread = threading.Thread(target=audio_worker, daemon=True)
-            self.audio_thread.start()
+        try:
+            start_time = self.current_frame_idx / self.fps
+            # --- MODIFICA: Usa il parametro 'start' per la riproduzione sincronizzata ---
+            pygame.mixer.music.play(start=start_time)
+        except Exception as e:
+            logging.error(f"Errore durante la riproduzione audio: {e}")
 
     def play_video(self):
         if self.is_playing and self.current_frame_idx < self.total_frames - 1:
