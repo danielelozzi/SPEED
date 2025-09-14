@@ -1218,13 +1218,22 @@ class SpeedApp:
         video_path = next(Path(self.unenriched_dir_var.get()).glob('*.mp4'))
         # --- MODIFICA: Passa anche i risultati YOLO se disponibili ---
         yolo_results_path = Path(self.output_dir_entry.get()) / 'yolo_detections_cache.csv'
-        yolo_df = pd.read_csv(yolo_results_path) if yolo_results_path.exists() else None
+        
+        # Se abbiamo già un yolo_df filtrato in memoria, usiamo quello. Altrimenti, carichiamo dal file.
+        yolo_df = self.yolo_detections_df if hasattr(self, 'yolo_detections_df') and not self.yolo_detections_df.empty else None
+        if yolo_df is None and yolo_results_path.exists():
+            yolo_df = pd.read_csv(yolo_results_path)
+
         manager = InteractiveVideoEditor(self.root, video_path, self.events_df, self.world_timestamps_df, yolo_df)
         self.root.wait_window(manager)
+        
         if manager.saved_df is not None:
             self.events_df = manager.saved_df.reset_index(drop=True)
             self.update_event_summary_display()
             logging.info("Event list updated via video editor.")
+        if manager.saved_yolo_df is not None:
+            self.yolo_detections_df = manager.saved_yolo_df
+            logging.info(f"YOLO detections updated via video editor. {len(self.yolo_detections_df)} detections remaining.")
 
     def open_video_editor_standalone(self):
         """
@@ -1369,6 +1378,11 @@ class SpeedApp:
             if custom_classes_str and custom_classes_str != "person, car, dog": # Ignora il placeholder
                 yolo_custom_classes = [cls.strip() for cls in custom_classes_str.split(',') if cls.strip()]
             # --- FINE MODIFICA ---
+            
+            # --- NUOVO: Usa il DataFrame YOLO filtrato se esiste ---
+            yolo_df_to_use = None
+            if hasattr(self, 'yolo_detections_df') and not self.yolo_detections_df.empty:
+                yolo_df_to_use = self.yolo_detections_df
 
             run_full_analysis(
                 raw_data_path=self.raw_dir_var.get(),
@@ -1379,7 +1393,8 @@ class SpeedApp:
                 events_df=final_events_df,
                 yolo_models=yolo_models_to_run if self.yolo_var.get() else None,
                 yolo_custom_classes=yolo_custom_classes, # Nuovo
-                defined_aois=self.user_defined_aois
+                defined_aois=self.user_defined_aois,
+                yolo_detections_df=yolo_df_to_use # Passa il df filtrato
             )
 
             messagebox.showinfo("Success", f"Full analysis completed.\nResults in: {output_dir}")

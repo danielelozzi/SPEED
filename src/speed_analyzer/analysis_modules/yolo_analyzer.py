@@ -127,7 +127,8 @@ def run_yolo_analysis(
     output_dir: Path, 
     subj_name: str,
     yolo_models: Optional[typing.Dict[str, str]] = None,
-    custom_classes: Optional[List[str]] = None
+    custom_classes: Optional[List[str]] = None,
+    yolo_detections_df: Optional[pd.DataFrame] = None
 ):
     """
     Runs YOLO object detection, correlates with fixations, and saves statistics.
@@ -166,10 +167,14 @@ def run_yolo_analysis(
         logging.error(f"Error loading/syncing eye-tracking data for YOLO: {e}. Skipping YOLO analysis.")
         return
 
-    yolo_cache_path = output_dir / 'yolo_detections_cache.csv'
-    if yolo_cache_path.exists():
-        logging.info(f"YOLO cache found. Loading detections from: {yolo_cache_path}")
-        detections_df = pd.read_csv(yolo_cache_path)
+    if yolo_detections_df is not None and not yolo_detections_df.empty:
+        logging.info("Using pre-filtered YOLO detections passed from the GUI.")
+        detections_df = yolo_detections_df
+    else:
+        yolo_cache_path = output_dir / 'yolo_detections_cache.csv'
+        if yolo_cache_path.exists():
+            logging.info(f"YOLO cache found. Loading detections from: {yolo_cache_path}")
+            detections_df = pd.read_csv(yolo_cache_path)
     else:
         logging.info("YOLO cache not found. Starting video tracking...")
         cap = cv2.VideoCapture(str(video_path))
@@ -263,8 +268,9 @@ def run_yolo_analysis(
         pbar.close()
         
         detections_df = pd.DataFrame(detections)
-        logging.info(f"Saving YOLO detections to cache at: {yolo_cache_path}")
-        detections_df.to_csv(yolo_cache_path, index=False)
+        if not yolo_cache_path.exists():
+            logging.info(f"Saving YOLO detections to cache at: {yolo_cache_path}")
+            detections_df.to_csv(yolo_cache_path, index=False)
 
     # --- INIZIA LA LOGICA DI ANALISI ---
     # Crea sempre i file di output, anche se vuoti.

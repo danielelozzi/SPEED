@@ -80,6 +80,7 @@ class InteractiveVideoEditor(tk.Toplevel):
             self.world_ts = world_timestamps_df
 
         self.saved_df = None
+        self.saved_yolo_df = None
         self.is_playing = False
         self.current_frame_idx = 0
         
@@ -703,6 +704,13 @@ class InteractiveVideoEditor(tk.Toplevel):
         self.is_playing = False
         cols_to_save = ['name', 'timestamp [ns]', 'recording id', 'selected', 'source']
         self.saved_df = self.events_df[[col for col in cols_to_save if col in self.events_df.columns]]
+
+        # --- NUOVO: Salva il DataFrame YOLO filtrato ---
+        if not self.yolo_df.empty:
+            shown_instances = self.yolo_df['class_name'].isin(self.yolo_class_filter or self.yolo_df['class_name'].unique()) & \
+                              self.yolo_df['track_id'].isin(self.yolo_id_filter or self.yolo_df['track_id'].unique())
+            self.saved_yolo_df = self.yolo_df[shown_instances].copy()
+
         self.on_close()
 
     def export_video_dialog(self):
