@@ -244,9 +244,13 @@ class DataViewerWindow(tk.Toplevel):
 
         yolo_filter_frame = tk.LabelFrame(right_panel, text="YOLO Object Filter")
         yolo_filter_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        self.yolo_filter_tree = ttk.Treeview(yolo_filter_frame, show="tree")
+        # --- MODIFICA: Aggiunta colonna per checkbox ---
+        self.yolo_filter_tree = ttk.Treeview(yolo_filter_frame, columns=("#1"), show="tree headings")
+        self.yolo_filter_tree.heading("#0", text="Object")
+        self.yolo_filter_tree.heading("#1", text="Show")
+        self.yolo_filter_tree.column("#1", width=50, anchor='center')
         self.yolo_filter_tree.pack(fill=tk.BOTH, expand=True)
-        self.yolo_filter_tree.bind('<Button-1>', self.on_yolo_filter_click)
+        self.yolo_filter_tree.bind('<Button-1>', self.on_yolo_filter_click) # Associazione evento
 
         metadata_frame = tk.LabelFrame(right_panel, text="File Metadata")
         metadata_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -1002,14 +1006,34 @@ class DataViewerWindow(tk.Toplevel):
         self.detected_yolo_items = self.yolo_detections_df.groupby('class_name')['track_id'].unique().apply(list).to_dict()
         self.yolo_filter_tree.delete(*self.yolo_filter_tree.get_children())
         for class_name, ids in sorted(self.detected_yolo_items.items()):
-            class_node = self.yolo_filter_tree.insert("", "end", text=f"Class: {class_name}", open=True, tags=('class', class_name))
-            self.yolo_filter_tree.item(class_node, values=(True,))
+            # --- MODIFICA: Inserimento con valore per checkbox ---
+            class_node = self.yolo_filter_tree.insert("", "end", text=f"Class: {class_name}", open=True, values=("☑",), tags=('class', class_name))
             for track_id in sorted(ids):
-                id_node = self.yolo_filter_tree.insert(class_node, "end", text=f"  ID: {track_id}", tags=('id', track_id))
-                self.yolo_filter_tree.item(id_node, values=(True,))
+                self.yolo_filter_tree.insert(class_node, "end", text=f"  ID: {track_id}", values=("☑",), tags=('id', track_id))
         self.update_frame(self.current_frame_idx)
 
     def on_yolo_filter_click(self, event):
+        # --- MODIFICA: Logica per gestire il click sulla colonna checkbox ---
+        item_id = self.yolo_filter_tree.identify_row(event.y)
+        column = self.yolo_filter_tree.identify_column(event.x)
+        
+        # Agisci solo se si clicca sulla colonna "Show"
+        if not item_id or column != "#1":
+            return
+
+        current_val = self.yolo_filter_tree.item(item_id, 'values')[0]
+        new_val = "☐" if current_val == "☑" else "☑"
+        self.yolo_filter_tree.set(item_id, column, new_val)
+
+        tags = self.yolo_filter_tree.item(item_id, 'tags')
+        if tags and tags[0] == 'class':
+            # Se si clicca su una classe, aggiorna tutti i suoi figli (ID)
+            for child_id in self.yolo_filter_tree.get_children(item_id):
+                self.yolo_filter_tree.set(child_id, column, new_val)
+        
+        self.update_yolo_filters_and_redraw()
+
+    def on_yolo_filter_click_old(self, event):
         item_id = self.yolo_filter_tree.identify_row(event.y)
         if not item_id: return
         is_checked = not self.yolo_filter_tree.item(item_id, 'values')[0]
@@ -1032,12 +1056,13 @@ class DataViewerWindow(tk.Toplevel):
         for class_node in self.yolo_filter_tree.get_children(''):
             class_name = self.yolo_filter_tree.item(class_node, 'tags')[1]
             all_classes.add(class_name)
-            if self.yolo_filter_tree.item(class_node, 'values')[0]:
+            # --- MODIFICA: Controlla il testo del checkbox ---
+            if self.yolo_filter_tree.item(class_node, 'values')[0] == "☑":
                 self.yolo_class_filter.add(class_name)
                 for id_node in self.yolo_filter_tree.get_children(class_node):
                     track_id = int(self.yolo_filter_tree.item(id_node, 'tags')[1] )
                     all_ids.add(track_id)
-                    if self.yolo_filter_tree.item(id_node, 'values')[0]:
+                    if self.yolo_filter_tree.item(id_node, 'values')[0] == "☑":
                         self.yolo_id_filter.add(track_id)
 
         # Se tutti gli elementi sono selezionati, il set di filtri dovrebbe essere vuoto per non filtrare nulla.

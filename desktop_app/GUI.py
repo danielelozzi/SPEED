@@ -1384,6 +1384,11 @@ class SpeedApp:
             if hasattr(self, 'yolo_detections_df') and not self.yolo_detections_df.empty:
                 yolo_df_to_use = self.yolo_detections_df
 
+            # --- NUOVO: Passa il DataFrame YOLO filtrato se esiste ---
+            yolo_df_to_use = None
+            if hasattr(self, 'yolo_detections_df') and not self.yolo_detections_df.empty:
+                yolo_df_to_use = self.yolo_detections_df
+
             run_full_analysis(
                 raw_data_path=self.raw_dir_var.get(),
                 unenriched_data_path=self.unenriched_dir_var.get(),
@@ -1394,7 +1399,7 @@ class SpeedApp:
                 yolo_models=yolo_models_to_run if self.yolo_var.get() else None,
                 yolo_custom_classes=yolo_custom_classes, # Nuovo
                 defined_aois=self.user_defined_aois,
-                yolo_detections_df=yolo_df_to_use # Passa il df filtrato
+                yolo_detections_df=yolo_df_to_use # Passa il df filtrato se disponibile
             )
 
             messagebox.showinfo("Success", f"Full analysis completed.\nResults in: {output_dir}")

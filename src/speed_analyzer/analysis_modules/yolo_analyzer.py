@@ -129,7 +129,7 @@ def run_yolo_analysis(
     yolo_models: Optional[typing.Dict[str, str]] = None,
     custom_classes: Optional[List[str]] = None,
     yolo_detections_df: Optional[pd.DataFrame] = None
-):
+) -> None:
     """
     Runs YOLO object detection, correlates with fixations, and saves statistics.
     MODIFIED for multi-task (detect, segment, pose) and flexible model loading.
