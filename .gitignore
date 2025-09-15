@@ -9,3 +9,4 @@ yolov8x-seg.pt
 yolov8x-worldv2.pt
 *.pyc
 *.log
+*DS_Store*
