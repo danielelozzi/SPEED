@@ -1,7 +1,7 @@
 # speedAnalyzerR
 
-A command-line-only R package inspired by the `speed-analyzer` Python package.
-It focuses on eye-tracking datasets: converting to a lightweight BIDS-like layout,
+An experimental, command-line-only R package inspired by the `speed-analyzer` Python package.
+It focuses on eye-tracking datasets: converting to a lightweight BIDS-like structure,
 basic summaries/plots, and a simple video overlay option (if FFmpeg is available via the `av` package).
 
 ## CLI usage (after installing the package)

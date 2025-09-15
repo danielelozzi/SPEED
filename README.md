@@ -8,15 +8,15 @@ SPEED is a Python-based project for processing, analyzing, and visualizing eye-t
 
 1.  **SPEED Desktop App**: A user-friendly GUI application for running a full analysis pipeline, designed for end-users and researchers.
 2.  **`speed-analyzer`**[![PyPI version](https://img.shields.io/pypi/v/speed-analyzer.svg)](https://pypi.org/project/speed-analyzer/): A Python package for developers who want to integrate the analysis logic into their own scripts.
-3.  **`speedAnalyzerR`**: A command line version for R programming language. This package is under development. 
-   
+3.  **`speedAnalyzerR`**: An experimental command-line package for the R programming language.
+
 This version supports GPU acceleration for YOLO analysis and also offers three powerful AOI definition methods:
 1.  **Static AOI**: A fixed rectangle for stationary scenes.
 2.  **Dynamic AOI (Object Tracking)**: An AOI that automatically follows a selected object detected by YOLO.
 3.  **Dynamic AOI (Manual Keyframes)**: A user-defined AOI path created by setting its position and size at key moments in the video.
 4.  **Real-time visualization**: A real-time visualization of external and internal camera with YOLO AOI and manual multiple AOI, allowing the visualization of blink, pupillometry, fragmentation and events management. 
 5. **Data Viewer**: A separate window that allow the visualization of DICOM/BIDS metadata and the visualization/plot the data.
-6. **YOLO**: pre-fixed and custom object detection, segmentation and pose estimation using YOLO models.
+6. **Multi-Task YOLO**: Pre-trained and custom object detection, segmentation, and pose estimation using various YOLO models.
 
 ---
 

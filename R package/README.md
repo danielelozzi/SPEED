@@ -1,7 +1,7 @@
 
 # speedAnalyzerR
 
-`speedAnalyzerR` is an **R command-line tool** inspired by the Python package `speed-analyzer`. It provides basic functionality for organizing eye-tracking data into a lightweight BIDS-like structure, generating plots, and optionally creating simple video overlays of gaze positions.
+`speedAnalyzerR` is an **experimental R command-line tool** inspired by the Python package `speed-analyzer`. It provides basic functionality for organizing eye-tracking data into a lightweight BIDS-like structure, generating summary plots, and creating simple video overlays of gaze positions.
 
 ## Features
 - Convert raw CSV/video data into a **minimal BIDS-like structure**.

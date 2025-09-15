@@ -2,7 +2,7 @@
 
 *An Advanced Eye-Tracking Data Analysis Software for Researchers*
 
-SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. This project offers two main components: a user-friendly **Desktop App** and a powerful **`speed-analyzer` Python package** and **`speed-analyzerR` for R programming language**-
+SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. This project offers three main components: a user-friendly **Desktop App**, a powerful **`speed-analyzer` Python package**, and an experimental **`speed-analyzerR` package for R**.
 
 
 ## Quick Links
@@ -29,8 +29,8 @@ SPEED is designed for cognitive and behavioral experiments, providing a modular 
 * **AOI**: create and manager multiple AOIs in static, dynamic and YOLO-based modality.
 * **Real-time visualization**: A real-time visualization of external and internal camera with YOLO AOI and manual multiple AOI, allowing the visualization of blink, pupillometry, fragmentation and events management. 
 * **Data Viewer**: A separate window that allow the visualization of DICOM/BIDS metadata and the visualization/plot the data.
-* **YOLO**: pre-fixed and custom object detection, segmentation and pose estimation using YOLO models.
-
+* **Multi-Task YOLO**: Pre-trained and custom object detection, segmentation, and pose estimation using a wide range of YOLO models.
+* **Data Interoperability**: Convert data to and from standard formats like BIDS and DICOM.
 
 ## Getting Started
 
