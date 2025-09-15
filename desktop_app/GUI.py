@@ -671,7 +671,7 @@ YOLO_MODELS = {
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.1.0")
+        self.root.title("SPEED v5.1.1")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
@@ -1521,7 +1521,7 @@ class SpeedApp:
 
         yolo_cache_path = output_dir_path / 'yolo_detections_cache.csv'
         if not yolo_cache_path.exists():
-            messagebox.showinfo("Info", "yolo_detections_cache.csv not found. Run Analysis with YOLO enabled first.", parent=self)
+            messagebox.showinfo("Info", "yolo_detections_cache.csv not found. Run Analysis with YOLO enabled first.", parent=self.root)
             return
 
         try:
@@ -1547,7 +1547,7 @@ class SpeedApp:
 
         except Exception as e:
             logging.error(f"Could not load or process YOLO results: {e}")
-            messagebox.showerror("Error", f"Could not load or process YOLO results: {e}", parent=self)
+            messagebox.showerror("Error", f"Could not load or process YOLO results: {e}", parent=self.root)
 
     def on_yolo_filter_click(self, event):
         tree = event.widget
@@ -1581,32 +1581,36 @@ class SpeedApp:
             try:
                 class_csv = output_dir_path / 'stats_per_class.csv'
                 if class_csv.exists(): self._populate_treeview(self.class_treeview, pd.read_csv(class_csv))
-                else: self._clear_treeview(self.class_treeview); messagebox.showinfo("Info", "stats_per_class.csv not found. Run Analysis with YOLO enabled.")
+                else: self._clear_treeview(self.class_treeview); messagebox.showinfo("Info", "stats_per_class.csv not found. Run Analysis with YOLO enabled.", parent=self.root)
                 
                 instance_csv = output_dir_path / 'stats_per_instance.csv'
                 if instance_csv.exists():
                     self.instance_stats_df = pd.read_csv(instance_csv)
                     self._populate_instance_treeview()
                 else:
-                    self._clear_treeview(self.instance_treeview); self.instance_stats_df = pd.DataFrame()
+                    self._clear_treeview(self.instance_treeview); self.instance_stats_df = pd.DataFrame(); messagebox.showinfo("Info", "stats_per_instance.csv not found. Run Analysis with YOLO enabled.", parent=self.root) # Mostra il messaggio ma non procedere oltre
             except pd.errors.EmptyDataError:
                 self._clear_treeview(self.class_treeview); self._clear_treeview(self.instance_treeview)
-                messagebox.showinfo("Info", "YOLO results files are empty. No objects were detected or fixated upon.", parent=self)
-            else:
-                self._clear_treeview(self.instance_treeview)
-                self.instance_stats_df = pd.DataFrame()
-                messagebox.showinfo("Info", "stats_per_instance.csv not found. Run Analysis with YOLO enabled.")
+                messagebox.showinfo("Info", "YOLO results files are empty. No objects were detected or fixated upon.", parent=self.root)
         except Exception as e:
             logging.error(f"Could not read YOLO results: {e}")
-            messagebox.showerror("Read Error", f"Could not read YOLO results: {e}")
+            messagebox.showerror("Read Error", f"Could not read YOLO results: {e}", parent=self.root)
 
     def _populate_instance_treeview(self, df_to_show=None):
         """Popola il treeview delle istanze, con checkbox."""
         self._clear_treeview(self.instance_treeview)
         df = df_to_show if df_to_show is not None else self.instance_stats_df
         
-        for col in self.instance_treeview['columns']:
-            if col != "Show": self.instance_treeview.heading(col, text=col.replace('_', ' ').title())
+        # --- CORREZIONE: Assicura che le colonne siano definite prima di inserire i dati ---
+        cols = ("Show", "Instance", "Fixations", "Avg Pupil", "Norm. Fixations")
+        self.instance_treeview['columns'] = cols
+        
+        for col in cols:
+            self.instance_treeview.heading(col, text=col.replace('_', ' ').title())
+        self.instance_treeview.column("Show", width=50, anchor='center')
+        # --- FINE CORREZIONE ---
+        if df.empty:
+            return
 
         for _, row in df.iterrows():
             values = ["☑"] + [f"{row.get(c, ''):.3f}" if isinstance(row.get(c), float) else row.get(c, '') for c in ['instance_name', 'n_fixations', 'avg_pupil_diameter_mm', 'normalized_fixation_count']]
@@ -1648,18 +1652,31 @@ class SpeedApp:
 
     def _populate_treeview(self, treeview, dataframe):
         treeview.delete(*treeview.get_children())
+        if dataframe.empty:
+            treeview["columns"] = (" ")
+            treeview.heading("#0", text="")
+            return
+            
         treeview["columns"] = list(dataframe.columns)
         for col in dataframe.columns:
             treeview.heading(col, text=col)
-            treeview.column(col, width=120, anchor='center')
+            treeview.column(col, width=150, anchor='center')
         for index, row in dataframe.iterrows():
             treeview.insert("", "end", values=list(row))
 
     def _clear_treeview(self, treeview):
         treeview.delete(*treeview.get_children())
-        treeview["columns"] = (" ")
-        treeview.heading("#1", text="")
-
+        # --- CORREZIONE: Gestione specifica per il treeview delle istanze ---
+        if treeview == self.instance_treeview:
+            cols = ("Show", "Instance", "Fixations", "Avg Pupil", "Norm. Fixations")
+            treeview['columns'] = cols
+            for col in cols:
+                treeview.heading(col, text=col.replace('_', ' ').title())
+            treeview.column("Show", width=50, anchor='center')
+        else:
+            treeview["columns"] = (" ")
+            treeview.heading("#0", text="") # Usa #0 per la colonna di default
+            
     def load_bids_data(self):
         bids_root_path = filedialog.askdirectory(title="Select the root BIDS directory (containing sub-...)")
         if not bids_root_path:
