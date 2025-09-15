@@ -1,13 +1,15 @@
-# Video overlay (very simple): requires av and optionally magick
-
-#' Create a simple overlay video: draw gaze as small circles over frames
-#' @param data_dir path with gaze.csv and a scene video
-#' @param output_dir destination
-#' @param subject subject id
-#' @param video_file optional path to video; if NULL, tries data_dir/scene_video.mp4
-#' @param draw_gaze_path logical, if TRUE, draw a trail for the gaze
-#' @param point_radius numeric radius in pixels
-#' @return output video path (mp4) or NULL if prerequisites missing
+#' Create a simple video overlay with gaze points.
+#'
+#' This function draws gaze points (and optionally a trailing path) onto each
+#' frame of a scene video. It requires the 'av' and 'magick' packages.
+#'
+#' @param data_dir Path to the directory containing 'gaze.csv' and a scene video.
+#' @param output_dir Path to the directory where the output video will be saved.
+#' @param subject The subject identifier, used for naming the output file.
+#' @param video_file Optional path to the video file. If NULL, the function will search for a '.mp4' file in `data_dir`.
+#' @param draw_gaze_path Logical. If TRUE, a short trail of recent gaze points is drawn.
+#' @param point_radius Numeric. The radius of the gaze point circle in pixels.
+#' @return The path to the created MP4 video, or NULL if prerequisites are missing or an error occurs.
 create_video_overlay <- function(data_dir, output_dir, subject = "S01", video_file = NULL, draw_gaze_path = TRUE, point_radius = 10) {
   suppressWarnings({
     has_av <- requireNamespace("av", quietly = TRUE)
@@ -17,70 +19,77 @@ create_video_overlay <- function(data_dir, output_dir, subject = "S01", video_fi
     pkg_message("av and magick packages are required for video overlay.")
     return(NULL)
   }
+
   data_dir <- normalizePath(data_dir, mustWork = TRUE)
   ensure_dir(output_dir)
+
   gaze <- read_csv_safe(file.path(data_dir, "gaze.csv"))
   if (is.null(video_file)) {
-    guess <- file.path(data_dir, "scene_video.mp4")
-    video_file <- if (file.exists(guess)) guess else NULL
+    video_files <- list.files(data_dir, pattern = "\\.mp4$", full.names = TRUE)
+    if (length(video_files) == 1) {
+      video_file <- video_files[1]
+    }
   }
+
   if (is.null(gaze) || is.null(video_file) || !file.exists(video_file)) {
-    pkg_message("Missing gaze.csv or scene_video.mp4. Skipping video overlay.")
+    pkg_message("Missing gaze.csv or a unique .mp4 video file. Skipping video overlay.")
     return(NULL)
   }
-  # Extract frames, overlay, re-encode (this is best-effort and may be slow)
+
+  # --- 1. Setup paths and parameters ---
   tmpdir <- tempfile("frames_")
-  dir.create(tmpdir, showWarnings = False <- FALSE)
+  dir.create(tmpdir, showWarnings = FALSE)
   on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+
   info <- av::av_media_info(video_file)
   fps <- as.numeric(info$video$framerate)
   if (!is.finite(fps) || fps <= 0) fps <- 30
-  # timestamps in gaze assumed in seconds or ms? Try to auto-detect: if max > 6e3, assume ms
-  ts <- gaze$timestamp
-  if (max(ts, na.rm=TRUE) > 6000) ts <- ts / 1000
-  # Extract frames as images
+
+  # --- 2. Prepare gaze data ---
+  # Auto-detect timestamp unit (seconds vs. milliseconds)
+  if ("timestamp" %in% names(gaze) && max(gaze$timestamp, na.rm = TRUE) > 6000) {
+    gaze$timestamp <- gaze$timestamp / 1000
+  }
+
+  # --- 3. Extract frames and map to gaze data ---
+  pkg_message("Extracting video frames...")
   av::av_video_images(video_file, destdir = tmpdir, format = "png", fps = fps, verbose = FALSE)
   frames <- list.files(tmpdir, pattern = "\\.png$", full.names = TRUE)
-  # Build a simple nearest timestamp index per frame
+  if (length(frames) == 0) {
+    pkg_message("No frames were extracted from the video. Aborting.")
+    return(NULL)
+  }
+
   t_frame <- seq(0, by = 1/fps, length.out = length(frames))
-  # For speed, use nearest join
-  which_nearest <- function(x, y) y[max(1, which.min(abs(y - x)))]
-  idx <- vapply(t_frame, function(t) {
-    which.min(abs(ts - t))
-  }, integer(1))
-  # Overlay
+  gaze_dt <- data.table::as.data.table(gaze)
+  frame_dt <- data.table::data.table(frame_idx = seq_along(t_frame), t_frame = t_frame)
+  gaze_dt[, t_gaze := timestamp]
+
+  # Find the nearest gaze point for each frame time
+  frame_dt[, gaze_idx := gaze_dt[frame_dt, on = .(t_gaze = t_frame), roll = "nearest", which = TRUE]]
+
+  # --- 4. Overlay gaze on frames ---
+  pkg_message("Overlaying gaze data on frames...")
   outdir <- file.path(output_dir, "frames_overlay")
-  gaze_history <- list()
-  path_palette <- colorRampPalette(c("darkred", "red"))(10)
   dir.create(outdir, showWarnings = FALSE)
-  for (i in seq_along(frames)) {
+
+  lapply(seq_along(frames), function(i) {
     fr <- magick::image_read(frames[i])
-    j <- idx[i]
-    
-    current_point <- if (is.finite(gaze$x[j]) && is.finite(gaze$y[j])) {
-      list(x = gaze$x[j], y = gaze$y[j])
-    } else {
-      NULL
-    }
-    
-    if (!is.null(current_point)) {
-      gaze_history <- c(gaze_history, list(current_point))
-      if (length(gaze_history) > 10) {
-        gaze_history <- tail(gaze_history, 10)
-      }
-      
+    gaze_point <- gaze_dt[frame_dt$gaze_idx[i], ]
+
+    if (nrow(gaze_point) == 1 && is.finite(gaze_point$x) && is.finite(gaze_point$y)) {
       fr <- magick::image_draw(fr)
-      if (draw_gaze_path && length(gaze_history) > 1) {
-        for (k in 1:(length(gaze_history) - 1)) {
-          graphics::lines(c(gaze_history[[k]]$x, gaze_history[[k+1]]$x), c(gaze_history[[k]]$y, gaze_history[[k+1]]$y), col = path_palette[k], lwd = 2)
-        }
-      }
-      symbols(current_point$x, current_point$y, circles = point_radius, inches = FALSE, add = TRUE, bg = "red", fg = "white")
+      graphics::symbols(gaze_point$x, gaze_point$y, circles = point_radius, inches = FALSE, add = TRUE, bg = "#FF000080", fg = "white")
       dev.off()
     }
     magick::image_write(fr, path = file.path(outdir, sprintf("frame_%06d.png", i)))
-  }
+    return(NULL)
+  })
+
+  # --- 5. Encode video ---
+  pkg_message("Encoding final video...")
   out_file <- file.path(output_dir, paste0("video_overlay_", subject, ".mp4"))
   av::av_encode_video(list.files(outdir, pattern="\\.png$", full.names=TRUE), framerate = fps, output = out_file, verbose = FALSE)
-  out_file
+  pkg_message("Video overlay created: ", out_file)
+  return(out_file)
 }

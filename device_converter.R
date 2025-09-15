@@ -12,6 +12,11 @@
 # @import R.utils
 #
 convert_tobii_to_bids_r <- function(source_dir, bids_root_dir, subject_id, session_id, task_name) {
+  # --- 0. Validate inputs ---
+  if (!dir.exists(source_dir)) {
+    stop("Source directory does not exist: ", source_dir)
+  }
+  bids_root_dir <- normalizePath(bids_root_dir, mustWork = FALSE)
 
   # --- 1. Find and read the source TSV file ---
   tsv_file <- list.files(source_dir, pattern = "\\.tsv$", full.names = TRUE)
@@ -19,7 +24,7 @@ convert_tobii_to_bids_r <- function(source_dir, bids_root_dir, subject_id, sessi
     stop("Expected exactly one .tsv file in the source directory: ", source_dir)
   }
   pkg_message("Reading source data from: ", basename(tsv_file))
-  dt <- data.table::fread(tsv_file, na.strings = c("", "NA", "-"))
+  dt <- data.table::fread(tsv_file, na.strings = c("", "NA", "-", "null"))
 
   # --- 2. Create BIDS directory structure ---
   session_dir <- file.path(bids_root_dir, paste0("sub-", subject_id), paste0("ses-", session_id), "eyetrack")
@@ -29,12 +34,16 @@ convert_tobii_to_bids_r <- function(source_dir, bids_root_dir, subject_id, sessi
   base_name <- paste0("sub-", subject_id, "_ses-", session_id, "_task-", task_name)
 
   # --- 3. Write dataset_description.json ---
-  dataset_desc <- list(
-    "Name" = "SPEED Eye-Tracking Dataset (Converted from Tobii)",
-    "BIDSVersion" = "1.8.0",
-    "DatasetType" = "raw",
-    "Authors" = list("Dr. Daniele Lozzi, LabSCoC")
-  )
+  dataset_desc_path <- file.path(bids_root_dir, "dataset_description.json")
+  if (!file.exists(dataset_desc_path)) {
+    dataset_desc <- list(
+      "Name" = "SPEED Eye-Tracking Dataset (Converted from Tobii)",
+      "BIDSVersion" = "1.8.0",
+      "DatasetType" = "raw",
+      "Authors" = list("Dr. Daniele Lozzi, LabSCoC")
+    )
+  } # else, append/update if needed, for now just don't overwrite
+
   jsonlite::write_json(dataset_desc, file.path(bids_root_dir, "dataset_description.json"), auto_unbox = TRUE, pretty = TRUE)
   pkg_message("Created dataset_description.json")
 
@@ -42,12 +51,20 @@ convert_tobii_to_bids_r <- function(source_dir, bids_root_dir, subject_id, sessi
   # Assuming Tobii column names. These may need adjustment.
   # We select the first timestamp as the reference start time.
   start_time_ms <- dt[!is.na(RecordingTimestamp), min(RecordingTimestamp)]
+  if (!is.finite(start_time_ms)) {
+    stop("Could not determine a valid start time from 'RecordingTimestamp' column.")
+  }
 
   eyetrack_dt <- data.table(
     time = (dt$RecordingTimestamp - start_time_ms) / 1000, # Convert to seconds
     eye1_x_coordinate = dt$`GazePointX (ADCSpx)`,
     eye1_y_coordinate = dt$`GazePointY (ADCSpx)`,
     # Take the mean of left and right pupil, ignoring NAs
+    # BIDS specifies a single value for pupil size if not tracking each eye separately.
+    # Using rowMeans is a reasonable approach for this.
+    # Note: Tobii Pro Glasses 3 provides `PupilDiameterLeft` and `PupilDiameterRight`
+    # The column names `PupilLeft` and `PupilRight` might be from older devices.
+    # Let's make this more robust.
     eye1_pupil_size = rowMeans(dt[, .(`PupilLeft`, `PupilRight`)], na.rm = TRUE)
   )
   # Replace NaN from rowMeans (when both are NA) with NA
@@ -64,13 +81,21 @@ convert_tobii_to_bids_r <- function(source_dir, bids_root_dir, subject_id, sessi
   # Assuming a common sampling frequency for Tobii Pro Glasses.
   # This should be verified from the device specifications.
   sampling_freq <- 100
+  # More robustly, we can try to calculate it
+  if (nrow(eyetrack_dt) > 10) {
+      calculated_freq <- 1 / mean(diff(eyetrack_dt$time), na.rm = TRUE)
+      # Use calculated if it's reasonable (e.g., close to 100)
+      if (is.finite(calculated_freq) && calculated_freq > 50 && calculated_freq < 150) {
+          sampling_freq <- round(calculated_freq)
+      }
+  }
   eyetrack_json <- list(
     "SamplingFrequency" = sampling_freq,
     "StartTime" = 0,
     "Columns" = c("time", "eye1_x_coordinate", "eye1_y_coordinate", "eye1_pupil_size"),
-    "eye1_x_coordinate" = list("Units" = "pixels"),
-    "eye1_y_coordinate" = list("Units" = "pixels"),
-    "eye1_pupil_size" = list("Units" = "mm")
+    "x_coordinate" = list("Units" = "pixels"),
+    "y_coordinate" = list("Units" = "pixels"),
+    "pupil_size" = list("Units" = "mm")
   )
   jsonlite::write_json(eyetrack_json, file.path(session_dir, paste0(base_name, "_eyetrack.json")), auto_unbox = TRUE, pretty = TRUE)
   pkg_message("Created _eyetrack.json")
@@ -85,7 +110,7 @@ convert_tobii_to_bids_r <- function(source_dir, bids_root_dir, subject_id, sessi
     )]
 
     if (nrow(events_dt) > 0) {
-      data.table::fwrite(events_dt, file = file.path(session_dir, paste0(base_name, "_events.tsv")), sep = "\t")
+      data.table::fwrite(events_dt, file = file.path(session_dir, paste0(base_name, "_events.tsv")), sep = "\t", na = "n/a")
       pkg_message("Created _events.tsv")
 
       # --- 7. Write _events.json sidecar ---
@@ -106,7 +131,7 @@ convert_tobii_to_bids_r <- function(source_dir, bids_root_dir, subject_id, sessi
   # --- 8. Copy the video file ---
   video_file <- list.files(source_dir, pattern = "\\.mp4$", full.names = TRUE)
   if (length(video_file) == 1) {
-    dest_video_path <- file.path(session_dir, paste0(base_name, "_recording.mp4"))
+    dest_video_path <- file.path(session_dir, paste0(base_name, "_eyetrack.mp4"))
     file.copy(video_file, dest_video_path, overwrite = TRUE)
     pkg_message("Copied video file to BIDS directory.")
   } else {
@@ -115,14 +140,6 @@ convert_tobii_to_bids_r <- function(source_dir, bids_root_dir, subject_id, sessi
 
   pkg_message("Tobii to BIDS conversion completed successfully!")
   return(invisible(TRUE))
-}
-
-#' A helper function to print messages with a package prefix.
-#'
-#' @param ... Items to be printed.
-#' @keywords internal
-pkg_message <- function(...) {
-  message("[speedAnalyzerR] ", ...)
 }
 
 #' Convert data from a specific eye-tracking device to a standard format.
@@ -144,7 +161,7 @@ run_device_conversion <- function(device_name, source_dir, output_dir, output_fo
   if (tolower(device_name) == "tobii") {
     if (tolower(output_format) == "bids") {
       if (is.null(bids_info) || !is.list(bids_info) || !all(c("subject_id", "session_id", "task_name") %in% names(bids_info))) {
-        stop("Le informazioni BIDS (una lista con 'subject_id', 'session_id', 'task_name') sono obbligatorie per l'output BIDS.")
+        stop("BIDS info (a list with 'subject_id', 'session_id', 'task_name') is required for BIDS output.")
       }
       # Call the internal Tobii to BIDS converter
       convert_tobii_to_bids_r(
@@ -156,7 +173,7 @@ run_device_conversion <- function(device_name, source_dir, output_dir, output_fo
       )
     } # Future output formats for Tobii could be added here
   } else {
-    stop("Dispositivo non supportato: '", device_name, "'. Attualmente è supportato solo 'tobii'.")
+    stop("Unsupported device: '", device_name, "'. Currently only 'tobii' is supported.")
   }
 
   return(invisible(TRUE))

@@ -1,5 +1,8 @@
 # Utilities
 
+#' A helper function to print messages with a package prefix and timestamp.
+#' @param ... Items to be printed.
+#' @keywords internal
 pkg_message <- function(...) {
   message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - ", paste0(..., collapse=""))
 }

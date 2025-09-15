@@ -33,19 +33,24 @@ generate_plots <- function(data_dir, output_dir, subject = "S01", bids = FALSE, 
     # Infer speed from successive points if not present
     if (!("speed" %in% names(dt))) {
       needed <- c("x","y","timestamp")
-      if (all(needed %in% names(dt))) {
+      if (all(needed %in% names(dt)) && nrow(dt) > 1) {
         dt <- dt[order(timestamp)]
-        dt[, dx := c(NA, diff(x))]
-        dt[, dy := c(NA, diff(y))]
-        dt[, dtm := c(NA, diff(timestamp))]
-        dt[, speed := sqrt(dx^2 + dy^2) / dtm]
+        # Calculate differences between consecutive rows
+        dt[, dx := x - data.table::shift(x, type = "lag")]
+        dt[, dy := y - data.table::shift(y, type = "lag")]
+        dt[, dt_s := (timestamp - data.table::shift(timestamp, type = "lag")) / 1000] # time diff in seconds
+        
+        # Calculate speed, avoiding division by zero
+        dt[dt_s > 0, speed := sqrt(dx^2 + dy^2) / dt_s]
       } else {
         dt[, speed := NA_real_]
       }
     }
-    p <- ggplot(dt[is.finite(speed)], aes(x = speed)) + 
+    
+    plot_data <- dt[is.finite(speed) & speed < quantile(speed, 0.99, na.rm = TRUE)] # Remove outliers for better viz
+    p <- ggplot(plot_data, aes(x = speed)) + 
       geom_histogram(bins = 60) + 
-      ggtitle(paste0("Gaze speed histogram - ", subject)) + xlab("px/ms (approx)") + ylab("Count")
+      ggtitle(paste0("Gaze speed histogram - ", subject)) + xlab("Speed (pixels/sec)") + ylab("Count")
     f <- file.path(output_dir, "plot_gaze_speed_hist.png")
     ggplot2::ggsave(f, p, dpi = 120, width = 8, height = 5)
     out_files <- c(out_files, f)
@@ -53,7 +58,7 @@ generate_plots <- function(data_dir, output_dir, subject = "S01", bids = FALSE, 
     # Heatmap via KDE if x,y exist
     if (all(c("x","y") %in% names(dt))) {
       dd <- dt[is.finite(x) & is.finite(y)]
-      if (nrow(dd) > 10) {
+      if (nrow(dd) > 50) { # Need enough points for a meaningful KDE
         kd <- MASS::kde2d(dd$x, dd$y, n = 100)
         df <- data.frame(expand.grid(x = kd$x, y = kd$y), z = as.vector(kd$z))
         p2 <- ggplot(df, aes(x, y, fill = z)) + 
@@ -69,10 +74,11 @@ generate_plots <- function(data_dir, output_dir, subject = "S01", bids = FALSE, 
 
   # 2) Fixation duration histogram
   if (!is.null(fix) && ("duration" %in% names(fix))) {
-    ff <- data.table::as.data.table(fix)
-    p3 <- ggplot(ff[is.finite(duration)], aes(x = duration)) + 
+    fix_dt <- data.table::as.data.table(fix)
+    plot_data_fix <- fix_dt[is.finite(duration)]
+    p3 <- ggplot(plot_data_fix, aes(x = duration)) + 
       geom_histogram(bins = 50) + 
-      ggtitle(paste0("Fixation duration - ", subject)) + xlab("ms") + ylab("Count")
+      ggtitle(paste0("Fixation duration - ", subject)) + xlab("Duration (ms)") + ylab("Count")
     f3 <- file.path(output_dir, "plot_fixation_duration.png")
     ggplot2::ggsave(f3, p3, dpi = 120, width = 8, height = 5)
     out_files <- c(out_files, f3)
@@ -80,12 +86,12 @@ generate_plots <- function(data_dir, output_dir, subject = "S01", bids = FALSE, 
 
   # 3) Events timeline (if onset, duration, event exist)
   if (!is.null(events) && all(c("onset","duration","event") %in% names(events))) {
-    ee <- data.table::as.data.table(events)
-    ee[, t0 := onset]
-    ee[, t1 := onset + duration]
-    p4 <- ggplot(ee, aes(y = event)) + 
+    events_dt <- data.table::as.data.table(events)
+    events_dt[, t0 := onset / 1000] # Convert to seconds
+    events_dt[, t1 := (onset + duration) / 1000]
+    p4 <- ggplot(events_dt, aes(y = event)) + 
       geom_segment(aes(x = t0, xend = t1, yend = event)) + 
-      ggtitle(paste0("Events timeline - ", subject)) + xlab("time (ms)") + ylab("event")
+      ggtitle(paste0("Events timeline - ", subject)) + xlab("Time (seconds)") + ylab("Event")
     f4 <- file.path(output_dir, "plot_events_timeline.png")
     ggplot2::ggsave(f4, p4, dpi = 120, width = 9, height = 6)
     out_files <- c(out_files, f4)
