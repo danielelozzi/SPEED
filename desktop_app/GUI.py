@@ -12,6 +12,7 @@ import webbrowser
 import threading
 from PIL import Image, ImageTk
 from src.speed_analyzer.analysis_modules.bids_converter import convert_to_bids, load_from_bids
+from ultralytics import YOLO
 from src.speed_analyzer.analysis_modules.dicom_converter import convert_to_dicom, load_from_dicom 
 from desktop_app.data_viewer import DataViewerWindow
 
@@ -668,10 +669,16 @@ YOLO_MODELS = {
     'detect_world': ['yolov8s-world.pt', 'yolov8m-world.pt', 'yolov8l-world.pt', 'yolov8x-world.pt']
 }
 
+# --- NUOVO: Lista dei modelli di classificazione ufficiali ---
+OFFICIAL_YOLO_CLS_MODELS = [
+    'yolov8n-cls.pt', 'yolov8s-cls.pt', 'yolov8m-cls.pt', 'yolov8l-cls.pt', 'yolov8x-cls.pt',
+    'yolov5n-cls.pt', 'yolov5s-cls.pt', 'yolov5m-cls.pt', 'yolov5l-cls.pt', 'yolov5x-cls.pt'
+]
+
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.1.1")
+        self.root.title("SPEED v5.2.0")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
@@ -853,8 +860,41 @@ class SpeedApp:
             tree.bind('<Button-1>', self.on_yolo_filter_click)
             self.yolo_filter_trees[task] = {'tab': tab, 'tree': tree}
         # --- FINE NUOVO FRAME ---
+        
+        # --- NUOVO: Frame per la classificazione delle detection ---
+        yolo_classify_frame = tk.LabelFrame(main_frame, text="5. Classify Detections", padx=10, pady=10)
+        yolo_classify_frame.pack(fill=tk.X, pady=5, padx=10)
 
-        bids_frame = tk.LabelFrame(main_frame, text="4. Data Export", padx=10, pady=10)
+        # --- MODIFICA: Sostituzione dell'Entry con un Combobox + opzione custom ---
+        classify_combo_frame = tk.Frame(yolo_classify_frame)
+        classify_combo_frame.pack(fill=tk.X, pady=2)
+        tk.Label(classify_combo_frame, text="Classification Model:", width=20, anchor='w').pack(side=tk.LEFT)
+        self.yolo_classify_model_combo_var = tk.StringVar()
+        self.yolo_classify_combo = ttk.Combobox(classify_combo_frame, textvariable=self.yolo_classify_model_combo_var, state='readonly')
+        self.yolo_classify_combo.pack(fill=tk.X, expand=True, side=tk.LEFT)
+        self.yolo_classify_combo.bind('<<ComboboxSelected>>', self.on_classify_model_selected)
+
+        # Frame per il percorso custom, inizialmente nascosto
+        self.classify_custom_path_frame = tk.Frame(yolo_classify_frame)
+        # Non fare il pack() qui, verrà gestito da on_classify_model_selected
+
+        tk.Label(self.classify_custom_path_frame, text="Custom Model Path:", width=20, anchor='w').pack(side=tk.LEFT)
+        self.yolo_classify_model_var = tk.StringVar()
+        self.yolo_classify_custom_entry = tk.Entry(self.classify_custom_path_frame, textvariable=self.yolo_classify_model_var)
+        self.yolo_classify_custom_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
+        tk.Button(self.classify_custom_path_frame, text="Browse...", command=self.select_classification_model).pack(side=tk.RIGHT)
+        # --- FINE MODIFICA ---
+
+        tk.Button(yolo_classify_frame, text="RUN CLASSIFICATION ON FILTERED DETECTIONS", command=self.run_classification_on_detections, font=('Helvetica', 10, 'bold'), bg='#80deea').pack(pady=5)
+        
+        # Popola il combobox all'avvio
+        self.update_classification_model_options()
+        # Imposta lo stato iniziale della UI
+        self.on_classify_model_selected()
+
+        # --- FINE NUOVO FRAME ---
+
+        bids_frame = tk.LabelFrame(main_frame, text="6. Data Export", padx=10, pady=10)
         bids_frame.pack(fill=tk.X, pady=5, padx=10)
         export_buttons_frame = tk.Frame(bids_frame)
         export_buttons_frame.pack(fill=tk.X, pady=(0, 5))
@@ -871,9 +911,9 @@ class SpeedApp:
 
         notebook = ttk.Notebook(main_frame)
         notebook.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
-        plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='5. Generate Plots')
-        video_tab = tk.Frame(notebook); notebook.add(video_tab, text='6. Generate Videos')
-        yolo_tab = tk.Frame(notebook); notebook.add(yolo_tab, text='7. YOLO Results')
+        plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='7. Generate Plots')
+        video_tab = tk.Frame(notebook); notebook.add(video_tab, text='8. Generate Videos')
+        yolo_tab = tk.Frame(notebook); notebook.add(yolo_tab, text='9. YOLO Results')
         self.setup_plot_tab(plot_tab)
         self.setup_video_tab(video_tab)
         self.setup_yolo_tab(yolo_tab)
@@ -933,6 +973,37 @@ class SpeedApp:
             # Imposta un default o lascia vuoto
             if self.yolo_model_vars[task].get() not in models_for_task:
                 self.yolo_model_vars[task].set(models_for_task[0])
+
+    def update_classification_model_options(self):
+        """Scansiona la cartella dei modelli, aggiunge i modelli ufficiali e popola il combobox."""
+        try:
+            # 1. Prendi i modelli locali
+            local_cls_models = {f.name for f in MODELS_DIR.glob('*-cls.pt')}
+            
+            # 2. Unisci con i modelli ufficiali (il set gestisce i duplicati)
+            all_models = sorted(list(local_cls_models.union(set(OFFICIAL_YOLO_CLS_MODELS))))
+
+        except Exception as e:
+            logging.error(f"Could not scan for classification models in {MODELS_DIR}: {e}")
+            # In caso di errore, usa solo la lista ufficiale
+            all_models = sorted(OFFICIAL_YOLO_CLS_MODELS)
+        
+        # 3. Aggiungi l'opzione custom
+        options = all_models + ["Custom..."]
+        
+        self.yolo_classify_combo['values'] = options
+        if self.yolo_classify_model_combo_var.get() not in options:
+            self.yolo_classify_model_combo_var.set(options[0] if options else "")
+
+    def on_classify_model_selected(self, event=None):
+        """Mostra o nasconde il campo per il percorso custom in base alla selezione."""
+        if self.yolo_classify_model_combo_var.get() == "Custom...":
+            self.classify_custom_path_frame.pack(fill=tk.X, pady=2, before=self.yolo_classify_combo.master.master.winfo_children()[-1]) # Inserisce prima del bottone RUN
+        else:
+            self.classify_custom_path_frame.pack_forget()
+            # Pulisce il campo custom per evitare confusione
+            self.yolo_classify_model_var.set("")
+
 
 
 
@@ -1513,6 +1584,92 @@ class SpeedApp:
             logging.error(f"Video Generation Error: {e}\n{traceback.format_exc()}")
             messagebox.showerror("Video Generation Error", f"An error occurred: {e}\n\nSee log for details.")
 
+    def select_classification_model(self):
+        """Apre un file dialog per selezionare un modello di classificazione .pt."""
+        filepath = filedialog.askopenfilename(
+            title="Select YOLO Classification Model",
+            filetypes=[("PyTorch Models", "*.pt"), ("All files", "*.*")]
+        )
+        if filepath:
+            self.yolo_classify_model_var.set(filepath)
+
+    def run_classification_on_detections(self):
+        """Esegue la classificazione sulle detection filtrate."""
+        # --- MODIFICA: Ottieni il percorso del modello dal combobox o dal campo custom ---
+        selected_model = self.yolo_classify_model_combo_var.get()
+        if selected_model == "Custom...":
+            model_path_str = self.yolo_classify_model_var.get()
+        elif selected_model in OFFICIAL_YOLO_CLS_MODELS:
+            # Usa solo il nome del modello. Ultralytics lo scaricherà se non esiste.
+            model_path_str = selected_model
+        else:
+            # È un modello locale, usa il percorso completo.
+            model_path_str = str(MODELS_DIR / selected_model) if selected_model else ""
+        # --- FINE MODIFICA ---
+
+        # --- MODIFICA: Controllo più robusto ---
+        if not model_path_str or (selected_model == "Custom..." and not Path(model_path_str).exists()):
+            messagebox.showerror("Error", "Please select a YOLO classification model first.", parent=self.root)
+            return
+
+        common_paths = self._get_common_paths()
+        if not common_paths: return
+        output_dir_path, _ = common_paths
+
+        yolo_cache_path = output_dir_path / 'yolo_detections_cache.csv'
+        if not yolo_cache_path.exists():
+            messagebox.showerror("Error", "yolo_detections_cache.csv not found. Run Analysis with YOLO object detection first.", parent=self.root)
+            return
+
+        unenriched_dir_str = self.unenriched_dir_var.get()
+        if not unenriched_dir_str:
+            messagebox.showerror("Error", "Un-enriched folder is mandatory to get the video.", parent=self.root)
+            return
+        
+        try:
+            video_path = next(Path(unenriched_dir_str).glob('*.mp4'))
+        except StopIteration:
+            messagebox.showerror("Error", "No .mp4 video file found in the Un-enriched folder.", parent=self.root)
+            return
+
+        try:
+            messagebox.showinfo("In Progress", "Starting classification on detected objects. This may take a while...", parent=self.root)
+            
+            # Carica i dati e il modello
+            detections_df = pd.read_csv(yolo_cache_path)
+            # L'istanziazione di YOLO qui gestirà il download automatico se model_path_str è solo un nome (es. 'yolov8n-cls.pt')
+            # e non un percorso completo.
+            classify_model = YOLO(model_path_str)
+            
+            cap = cv2.VideoCapture(str(video_path))
+
+            # Applica i filtri dalla GUI
+            self.update_yolo_filters()
+            filtered_df = detections_df.copy()
+            if self.yolo_class_filter:
+                filtered_df = filtered_df[filtered_df['class_name'].isin(self.yolo_class_filter)]
+            if self.yolo_id_filter:
+                filtered_df = filtered_df[filtered_df['track_id'].isin(self.yolo_id_filter)]
+
+            # Esegui classificazione
+            classification_results = video_generator.classify_detections(cap, filtered_df, classify_model)
+            cap.release()
+
+            # Unisci e salva i risultati
+            if classification_results:
+                results_df = pd.DataFrame(classification_results)
+                detections_df = detections_df.merge(results_df, on=['frame_idx', 'track_id'], how='left')
+                detections_df.to_csv(yolo_cache_path, index=False) # Sovrascrivi il cache con i nuovi dati
+                results_df.to_csv(output_dir_path / 'yolo_classification_results.csv', index=False)
+                messagebox.showinfo("Success", f"Classification complete. Results saved and merged into cache.", parent=self.root)
+                self.load_yolo_results() # Ricarica i risultati nella GUI
+            else:
+                messagebox.showinfo("Info", "No objects were classified.", parent=self.root)
+
+        except Exception as e:
+            logging.error(f"Error during classification: {e}\n{traceback.format_exc()}")
+            messagebox.showerror("Classification Error", f"An error occurred: {e}", parent=self.root)
+
     def load_yolo_results_for_filtering(self):
         """Carica i risultati YOLO e popola i treeview per il filtraggio."""
         common_paths = self._get_common_paths()
@@ -1580,12 +1737,21 @@ class SpeedApp:
         try:
             try:
                 class_csv = output_dir_path / 'stats_per_class.csv'
-                if class_csv.exists(): self._populate_treeview(self.class_treeview, pd.read_csv(class_csv))
+                if class_csv.exists(): 
+                    df = pd.read_csv(class_csv)
+                    self._populate_treeview(self.class_treeview, df)
                 else: self._clear_treeview(self.class_treeview); messagebox.showinfo("Info", "stats_per_class.csv not found. Run Analysis with YOLO enabled.", parent=self.root)
                 
                 instance_csv = output_dir_path / 'stats_per_instance.csv'
                 if instance_csv.exists():
                     self.instance_stats_df = pd.read_csv(instance_csv)
+                    # --- NUOVO: Controlla se ci sono risultati di classificazione ---
+                    classification_results_csv = output_dir_path / 'yolo_classification_results.csv'
+                    if classification_results_csv.exists():
+                        class_df = pd.read_csv(classification_results_csv)
+                        # Aggrega per ottenere la classe più probabile per istanza
+                        top_class_per_instance = class_df.loc[class_df.groupby('track_id')['confidence'].idxmax()]
+                        self.instance_stats_df = self.instance_stats_df.merge(top_class_per_instance[['track_id', 'classification_class', 'confidence']], on='track_id', how='left')
                     self._populate_instance_treeview()
                 else:
                     self._clear_treeview(self.instance_treeview); self.instance_stats_df = pd.DataFrame(); messagebox.showinfo("Info", "stats_per_instance.csv not found. Run Analysis with YOLO enabled.", parent=self.root) # Mostra il messaggio ma non procedere oltre
@@ -1601,8 +1767,11 @@ class SpeedApp:
         self._clear_treeview(self.instance_treeview)
         df = df_to_show if df_to_show is not None else self.instance_stats_df
         
-        # --- CORREZIONE: Assicura che le colonne siano definite prima di inserire i dati ---
-        cols = ("Show", "Instance", "Fixations", "Avg Pupil", "Norm. Fixations")
+        # --- MODIFICA: Aggiungi colonne per la classificazione se esistono ---
+        base_cols = ["Show", "Instance", "Fixations", "Avg Pupil", "Norm. Fixations"]
+        extra_cols = []
+        if 'classification_class' in df.columns: extra_cols.extend(["Classification", "Confidence"])
+        cols = tuple(base_cols + extra_cols)
         self.instance_treeview['columns'] = cols
         
         for col in cols:
@@ -1613,7 +1782,13 @@ class SpeedApp:
             return
 
         for _, row in df.iterrows():
-            values = ["☑"] + [f"{row.get(c, ''):.3f}" if isinstance(row.get(c), float) else row.get(c, '') for c in ['instance_name', 'n_fixations', 'avg_pupil_diameter_mm', 'normalized_fixation_count']]
+            base_values = [f"{row.get(c, ''):.3f}" if isinstance(row.get(c), float) else row.get(c, '') for c in ['instance_name', 'n_fixations', 'avg_pupil_diameter_mm', 'normalized_fixation_count']]
+            extra_values = []
+            if 'classification_class' in df.columns:
+                conf_val = f"{row.get('confidence', 0.0):.2f}" if pd.notna(row.get('confidence')) else ''
+                extra_values.extend([row.get('classification_class', ''), conf_val])
+
+            values = ["☑"] + base_values + extra_values
             self.instance_treeview.insert("", "end", values=values, tags=(row['instance_name'],))
 
     def on_instance_filter_click(self, event):
@@ -1668,7 +1843,11 @@ class SpeedApp:
         treeview.delete(*treeview.get_children())
         # --- CORREZIONE: Gestione specifica per il treeview delle istanze ---
         if treeview == self.instance_treeview:
-            cols = ("Show", "Instance", "Fixations", "Avg Pupil", "Norm. Fixations")
+            # Rileva le colonne dinamicamente come in _populate_instance_treeview
+            base_cols = ["Show", "Instance", "Fixations", "Avg Pupil", "Norm. Fixations"]
+            extra_cols = []
+            if 'classification_class' in self.instance_stats_df.columns: extra_cols.extend(["Classification", "Confidence"])
+            cols = tuple(base_cols + extra_cols)
             treeview['columns'] = cols
             for col in cols:
                 treeview.heading(col, text=col.replace('_', ' ').title())
