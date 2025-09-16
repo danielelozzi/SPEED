@@ -596,6 +596,57 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
                 if temp_video_path.exists():
                     temp_video_path.rename(video_out_path)
                 print("Video creation process completed, but without audio.")
+
+def classify_detections(cap: cv2.VideoCapture, detections_df: pd.DataFrame, classify_model) -> list:
+    """
+    Esegue la classificazione sulle immagini ritagliate dalle bounding box delle detection.
+
+    Args:
+        cap (cv2.VideoCapture): L'oggetto VideoCapture del video sorgente.
+        detections_df (pd.DataFrame): DataFrame contenente le detection da classificare.
+                                      Deve avere le colonne ['frame_idx', 'track_id', 'x1', 'y1', 'x2', 'y2'].
+        classify_model: Il modello di classificazione YOLO caricato.
+
+    Returns:
+        list: Una lista di dizionari, ognuno con 'frame_idx', 'track_id', 
+              'classification_class', e 'confidence'.
+    """
+    if detections_df.empty:
+        return []
+
+    results = []
+    
+    # Raggruppa per frame per leggere ogni frame una sola volta
+    grouped_by_frame = detections_df.groupby('frame_idx')
+    
+    with tqdm(total=len(grouped_by_frame), desc="Classifying Detections") as pbar:
+        for frame_idx, group in grouped_by_frame:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            for _, row in group.iterrows():
+                x1, y1, x2, y2 = int(row['x1']), int(row['y1']), int(row['x2']), int(row['y2'])
+                
+                # Ritaglia l'immagine dalla bounding box
+                crop = frame[y1:y2, x1:x2]
+                
+                if crop.size > 0:
+                    cls_results = classify_model(crop, verbose=False)
+                    top1 = cls_results[0].probs.top1
+                    top1_conf = cls_results[0].probs.top1conf.item()
+                    class_name = classify_model.names[top1]
+                    
+                    results.append({
+                        'frame_idx': frame_idx,
+                        'track_id': row['track_id'],
+                        'classification_class': class_name,
+                        'confidence': top1_conf
+                    })
+            pbar.update(1)
+            
+    return results
         else:
             print("No external video file found to extract audio from. Video saved without audio.")
         # --- FINE NUOVA LOGICA ---
