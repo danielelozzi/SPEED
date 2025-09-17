@@ -34,6 +34,7 @@ sys.path.insert(0, str(project_root))
 from desktop_app.interactive_video_editor import InteractiveVideoEditor
 from desktop_app.aoi_editor import AoiEditor
 from desktop_app.manual_aoi_editor import ManualAoiEditor
+from desktop_app.marker_surface_editor import MarkerSurfaceEditor
 from device_converter_window import DeviceConverterWindow
 from src.speed_analyzer import run_full_analysis
 from src.speed_analyzer import _prepare_working_directory # Importazione diretta
@@ -1394,6 +1395,7 @@ class SpeedApp:
         ttk.Radiobutton(choice_dialog, text="Static AOI (Fixed Rectangle)", variable=aoi_mode, value="static").pack(anchor='w', padx=20)
         ttk.Radiobutton(choice_dialog, text="Dynamic AOI (Automatic Object Tracking)", variable=aoi_mode, value="dynamic_auto").pack(anchor='w', padx=20)
         ttk.Radiobutton(choice_dialog, text="Dynamic AOI (Manual Keyframes)", variable=aoi_mode, value="dynamic_manual").pack(anchor='w', padx=20)
+        ttk.Radiobutton(choice_dialog, text="Surface from Markers (for Enrichment)", variable=aoi_mode, value="marker_surface").pack(anchor='w', padx=20)
 
         def on_proceed():
             mode = aoi_mode.get()
@@ -1417,6 +1419,8 @@ class SpeedApp:
             editor.update_ui_for_mode()
         elif mode == 'dynamic_manual':
             editor = ManualAoiEditor(self.root, video_path)
+        elif mode == 'marker_surface':
+            editor = MarkerSurfaceEditor(self.root, video_path)
 
         if editor:
             self.root.wait_window(editor)
@@ -1435,6 +1439,13 @@ class SpeedApp:
                         'name': editor.aoi_name, 
                         'type': 'dynamic_manual', 
                         'data': editor.saved_keyframes
+                    }
+            elif isinstance(editor, MarkerSurfaceEditor):
+                if editor.result is not None:
+                    new_aoi = {
+                        'name': editor.aoi_name,
+                        'type': 'marker_surface',
+                        'data': editor.result
                     }
 
             if new_aoi:
