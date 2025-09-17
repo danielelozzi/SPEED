@@ -125,8 +125,10 @@ if __name__ == "__main__":
 
     # --- Setup Stream Video ---
     video_channel_count = WIDTH * HEIGHT * 3
-    # --- CORREZIONE QUI ---
-    info_video = StreamInfo(VIDEO_STREAM_NAME, VIDEO_STREAM_TYPE, video_channel_count, VIDEO_RATE, 'uint8', 'VideoSimID1')
+    # The pylsl library does not support 'uint8'. The common practice is to use 'int8'
+    # for byte streams, as the underlying data is sent as bytes. The receiver can
+    # correctly interpret this as uint8 if it knows the original format.
+    info_video = StreamInfo(VIDEO_STREAM_NAME, VIDEO_STREAM_TYPE, video_channel_count, VIDEO_RATE, 'int8', 'VideoSimID1')
     info_video.desc().append_child_value("width", str(WIDTH))
     info_video.desc().append_child_value("height", str(HEIGHT))
     info_video.desc().append_child_value("color_format", "BGR")

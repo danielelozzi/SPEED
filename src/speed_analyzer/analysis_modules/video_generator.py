@@ -5,7 +5,6 @@ import cv2
 from pathlib import Path
 from tqdm import tqdm
 import traceback, logging
-from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip
 
 # --- Constants ---
 NS_TO_S = 1e9 # Conversion factor from nanoseconds to seconds
@@ -567,6 +566,7 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
         if external_vid_path.exists():
             try:
                 print("Adding audio to the generated video...")
+                from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip
                 video_clip = VideoFileClip(str(temp_video_path))
                 original_audio_clip = AudioFileClip(str(external_vid_path))
 
@@ -647,6 +647,3 @@ def classify_detections(cap: cv2.VideoCapture, detections_df: pd.DataFrame, clas
             pbar.update(1)
             
     return results
-        else:
-            print("No external video file found to extract audio from. Video saved without audio.")
-        # --- FINE NUOVA LOGICA ---
