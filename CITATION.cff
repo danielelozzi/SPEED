@@ -30,7 +30,7 @@ preferred-citation:
   - family-names: "Curcio"
     given-names: "Giuseppe"
     orcid: "https://orcid.org/0000-0003-2248-781X"
-  doi: "10.0000/00000"
+  doi: "10.3390/neurosci6020035"
   journal: "NeuroSci"
   start: 1 # First page number
   end: 23 # Last page number
