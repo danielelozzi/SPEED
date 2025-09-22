@@ -1,26 +1,40 @@
 cff-version: 1.2.0
-message: "If you use this work, please cite it as below."
-type: article
-title: "SPEED: A Graphical User Interface Software for Processing Eye Tracking Data"
+message: "If you use this software, please cite it as below."
 authors:
+- family-names: "Daniele"
+  given-names: "Lozzi"
+  orcid: "https://orcid.org/0000-0002-6180-5131"
+title: "SPEED: A Graphical User Interface Software for Processing Eye Tracking Data"
+version: 5.2.0
+doi: 10.5281/zenodo.14049988
+date-released: 2024-11-07
+url: "https://www.mdpi.com/2673-4087/6/2/35"
+preferred-citation:
+  type: article
+  authors:
   - family-names: "Lozzi"
     given-names: "Daniele"
+    orcid: "https://orcid.org/0000-0002-6180-5131"
   - family-names: "Di Pompeo"
     given-names: "Ilaria"
+    orcid: "https://orcid.org/0009-0002-7250-1595"
   - family-names: "Marcaccio"
     given-names: "Martina"
+    orcid: "https://orcid.org/0009-0000-2912-1031"
   - family-names: "Ademaj"
     given-names: "Matias"
+    orcid: "https://orcid.org/0009-0006-5596-0828"
   - family-names: "Migliore"
     given-names: "Simone"
+    orcid: "https://orcid.org/0000-0002-2665-231X"
   - family-names: "Curcio"
     given-names: "Giuseppe"
-journal: "NeuroSci"
-volume: 6
-issue: 2
-issn: "2673-4087"
-# La documentazione CFF usa 'start' per indicare la pagina iniziale o l'article-number
-start: 35
-doi: "10.3390/neurosci6020035"
-url: "https://www.mdpi.com/2673-4087/6/2/35"
-date-released: 2025-04-16
+    orcid: "https://orcid.org/0000-0003-2248-781X"
+  doi: "10.0000/00000"
+  journal: "NeuroSci"
+  start: 1 # First page number
+  end: 23 # Last page number
+  title: "SPEED: A Graphical User Interface Software for Processing Eye Tracking Data"
+  issue: 35
+  volume: 6(2)
+  year: 2025
