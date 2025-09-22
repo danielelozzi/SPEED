@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: Lozzi
+    given-names: Daniele
+    orcid: https://orcid.org/0000-0002-6180-5131
+title: "SPEED: A Graphical User Interface Software for Processing Eye Tracking Data"
+version: 5.2.0
+identifiers:
+  - type: doi
+    value: 10.3390/neurosci6020035
+date-released: 2021-08-11
