@@ -1,12 +1,27 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite it as below."
-authors:
-  - family-names: Lozzi
-    given-names: Daniele
-    orcid: https://orcid.org/0000-0002-6180-5131
+message: "If you use this work, please cite it as below."
+type: article
 title: "SPEED: A Graphical User Interface Software for Processing Eye Tracking Data"
-version: 5.2.0
+authors:
+  - family-names: "Lozzi"
+    given-names: "Daniele"
+  - family-names: "Di Pompeo"
+    given-names: "Ilaria"
+  - family-names: "Marcaccio"
+    given-names: "Martina"
+  - family-names: "Ademaj"
+    given-names: "Matias"
+  - family-names: "Migliore"
+    given-names: "Simone"
+  - family-names: "Curcio"
+    given-names: "Giuseppe"
+journal: "NeuroSci"
+volume: 6
+issue: 2
+start: 35
+issn: "2673-4087"
+url: "https://www.mdpi.com/2673-4087/6/2/35"
 identifiers:
   - type: doi
-    value: 10.5281/zenodo.14049988
-date-released: 2021-08-11
+    value: 10.3390/neurosci6020035
+date-released: 2025-08-28
