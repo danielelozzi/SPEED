@@ -5,13 +5,22 @@ title: "SPEED: A Graphical User Interface Software for Processing Eye Tracking D
 authors:
   - family-names: "Lozzi"
     given-names: "Daniele"
+  - family-names: "Di Pompeo"
+    given-names: "Ilaria"
+  - family-names: "Marcaccio"
+    given-names: "Martina"
+  - family-names: "Ademaj"
+    given-names: "Matias"
+  - family-names: "Migliore"
+    given-names: "Simone"
+  - family-names: "Curcio"
+    given-names: "Giuseppe"
 journal: "NeuroSci"
 volume: 6
 issue: 2
-start: 35
 issn: "2673-4087"
+# La documentazione CFF usa 'start' per indicare la pagina iniziale o l'article-number
+start: 35
+doi: "10.3390/neurosci6020035"
 url: "https://www.mdpi.com/2673-4087/6/2/35"
-identifiers:
-  - type: doi
-    value: 10.3390/neurosci6020035
-date-released: 2025-08-28
+date-released: 2025-04-16
