@@ -8,5 +8,5 @@ title: "SPEED: A Graphical User Interface Software for Processing Eye Tracking D
 version: 5.2.0
 identifiers:
   - type: doi
-    value: 10.3390/neurosci6020035
+    value: 10.5281/zenodo.14049988
 date-released: 2021-08-11
