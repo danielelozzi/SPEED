@@ -7,6 +7,8 @@ import time
 import logging
 import random
 from tqdm import tqdm
+import qrcode
+from PIL import Image
 
 # --- 1. CONFIGURAZIONE DEL LOGGING ---
 log_dir = Path('./logs')
@@ -82,6 +84,21 @@ def generate_viv_videos():
     writer2.release()
     logging.info("Video-in-Video source videos generated.")
 
+# --- NUOVA FUNZIONE: GENERAZIONE IMMAGINI QR CODE ---
+def create_qr_code_image(data: str, size: int = 40):
+    """Crea un'immagine di un QR code e la restituisce come array numpy."""
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=2,
+    )
+    qr.add_data(data)
+    qr.make(fit=True)
+    img_pil = qr.make_image(fill_color="black", back_color="white").convert('RGB')
+    img_pil = img_pil.resize((size, size), Image.Resampling.NEAREST)
+    return np.array(img_pil)
+
 # --- 4. FUNZIONI PER LA GENERAZIONE DEI VIDEO ---
 def generate_videos():
     """
@@ -96,6 +113,13 @@ def generate_videos():
     surface_corners = []
     object_paths = {1: [], 2: []} # track_id 1 e 2
 
+    # --- NUOVO: Genera le immagini dei QR code una sola volta ---
+    qr_size = 40
+    qr_tl_img = create_qr_code_image("TL", size=qr_size)
+    qr_tr_img = create_qr_code_image("TR", size=qr_size)
+    qr_bl_img = create_qr_code_image("BL", size=qr_size)
+    qr_br_img = create_qr_code_image("BR", size=qr_size)
+
     logging.info("Generating external.mp4 and internal.mp4...")
     for i in tqdm(range(NUM_FRAMES), desc="Generating Videos"):
         # Frame esterno (scena)
@@ -107,6 +131,24 @@ def generate_videos():
         tl = (int(center_x - surface_w/2), int(center_y - surface_h/2))
         br = (int(center_x + surface_w/2), int(center_y + surface_h/2))
         cv2.rectangle(frame_ext, tl, br, (150, 150, 150), -1)
+
+        # --- NUOVO: Disegna i QR code agli angoli della superficie ---
+        # Calcola le posizioni degli angoli
+        tl_pos = (tl[0], tl[1])
+        tr_pos = (br[0] - qr_size, tl[1])
+        bl_pos = (tl[0], br[1] - qr_size)
+        br_pos = (br[0] - qr_size, br[1] - qr_size)
+
+        # Sovrapponi le immagini dei QR code (con controllo dei bordi)
+        def overlay_image(background, overlay, pos):
+            x, y = pos
+            h, w, _ = overlay.shape
+            background[y:y+h, x:x+w] = overlay
+        overlay_image(frame_ext, qr_tl_img, tl_pos)
+        overlay_image(frame_ext, qr_tr_img, tr_pos)
+        overlay_image(frame_ext, qr_bl_img, bl_pos)
+        overlay_image(frame_ext, qr_br_img, br_pos)
+
         surface_corners.append({
             'tl x [px]': tl[0], 'tl y [px]': tl[1], 'tr x [px]': br[0], 'tr y [px]': tl[1],
             'br x [px]': br[0], 'br y [px]': br[1], 'bl x [px]': tl[0], 'bl y [px]': br[1],
