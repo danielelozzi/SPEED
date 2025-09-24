@@ -12,3 +12,4 @@ pupil-labs-realtime-api
 pylsl
 pydicom
 pygame
+qrcode
