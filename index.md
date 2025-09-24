@@ -1,4 +1,4 @@
-# Welcome to the Official Page for SPEED 5.2.0 - labScoc Processing and Extraction of Eye tracking Data
+# Welcome to the Official Page for SPEED 5.3.0 - labScoc Processing and Extraction of Eye tracking Data
 
 *An Advanced Eye-Tracking Data Analysis Software for Researchers*
 
@@ -13,7 +13,7 @@ SPEED is a Python-based project for processing, analyzing, and visualizing eye-t
 - **[GitHub project](https://www.github.com/danielelozzi/SPEED/)**
 - **[GitHub website](https://danielelozzi.github.io/SPEED/)**
 - **[speed-analyzer documentation](https://danielelozzi.github.io/SPEED/documentation/documentation.html)**
-
+- **[To-Do List](#-to-do-list)**
 
 ---
 
@@ -31,6 +31,8 @@ SPEED is designed for cognitive and behavioral experiments, providing a modular 
 * **Data Viewer**: A separate window that allow the visualization of DICOM/BIDS metadata and the visualization/plot the data.
 * **Multi-Task YOLO**: Pre-trained and custom object detection, segmentation, and pose estimation using a wide range of YOLO models.
 * **Data Interoperability**: Convert data to and from standard formats like BIDS and DICOM.
+* **Video-in-Video**: A specialized video generation mode that replaces the scene camera view with the on-screen content the user is watching, synchronized with gaze and events.
+
 
 ## Getting Started
 
@@ -59,7 +61,7 @@ The core analysis engine of SPEED, now available as a reusable package. It's des
 ### Installation from PyPI
 You can install the package directly from the Python Package Index (PyPI) using pip:
 ```bash
-pip install speed-analyzer==5.2.0
+pip install speed-analyzer==5.3.0
 ```
 ### How to Use the Package
 The package exposes a main function, `run_full_analysis`, that takes paths and options as arguments. See the `example_usage.py` file for a complete demonstration.
@@ -243,7 +245,7 @@ This approach guarantees that your analysis is always executed in the same contr
 ---
 
 ## The Modular Workflow (GUI)
-SPEED 5.2.0 operates on a two-step workflow designed to save time and computational resources.
+SPEED 5.3.0 operates on a two-step workflow designed to save time and computational resources.
 
 ### Step 1: Run Core Analysis
 This is the main data processing stage. You run this step only once per participant for a given set of events. The software will:
@@ -277,6 +279,20 @@ The "Generate Plots" tab allows you to create a wide range of visualizations for
 * **Gaze Fragmentation Plot**: This plot displays the speed of gaze movement (in pixels per second) over time. High fragmentation can be an indicator of visual searching behavior or cognitive instability.
 
 Simply select the desired plot types in the GUI and click "GENERATE SELECTED PLOTS". The software will use the pre-processed data to generate the figures for all selected events.
+
+#### Generate Videos 🎬
+
+The "Generate Videos" tab allows you to create highly customized videos with synchronized data overlays.
+
+*   **Standard Video**: Overlay gaze points, pupillometry plots, event names, and YOLO detections on the original scene video. You can trim the video to specific event segments.
+*   **Video-in-Video**: A powerful feature for analyzing screen-based interactions. This mode replaces the external camera video with a screen recording that the participant was viewing. It requires `enriched` gaze data and synchronizes different screen recording clips to specific events. Between events, a gray screen is shown. A dedicated editor allows you to map video files to events.
+
+To generate a video:
+1.  Go to the "Generate Videos" tab.
+2.  Select the desired overlays (gaze, plots, YOLO boxes, etc.).
+3.  Choose the output filename.
+4.  Click **"GENERATE VIDEO"** for a standard video or **"GENERATE VIDEO-IN-VIDEO"** to open the specific editor for this mode.
+
 
 ### Computer Vision Analysis with YOLO 🤖
 
@@ -360,7 +376,7 @@ python lsl_stream_simulator.py
 
 ## Export to BIDS Format
 
-SPEED 5.2.0 introduces a new feature to convert processed eye-tracking data into a format compatible with the **Brain Imaging Data Structure (BIDS)**, following the [BEP020 for Eye Tracking](https://bids.neuroimaging.io/extensions/beps/bep_020.html) guidelines. This facilitates data sharing and standardization for the research community.
+SPEED 5.3.0 introduces a new feature to convert processed eye-tracking data into a format compatible with the **Brain Imaging Data Structure (BIDS)**, following the [BEP020 for Eye Tracking](https://bids.neuroimaging.io/extensions/beps/bep_020.html) guidelines. This facilitates data sharing and standardization for the research community.
 
 ### Use via Desktop App
 
@@ -554,13 +570,19 @@ If you also the Computer Vision YOLO-based feature, please cite the following pu
 - Redmon, J., Divvala, S., Girshick, R., & Farhadi, A. (2016). You only look once: Unified, real-time object detection. In Proceedings of the IEEE conference on computer vision and pattern recognition (pp. 779-788). [10.1109/CVPR.2016.91](https://doi.org/10.1109/CVPR.2016.91)
 
 If you use the BIDS converter, please cite the BIDS format for eyetracker:
-
 - Szinte, Martin, et al. "Eye-Tracking-BIDS: the brain imaging data structure extended to gaze position and pupil data." Journal of Vision 25.9 (2025): 2351-2351. [10.1167/jov.25.9.2351](https://doi.org/10.1167/jov.25.9.2351)
 
 If you use the DICOM converter, please cite the DICOM inspiration paper:
-
 - Di Matteo, A., Lozzi, D., Mignosi, F., Polsinelli, M., & Placidi, G. (2025). A DICOM-based standard for quantitative physical rehabilitation. Computational and Structural Biotechnology Journal, 28, 40-49. [10.1016/j.csbj.2025.01.012](https://doi.org/10.1016/j.csbj.2025.01.012)
 
+---
+
+## ✅ To-Do List
+
+This is the list of features and improvements planned for future versions of SPEED:
+
+- **QR Code Trimming**: Implement a feature to automatically trim videos based on QR code markers detected at the start and end of a recording.
+- **Sport-Specific Event Analysis**: Develop specialized analysis modules and event markers tailored for sports science research (e.g., analyzing gaze during specific plays or movements).
 
 ---
 

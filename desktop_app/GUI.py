@@ -679,7 +679,7 @@ OFFICIAL_YOLO_CLS_MODELS = [
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.2.0")
+        self.root.title("SPEED v5.3.0")
         self.root.geometry("850x850")
 
         self.raw_dir_var = tk.StringVar()
@@ -721,6 +721,7 @@ class SpeedApp:
         self.participant_name_var = tk.StringVar(); self.participant_name_var.trace_add("write", self.update_output_dir_default)
         tk.Entry(name_frame, textvariable=self.participant_name_var).pack(fill=tk.X, expand=True)
         output_frame = tk.Frame(setup_frame); output_frame.pack(fill=tk.X, pady=2)
+        self.concatenated_video_path = None # NUOVO: per tracciare il video ViV
         tk.Label(output_frame, text="Output Folder:", width=20, anchor='w').pack(side=tk.LEFT)
         self.output_dir_entry = tk.Entry(output_frame); self.output_dir_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(output_frame, text="Browse...", command=self.select_output_dir).pack(side=tk.RIGHT)
@@ -771,6 +772,17 @@ class SpeedApp:
         self.remove_aoi_btn = tk.Button(aoi_button_frame, text="Remove Selected AOI", command=self.remove_selected_aoi, state=tk.DISABLED)
         self.remove_aoi_btn.pack(side=tk.LEFT, padx=10)
         self.aoi_listbox.bind('<<ListboxSelect>>', self.on_aoi_select)
+
+        # --- NUOVO: Sezione per la creazione del Video-in-Video ---
+        viv_frame = tk.LabelFrame(main_frame, text="2.2 Video-in-Video Setup (Optional)", padx=10, pady=10)
+        viv_frame.pack(fill=tk.X, pady=5, padx=10)
+        viv_info_label = tk.Label(viv_frame, text="This replaces the scene video with screen recordings synchronized to events.\nRequires 'enriched' data to be available.", justify=tk.LEFT)
+        viv_info_label.pack(anchor='w')
+        self.create_viv_btn = tk.Button(viv_frame, text="Create Concatenated Video...", command=self.run_video_in_video_creation, state=tk.DISABLED)
+        self.create_viv_btn.pack(pady=5)
+        self.viv_status_label = tk.Label(viv_frame, text="Status: Using original scene video.", fg="grey")
+        self.viv_status_label.pack(anchor='w', pady=(0, 5))
+        # --- FINE NUOVA SEZIONE ---
 
         event_frame = tk.LabelFrame(main_frame, text="2.5 Event Management", padx=10, pady=10)
         event_frame.pack(fill=tk.X, pady=5, padx=10)
@@ -1153,7 +1165,7 @@ class SpeedApp:
         if dir_path and dir_path not in self.enriched_dir_paths:
             self.enriched_dir_paths.append(dir_path)
             self.enriched_listbox.insert(tk.END, Path(dir_path).name) # Mostra solo il nome della cartella
-            self.update_aoi_list_display()
+            self.load_data_for_editors() # --- CORREZIONE: Ricarica i dati quando si aggiunge una cartella enriched
 
     def remove_enriched_dir(self):
         selected_indices = self.enriched_listbox.curselection()
@@ -1201,7 +1213,6 @@ class SpeedApp:
         self.video_filename_var = tk.StringVar(value="video_output_1.mp4")
         tk.Entry(video_options_frame, textvariable=self.video_filename_var).pack(fill=tk.X, pady=5)
         tk.Button(parent_tab, text="GENERATE VIDEO", command=self.run_video_generation, font=('Helvetica', 10, 'bold'), bg='#ef9a9a').pack(pady=10)
-
     def setup_yolo_tab(self, parent_tab):
         tk.Button(parent_tab, text="Load/Refresh YOLO Results", command=self.load_yolo_results, font=('Helvetica', 10, 'bold'), bg='#ffcc80').pack(pady=10)
         
@@ -1238,18 +1249,35 @@ class SpeedApp:
         self.update_aoi_list_display()
         unenriched_path_str = self.unenriched_dir_var.get()
         ext_event_file_str = self.external_event_file_var.get()
-        
+
         event_dfs = []
-        
-        if unenriched_path_str:
-            default_events_path = Path(unenriched_path_str) / 'events.csv'
-            if default_events_path.exists():
+
+        # --- MODIFICA: Logica di caricamento eventi migliorata ---
+        # 1. Prova a caricare gli eventi dalle cartelle "Enriched" se presenti.
+        #    Questo è utile se gli eventi sono specifici per un'analisi arricchita.
+        if self.enriched_dir_paths:
+            for enriched_path_str in self.enriched_dir_paths:
+                events_path = Path(enriched_path_str) / 'events.csv'
+                if events_path.exists():
+                    try:
+                        df = pd.read_csv(events_path)
+                        df['source'] = Path(enriched_path_str).name # Usa il nome della cartella come sorgente
+                        event_dfs.append(df)
+                        logging.info(f"Loaded events from enriched folder: {events_path}")
+                    except Exception as e:
+                        messagebox.showerror("Error", f"Could not read events.csv from {enriched_path_str}:\n{e}")
+
+        # 2. Se non sono stati trovati eventi nelle cartelle enriched, carica dalla cartella "Un-enriched".
+        if not event_dfs and unenriched_path_str:
+            events_path = Path(unenriched_path_str) / 'events.csv'
+            if events_path.exists():
                 try:
-                    df_default = pd.read_csv(default_events_path)
-                    df_default['source'] = 'default'
-                    event_dfs.append(df_default)
+                    df = pd.read_csv(events_path)
+                    df['source'] = 'un-enriched'
+                    event_dfs.append(df)
+                    logging.info(f"Loaded events from un-enriched folder: {events_path}")
                 except Exception as e:
-                    messagebox.showerror("Error", f"Could not read default events.csv:\n{e}")
+                    messagebox.showerror("Error", f"Could not read events.csv from {unenriched_path_str}:\n{e}")
 
         if ext_event_file_str:
             optional_events_path = Path(ext_event_file_str)
@@ -1260,6 +1288,7 @@ class SpeedApp:
                     event_dfs.append(df_optional)
                 except Exception as e:
                     messagebox.showerror("Error", f"Could not read optional events file:\n{e}")
+        # --- FINE MODIFICA ---
 
         if event_dfs:
             self.events_df = pd.concat(event_dfs, ignore_index=True).sort_values('timestamp [ns]').reset_index(drop=True)
@@ -1283,6 +1312,8 @@ class SpeedApp:
             self.world_timestamps_df = pd.DataFrame()
             
         self.update_event_summary_display()
+        self.on_aoi_select(None) # Aggiorna lo stato dei pulsanti dipendenti, come ViV
+   
 
     def update_event_summary_display(self):
         if not self.events_df.empty:
@@ -1303,6 +1334,10 @@ class SpeedApp:
         self.edit_video_btn.config(state=tk.NORMAL if video_path and video_path.exists() else tk.DISABLED)
 
     def open_event_manager_table(self):
+        # --- NUOVO: Importazione JIT ---
+        from desktop_app.event_manager import EventManagerWindow
+        # --- FINE ---
+
         if self.events_df.empty:
             messagebox.showwarning("Warning", "No events loaded to edit.")
             return
@@ -1369,6 +1404,12 @@ class SpeedApp:
         self.on_aoi_select(None)
 
     def on_aoi_select(self, event):
+        # --- NUOVO: Abilita il pulsante ViV se ci sono AOI (che genereranno dati enriched) ---
+        # CORREZIONE: Il pulsante ViV deve essere abilitato se gli eventi sono stati caricati,
+        # non solo se ci sono AOI o cartelle enriched. La presenza di eventi è il vero requisito.
+        can_create_viv = Path(self.unenriched_dir_var.get()).is_dir() and not self.events_df.empty
+        self.create_viv_btn.config(state=tk.NORMAL if can_create_viv else tk.DISABLED)
+        # --- FINE ---
         self.remove_aoi_btn.config(state=tk.NORMAL if self.aoi_listbox.curselection() else tk.DISABLED)
 
     def remove_selected_aoi(self):
@@ -1380,6 +1421,7 @@ class SpeedApp:
             for index in sorted(selected_indices, reverse=True):
                 del self.user_defined_aois[index]
             self.update_aoi_list_display()
+            self.on_aoi_select(None) # Aggiorna lo stato del pulsante ViV
 
     def open_aoi_editor(self):
         choice_dialog = tk.Toplevel(self.root)
@@ -1492,6 +1534,7 @@ class SpeedApp:
             
             # --- NUOVO: Passa il DataFrame YOLO filtrato se esiste ---
             yolo_df_to_use = None
+            # --- MODIFICA: Usa il video concatenato se esiste ---
             if hasattr(self, 'yolo_detections_df') and not self.yolo_detections_df.empty:
                 yolo_cache_path = output_dir_path / 'yolo_detections_cache.csv'
                 if yolo_cache_path.exists():
@@ -1504,6 +1547,9 @@ class SpeedApp:
                     yolo_df_to_use = self.yolo_detections_df
 
             run_full_analysis(
+                # --- MODIFICA: Passa il percorso del video concatenato se esiste ---
+                concatenated_video_path=self.concatenated_video_path,
+                # --- FINE MODIFICA ---
                 raw_data_path=self.raw_dir_var.get(),
                 unenriched_data_path=self.unenriched_dir_var.get(),
                 enriched_data_paths=self.enriched_dir_paths if not self.user_defined_aois else None,
@@ -1594,6 +1640,55 @@ class SpeedApp:
         except Exception as e:
             logging.error(f"Video Generation Error: {e}\n{traceback.format_exc()}")
             messagebox.showerror("Video Generation Error", f"An error occurred: {e}\n\nSee log for details.")
+
+    def run_video_in_video_creation(self):
+        """
+        Wrapper to launch the Video-in-Video editor and create the concatenated
+        base video *before* the main analysis.
+        """
+        common_paths = self._get_common_paths()
+        if not common_paths:
+            return
+        output_dir_path, subj_name = common_paths
+
+        # --- NUOVO: Importazione Just-in-Time ---
+        from desktop_app.video_in_video_editor import VideoInVideoEditor
+
+        if self.events_df.empty:
+            messagebox.showerror("Error", "Events must be loaded to create a video-in-video. Please load a dataset.", parent=self.root)
+            return
+
+        editor = VideoInVideoEditor(self.root, self.events_df)
+        self.root.wait_window(editor)
+
+        event_video_mapping = editor.result
+        viv_events_df = editor.result # Il risultato ora è un DataFrame
+        if not event_video_mapping:
+            logging.info("Video-in-video creation cancelled by user.")
+            return
+
+        try:
+            output_dir_path.mkdir(parents=True, exist_ok=True)
+            working_dir = output_dir_path / "SPEED_workspace"
+            working_dir.mkdir(exist_ok=True)
+            
+            # --- MODIFICA: Salva il nuovo DataFrame degli eventi ViV ---
+            # Questo file verrà letto da generate_concatenated_video
+            viv_events_df.to_csv(working_dir / 'events-video-in-video.csv', index=False)
+            # Per compatibilità con il resto del flusso, salviamo anche una versione
+            # base di events.csv senza le colonne extra.
+            viv_events_df[['name', 'timestamp [ns]', 'recording id']].to_csv(working_dir / 'events.csv', index=False)
+
+            messagebox.showinfo("In Progress", "Creating concatenated video...")
+            self.concatenated_video_path = video_generator.generate_concatenated_video(
+                data_dir=working_dir,
+                viv_events_df=viv_events_df
+            )
+            self.viv_status_label.config(text=f"Status: Using concatenated video: {self.concatenated_video_path.name}", fg="green")
+            messagebox.showinfo("Success", f"Concatenated video created successfully!\nIt will be used for the main analysis.")
+        except Exception as e:
+            logging.error(f"Video-in-Video Generation Error: {e}\n{traceback.format_exc()}")
+            messagebox.showerror("Video-in-Video Error", f"An error occurred: {e}\n\nSee log for details.")
 
     def select_classification_model(self):
         """Apre un file dialog per selezionare un modello di classificazione .pt."""

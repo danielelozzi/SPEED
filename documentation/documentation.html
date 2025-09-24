@@ -67,6 +67,7 @@
                     <li><a href="#event-analysis" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Event-based Analysis</a></li>
                     <li><a href="#video-generator" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Video Generator</a></li>
                     <li><a href="#yolo-analyzer" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">YOLO Analyzer</a></li>
+                    <li><a href="#interactive-editor" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Interactive Editor</a></li>
                 </ul>
             </nav>
         </aside>
@@ -113,6 +114,10 @@
                      <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
                         <h3 class="font-bold text-xl mb-2 text-indigo-600">YOLO Analyzer</h3>
                         <p class="text-gray-600">Applies YOLO models to detect objects and correlates this information with eye-tracking data to generate statistics.</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+                        <h3 class="font-bold text-xl mb-2 text-indigo-600">Interactive Video Editor</h3>
+                        <p class="text-gray-600">A powerful GUI tool for adding/editing events, running multi-task YOLO analysis, and exporting videos with custom overlays.</p>
                     </div>
                 </div>
             </section>
@@ -216,6 +221,11 @@
                         <li><code>process_and_visualize(...)</code>: Fetches the latest data, runs YOLO, and draws all enabled overlays onto the scene video frame.</li>
                         <li><code>close()</code>: Safely disconnects from the device.</li>
                     </ul>
+                    <h4 class="font-semibold text-lg mt-4 mb-2">New Features:</h4>
+                    <ul class="list-disc list-inside space-y-2 text-gray-600">
+                        <li>**Audio Recording**: Can now record audio alongside video streams.</li>
+                        <li>**Advanced Visualizations**: Includes a dynamic heatmap, gaze path with fading trail, and a dedicated blink detection plot.</li>
+                    </ul>
                 </div>
             </section>
 
@@ -281,13 +291,13 @@
                     <ul class="list-disc list-inside space-y-2 text-gray-600">
                         <li><code>data_dir</code> (Path): Path to the directory containing eye-tracking data and the scene video.</li>
                         <li><code>output_dir</code> (Path): Path where analysis results will be saved.</li>
-                        <li><code>yolo_task</code> (str): The task for the YOLO model (e.g., <code>detect</code>, <code>segment</code>, <code>pose</code>).</li>
-                        <li><code>yolo_model_name</code> (str): The name of the YOLO model file (e.g., <code>yolov8n.pt</code>).</li>
+                        <li><code>yolo_models</code> (Dict[str, str]): A dictionary mapping a task (e.g., 'detect', 'segment') to a model file name (e.g., 'yolov8n.pt').</li>
                         <li><code>custom_classes</code> (Optional[List[str]]): A list of class names for zero-shot detection.</li>
+                        <li><code>yolo_detections_df</code> (Optional[pd.DataFrame]): A pre-filtered DataFrame of YOLO detections to use, bypassing video analysis.</li>
                     </ul>
                      <h4 class="font-semibold text-lg mt-4 mb-2">Functionality:</h4>
                      <ul class="list-disc list-inside space-y-2 text-gray-600">
-                        <li>Automatically selects GPU or CPU for inference.</li>
+                        <li>**Multi-Task Analysis**: Can run detection, segmentation, and pose estimation models simultaneously on the video.</li>
                         <li>Runs YOLO tracking on the video or loads from a cache file.</li>
                         <li>Correlates fixations with detected object bounding boxes (or segmentation masks).</li>
                         <li>Calculates statistics like fixation count per object and average pupil size.</li>
@@ -296,6 +306,28 @@
                     </ul>
                 </div>
             </section>
+
+            <!-- Interactive Video Editor Section -->
+            <section id="interactive-editor" class="mb-16 scroll-mt-20">
+                <h2 class="text-3xl font-bold text-gray-900 border-b pb-4 mb-6">Interactive Video Editor (<code>interactive_video_editor.py</code>)</h2>
+                <p class="text-gray-600 mb-8">This module provides a comprehensive graphical interface for advanced, interactive analysis of a recorded session. It combines event management with powerful, on-the-fly computer vision analysis.</p>
+                
+                <div class="bg-white p-6 rounded-lg border border-gray-200">
+                    <h3 class="text-2xl font-semibold text-gray-800 mb-3">Class: <code>InteractiveVideoEditor</code></h3>
+                    <p class="text-gray-600 mb-4">A Toplevel Tkinter window that allows users to visualize data, manage events, and run complex analyses directly on a video.</p>
+                    <h4 class="font-semibold text-lg mt-4 mb-2">Key Features:</h4>
+                    <ul class="list-disc list-inside space-y-2 text-gray-600">
+                        <li><strong>Event Management</strong>: Add, remove, and drag-and-drop event markers directly on an interactive timeline.</li>
+                        <li><strong>Multi-Task YOLO Analysis</strong>: Select and run different YOLO models for object detection, segmentation, and pose estimation simultaneously. The results from all tasks are merged and visualized.</li>
+                        <li><strong>Interactive Filtering</strong>: Use a tabbed interface to view detected objects, segmented areas, and poses. Users can toggle the visibility of entire classes or individual tracked instances.</li>
+                        <li><strong>Audio Playback</strong>: Plays the video with its original audio, which can be muted or unmuted.</li>
+                        <li><strong>Overlay Control</strong>: All YOLO results (bounding boxes, segmentation masks, and pose skeletons) are overlaid on the video, respecting the user's filter selections.</li>
+                        <li><strong>Video Export</strong>: Export the current view as a new video file, with all selected overlays and optional audio baked in.</li>
+                        <li><strong>Data Persistence</strong>: When saving, the editor returns both the modified event data and a DataFrame containing only the YOLO detections that were visible (not filtered out) by the user.</li>
+                    </ul>
+                </div>
+            </section>
+
         </main>
     </div>
 

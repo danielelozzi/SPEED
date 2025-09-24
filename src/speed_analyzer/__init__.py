@@ -113,14 +113,29 @@ def _generate_enriched_from_multiple_aois(
 
     return enriched_gaze # Restituisce per il calcolo SI
 
-def _prepare_working_directory(output_dir: Path, raw_dir: Path, unenriched_dir: Path, enriched_dirs: List[Path], events_df: pd.DataFrame):
+def _prepare_working_directory(
+    output_dir: Path,
+    raw_dir: Path,
+    unenriched_dir: Path,
+    enriched_dirs: List[Path],
+    events_df: pd.DataFrame,
+    concatenated_video_path: Optional[Path] = None,
+    viv_events_path: Optional[Path] = None
+):
     working_dir = output_dir / 'eyetracking_files'
     working_dir.mkdir(parents=True, exist_ok=True)
     logging.info(f"Preparing working directory at: {working_dir}")
-    try:
-        external_video_path = next(unenriched_dir.glob('*.mp4'))
-    except StopIteration:
-        raise FileNotFoundError(f"No .mp4 file found in {unenriched_dir}")
+
+    # --- MODIFICA: Usa il video concatenato se fornito, altrimenti cerca quello di default ---
+    if concatenated_video_path and concatenated_video_path.exists():
+        external_video_path = concatenated_video_path
+        logging.info(f"Using provided concatenated video: {external_video_path}")
+    else:
+        try:
+            external_video_path = next(unenriched_dir.glob('*.mp4'))
+        except StopIteration:
+            raise FileNotFoundError(f"No .mp4 file found in {unenriched_dir}")
+
     file_map = {
         'internal.mp4': raw_dir / 'Neon Sensor Module v1 ps1.mp4',
         'external.mp4': external_video_path,
@@ -161,8 +176,13 @@ def _prepare_working_directory(output_dir: Path, raw_dir: Path, unenriched_dir: 
             shutil.copy(source, working_dir / dest)
         else:
             logging.warning(f"Optional file not found and not copied: {source}")
-    if not events_df.empty:
+
+    # --- MODIFICA: Usa il file di eventi ViV se esiste, altrimenti quello standard ---
+    if viv_events_path and viv_events_path.exists():
+        shutil.copy(viv_events_path, working_dir / 'events.csv')
+    elif not events_df.empty:
         events_df.to_csv(working_dir / 'events.csv', index=False)
+
     return working_dir
 
 def run_full_analysis(
@@ -171,7 +191,8 @@ def run_full_analysis(
     yolo_models: Optional[Dict[str, str]] = None, yolo_custom_classes: Optional[List[str]] = None,
     yolo_detections_df: Optional[pd.DataFrame] = None, generate_plots: bool = True, 
     plot_selections: Optional[Dict[str, bool]] = None,
-    generate_video: bool = True, video_options: Optional[Dict[str, bool]] = None,
+    generate_video: bool = True, video_options: Optional[Dict[str, Any]] = None,
+    concatenated_video_path: Optional[str] = None,
     defined_aois: Optional[List[Dict[str, Any]]] = None
 ) -> Path:
     raw_dir = Path(raw_data_path)
@@ -182,6 +203,10 @@ def run_full_analysis(
 
     un_enriched_mode = not bool(enriched_dirs) and not bool(defined_aois)
     enriched_gaze_df = pd.DataFrame()
+    
+    # --- NUOVO: Percorso per il file di eventi ViV ---
+    viv_events_path = output_dir / "SPEED_workspace" / "events-video-in-video.csv"
+    viv_events_path = viv_events_path if viv_events_path.exists() else None
 
     if events_df is None:
         logging.info("No events DataFrame provided, loading 'events.csv' from un-enriched folder.")
@@ -209,7 +234,15 @@ def run_full_analysis(
         enriched_dirs.append(enriched_dir_for_aois)
 
 
-    working_dir = _prepare_working_directory(output_dir, raw_dir, unenriched_dir, enriched_dirs, events_df)
+    working_dir = _prepare_working_directory(
+        output_dir,
+        raw_dir,
+        unenriched_dir,
+        enriched_dirs,
+        events_df,
+        Path(concatenated_video_path) if concatenated_video_path else None,
+        viv_events_path
+    )
     selected_event_names = events_df['name'].tolist() if not events_df.empty else []
 
     # --- NUOVO: Calcolo Switching Index ---

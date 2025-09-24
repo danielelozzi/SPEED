@@ -233,6 +233,137 @@ def _draw_pupil_plot(frame: np.ndarray, plot_data_dict: dict, min_val: float, ma
 
     return frame
 
+def generate_concatenated_video(data_dir: Path, viv_events_df: pd.DataFrame) -> Path:
+    """
+    Creates a new base video ('external.mp4') by concatenating screen recordings
+    synchronized with eye-tracking events. This video is intended to be used
+    as the primary scene video for subsequent analyses.
+    MODIFIED: Reads a DataFrame with video paths and optional start/end frames.
+
+    Args:
+        data_dir (Path): The working directory (e.g., SPEED_workspace) containing 'events.csv'.
+        viv_events_df (pd.DataFrame): A DataFrame containing event info, video paths,
+                                      and optional start/end frames for trimming.
+
+    Returns:
+        Path: The path to the newly created concatenated video.
+    """
+    # --- MODIFICA: Nuovo nome per il video di output ---
+    video_out_path = data_dir / 'external-video-in-video.mp4'
+    print(f"Starting concatenated video generation. Output will be saved to: {video_out_path}")
+
+    # --- 1. Load and Prepare Data ---
+    # Usa il DataFrame passato direttamente, che è già stato salvato come events.csv
+    # nella cartella di lavoro dalla funzione chiamante.
+    try:
+        events_df = pd.read_csv(data_dir / 'events.csv').sort_values('timestamp [ns]')
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"Essential file not found: {e}. Cannot generate concatenated video.")
+
+    # --- 2. Setup Video Timeline and Segments ---
+    FPS = 30
+    WIDTH, HEIGHT = 1280, 720  # Standard output resolution
+    GRAY_BG = np.full((HEIGHT, WIDTH, 3), 60, dtype=np.uint8)
+
+    # Determine total video duration from the events
+    min_ts = events_df['timestamp [ns]'].min()
+    # Find the end of the last event. We approximate it by adding a reasonable duration (e.g., 30s)
+    # or by finding the max duration of mapped videos. For simplicity, we add a fixed buffer.
+    last_event_ts = events_df['timestamp [ns]'].max()
+    max_ts = last_event_ts + pd.Timedelta('30s').value # Add 30s buffer
+
+    total_duration_ns = max_ts - min_ts
+    total_frames = int((total_duration_ns / NS_TO_S) * FPS)
+
+    # Create a DataFrame representing every frame of the output video
+    timeline_df = pd.DataFrame({
+        'timestamp [ns]': np.linspace(min_ts, max_ts, total_frames, dtype=np.int64),
+        'frame_idx': np.arange(total_frames)
+    })
+
+    # Merge event data onto our timeline
+    # --- MODIFICA: Unisci tutte le colonne necessarie dal DataFrame degli eventi ---
+    cols_to_merge = ['timestamp [ns]', 'name', 'video_path', 'start_frame', 'end_frame']
+    sync_data = pd.merge_asof(
+        timeline_df,
+        viv_events_df[cols_to_merge].rename(columns={'name': 'event_name'}),
+        on='timestamp [ns]',
+        direction='backward'
+    )
+    sync_data['event_name'].fillna(method='bfill', inplace=True)
+    sync_data.fillna(method='ffill', inplace=True)
+
+    # --- 3. Initialize Video Writer ---
+    writer = cv2.VideoWriter(str(video_out_path), cv2.VideoWriter_fourcc(*'mp4v'), FPS, (WIDTH, HEIGHT))
+
+    # --- 4. Main Video Generation Loop ---
+    video_caps = {path: cv2.VideoCapture(path) for path in viv_events_df['video_path'].unique()}
+    event_start_times = pd.Series(events_df['timestamp [ns]'].values, index=events_df['name']).to_dict()
+
+    try:
+        with tqdm(total=total_frames, desc="Generating Concatenated Video") as pbar:
+            for idx, frame_data in sync_data.iterrows():
+                current_event = frame_data.get('event_name')
+                
+                # --- MODIFICA: Logica per determinare il frame da mostrare ---
+                video_path = frame_data.get('video_path')
+                if pd.notna(video_path) and video_path in video_caps:
+                    cap = video_caps[video_path]
+                    event_start_ts = event_start_times[current_event]
+                    
+                    # Time elapsed since the event started
+                    time_since_event_start_ns = frame_data['timestamp [ns]'] - event_start_ts
+                    time_since_event_start_s = time_since_event_start_ns / NS_TO_S
+                    
+                    source_video_fps = cap.get(cv2.CAP_PROP_FPS)
+                    if source_video_fps == 0: source_video_fps = 30 # Fallback
+
+                    # Calcola l'indice del frame nel video sorgente
+                    source_frame_idx = int(time_since_event_start_s * source_video_fps)
+
+                    # Applica il taglio se start_frame è specificato
+                    start_frame_offset = frame_data.get('start_frame', 0)
+                    if pd.isna(start_frame_offset): start_frame_offset = 0
+                    target_frame_idx = int(start_frame_offset + source_frame_idx)
+                    
+                    # Controlla se il frame è oltre end_frame (se specificato)
+                    end_frame_limit = frame_data.get('end_frame')
+                    if pd.notna(end_frame_limit) and target_frame_idx > end_frame_limit:
+                        frame = GRAY_BG.copy() # Il segmento tagliato è terminato
+                    else:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame_idx)
+                        ret, frame = cap.read()
+
+                    if not ret:
+                        frame = GRAY_BG.copy() # Video ended, show gray
+                else:
+                    # No video associated with this event segment, or before the first event
+                    frame = GRAY_BG.copy()
+
+                # Resize frame to standard output size
+                if frame.shape[1] != WIDTH or frame.shape[0] != HEIGHT:
+                    frame = cv2.resize(frame, (WIDTH, HEIGHT))
+
+                writer.write(frame)
+                pbar.update(1)
+
+    except Exception as e:
+        print(f"An error occurred during concatenated video generation: {e}")
+        traceback.print_exc()
+    finally:
+        print("Finalizing and releasing resources...")
+        writer.release()
+        for cap in video_caps.values():
+            cap.release()
+        print("Concatenated video generation complete!")
+
+    # Also create a dummy world_timestamps.csv for this new video
+    world_timestamps_df = pd.DataFrame({
+        'timestamp [ns]': np.linspace(min_ts, max_ts, total_frames, dtype=np.int64)
+    })
+    world_timestamps_df.to_csv(data_dir / 'world_timestamps_viv.csv', index=False)
+
+    return video_out_path
 
 def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, options: dict, un_enriched_mode: bool, selected_events: list = None):
     """
@@ -240,7 +371,7 @@ def create_custom_video(data_dir: Path, output_dir: Path, subj_name: str, option
     MODIFIED: Can trim video to selected events.
     """
     video_out_path = output_dir / options.get('output_filename', f'video_output_{subj_name}.mp4')
-    # Nuovo: percorso temporaneo per il video senza audio
+    # Nuovo: percorso temporaneo per il video senza audio 
     temp_video_path = output_dir / f'temp_no_audio_{subj_name}.mp4'
     
     print("Loading and synchronizing data...")
