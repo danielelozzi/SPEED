@@ -103,6 +103,8 @@ def _load_and_sync_data(data_dir: Path):
         fixations = pd.read_csv(data_dir / 'fixations.csv').sort_values('start timestamp [ns]')
         pupil = pd.read_csv(data_dir / '3d_eye_states.csv').sort_values('timestamp [ns]')
         gaze = pd.read_csv(data_dir / 'gaze.csv').sort_values('timestamp [ns]')
+        # --- NUOVO: Carica anche gli eventi ---
+        events = pd.read_csv(data_dir / 'events.csv').sort_values('timestamp [ns]')
     except FileNotFoundError as e:
         raise FileNotFoundError(f"Missing required file for YOLO analysis: {e}")
 
@@ -110,9 +112,14 @@ def _load_and_sync_data(data_dir: Path):
     merged_fix['duration_s'] = merged_fix['duration [ms]'] / 1000.0
     duration_ns = (merged_fix['duration_s'] * 1e9).round()
     merged_fix['end_ts_ns'] = merged_fix['start timestamp [ns]'] + duration_ns.astype('Int64')
-    synced_data_fixations = merged_fix[merged_fix['timestamp [ns]'] <= merged_fix['end_ts_ns']].copy()
-    synced_data_fixations = pd.merge_asof(synced_data_fixations, pupil[['timestamp [ns]', 'pupil diameter left [mm]']], left_on='timestamp [ns]', right_on='timestamp [ns]', direction='nearest', suffixes=('', '_pupil'))
+    synced_data_fixations_base = merged_fix[merged_fix['timestamp [ns]'] <= merged_fix['end_ts_ns']].copy()
+    synced_data_fixations_pupil = pd.merge_asof(synced_data_fixations_base, pupil[['timestamp [ns]', 'pupil diameter left [mm]']], left_on='timestamp [ns]', right_on='timestamp [ns]', direction='nearest', suffixes=('', '_pupil'))
     
+    # --- NUOVO: Aggiungi le informazioni sull'evento corrente a ogni fissazione ---
+    synced_data_fixations = pd.merge_asof(synced_data_fixations_pupil.sort_values('timestamp [ns]'), 
+                                          events[['timestamp [ns]', 'name']].rename(columns={'name': 'event_name'}), 
+                                          on='timestamp [ns]', direction='backward')
+
     synced_data_gaze = pd.merge_asof(world_ts, gaze[['timestamp [ns]', 'gaze x [px]', 'gaze y [px]']], on='timestamp [ns]', direction='nearest')
 
     return synced_data_fixations, synced_data_gaze
@@ -319,11 +326,16 @@ def run_yolo_analysis(
             hits_df = pd.DataFrame(fixation_hits)
             logging.info("Calculating statistics for fixations...")            
             
-            # --- MODIFICA: Aggregazione condizionale per evitare KeyError ---
-            agg_dict_instance = {'n_fixations': ('fixation id', 'nunique'), 'avg_pupil_diameter_mm': ('pupil diameter left [mm]', 'mean')}
+            # --- MODIFICA: Aggiungi l'aggregazione degli eventi ---
+            agg_dict_instance = {
+                'n_fixations': ('fixation id', 'nunique'), 
+                'avg_pupil_diameter_mm': ('pupil diameter left [mm]', 'mean'),
+                'events': ('event_name', lambda x: list(x.unique())) # NUOVO
+            }
             if 'avg_kp_confidence' in hits_df.columns:
                 agg_dict_instance['avg_kp_confidence'] = ('avg_kp_confidence', 'mean')
             stats_instance = hits_df.groupby('instance_name').agg(**agg_dict_instance).reset_index()
+            # --- FINE MODIFICA ---
 
             # Arrotonda il risultato per una migliore leggibilità
             if 'avg_keypoint_confidence' in stats_instance.columns:
@@ -334,7 +346,11 @@ def run_yolo_analysis(
             stats_instance['normalized_fixation_count'] = stats_instance['n_fixations'] / stats_instance['total_frames_detected']
             
             # Aggregazione per classe (anch'essa condizionale)
-            agg_dict_class = {'n_fixations': ('fixation id', 'nunique'), 'avg_pupil_diameter_mm': ('pupil diameter left [mm]', 'mean')}
+            agg_dict_class = {
+                'n_fixations': ('fixation id', 'nunique'), 
+                'avg_pupil_diameter_mm': ('pupil diameter left [mm]', 'mean'),
+                'events': ('event_name', lambda x: list(x.unique())) # NUOVO
+            }
             if 'avg_kp_confidence' in hits_df.columns:
                 agg_dict_class['avg_keypoint_confidence'] = ('avg_kp_confidence', 'mean')
             stats_class = hits_df.groupby('class_name').agg(**agg_dict_class).reset_index()

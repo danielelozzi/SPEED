@@ -132,22 +132,23 @@ def generate_videos():
         br = (int(center_x + surface_w/2), int(center_y + surface_h/2))
         cv2.rectangle(frame_ext, tl, br, (150, 150, 150), -1)
 
-        # --- NUOVO: Disegna i QR code agli angoli della superficie ---
-        # Calcola le posizioni degli angoli
-        tl_pos = (tl[0], tl[1])
-        tr_pos = (br[0] - qr_size, tl[1])
-        bl_pos = (tl[0], br[1] - qr_size)
-        br_pos = (br[0] - qr_size, br[1] - qr_size)
+        # --- MODIFICA: Disegna i QR code solo in un intervallo di tempo per testare l'attivazione/disattivazione ---
+        if 10 * FPS <= i < 35 * FPS:
+            # Calcola le posizioni degli angoli
+            tl_pos = (tl[0], tl[1])
+            tr_pos = (br[0] - qr_size, tl[1])
+            bl_pos = (tl[0], br[1] - qr_size)
+            br_pos = (br[0] - qr_size, br[1] - qr_size)
 
-        # Sovrapponi le immagini dei QR code (con controllo dei bordi)
-        def overlay_image(background, overlay, pos):
-            x, y = pos
-            h, w, _ = overlay.shape
-            background[y:y+h, x:x+w] = overlay
-        overlay_image(frame_ext, qr_tl_img, tl_pos)
-        overlay_image(frame_ext, qr_tr_img, tr_pos)
-        overlay_image(frame_ext, qr_bl_img, bl_pos)
-        overlay_image(frame_ext, qr_br_img, br_pos)
+            # Sovrapponi le immagini dei QR code (con controllo dei bordi)
+            def overlay_image(background, overlay, pos):
+                x, y = pos
+                h, w, _ = overlay.shape
+                background[y:y+h, x:x+w] = overlay
+            overlay_image(frame_ext, qr_tl_img, tl_pos)
+            overlay_image(frame_ext, qr_tr_img, tr_pos)
+            overlay_image(frame_ext, qr_bl_img, bl_pos)
+            overlay_image(frame_ext, qr_br_img, br_pos)
 
         surface_corners.append({
             'tl x [px]': tl[0], 'tl y [px]': tl[1], 'tr x [px]': br[0], 'tr y [px]': tl[1],

@@ -80,6 +80,11 @@ class RealtimeNeonAnalyzer:
 
         # Gestione AOI
         self.static_aois = []
+        # --- NUOVO: Gestione AOI basate su QR code ---
+        self.qr_aois = [] # Lista di dizionari {'name': str, 'qr_data': list[str], 'last_polygon': np.array}
+        self.qr_detector = cv2.QRCodeDetector()
+        # --- FINE NUOVO ---
+
         self.aoi_colors = {}
 
         # Attributi di registrazione
@@ -321,6 +326,27 @@ class RealtimeNeonAnalyzer:
             del self.aoi_colors[name]
         print(f"AOI '{name}' removed.")
         
+    def add_qr_aoi(self, name: str, qr_data_list: list[str]):
+        """
+        Aggiunge una nuova Area di Interesse dinamica definita da una lista di QR code.
+        Args:
+            name (str): Nome univoco per l'AOI.
+            qr_data_list (list[str]): Lista dei dati contenuti nei QR code che definiscono i vertici del poligono.
+        """
+        if len(qr_data_list) < 3:
+            print(f"Warning: QR AOI '{name}' requires at least 3 QR codes to form a polygon.")
+        
+        # Rimuovi se esiste già per aggiornarlo
+        self.remove_qr_aoi(name)
+        
+        self.qr_aois.append({'name': name, 'qr_data': qr_data_list, 'last_polygon': None})
+        self.aoi_colors[name] = tuple(np.random.randint(100, 256, 3).tolist())
+        print(f"QR-based AOI '{name}' added, defined by QR codes: {qr_data_list}")
+
+    def remove_qr_aoi(self, name: str):
+        """Rimuove un'AOI basata su QR code."""
+        self.qr_aois = [aoi for aoi in self.qr_aois if aoi['name'] != name]
+
     def _analyze_gaze_in_aois(self, gaze_df):
         if gaze_df.empty or not self.static_aois:
             return
@@ -356,6 +382,40 @@ class RealtimeNeonAnalyzer:
 
         scene_img, scene_ts = self.last_scene_frame.image, self.last_scene_frame.timestamp_unix_seconds
 
+        # --- NUOVO: Rilevamento e aggiornamento delle AOI basate su QR code ---
+        detected_qrs = {} # Dizionario per mappare i dati QR alle loro posizioni
+        try:
+            ok, decoded_info, points, _ = self.qr_detector.detectAndDecodeMulti(scene_img)
+            if ok:
+                for i, info in enumerate(decoded_info):
+                    if info:
+                        # Calcola il centro del QR code
+                        qr_points = points[i].astype(int)
+                        center_x = int(np.mean(qr_points[:, 0]))
+                        center_y = int(np.mean(qr_points[:, 1]))
+                        detected_qrs[info] = (center_x, center_y)
+        except Exception as e:
+            print(f"Warning: QR code multi-detection failed. {e}")
+
+        # Aggiorna i poligoni delle QR AOI
+        for aoi in self.qr_aois:
+            aoi['last_polygon'] = None # Resetta ad ogni frame
+            vertices = []
+            all_markers_found = True
+            for qr_data in aoi['qr_data']:
+                if qr_data in detected_qrs:
+                    vertices.append(detected_qrs[qr_data])
+                else:
+                    all_markers_found = False
+                    break
+            
+            if all_markers_found and len(vertices) >= 3:
+                # Crea il poligono con i vertici trovati
+                polygon = np.array(vertices, dtype=np.int32)
+                aoi['last_polygon'] = polygon
+        # --- FINE NUOVA LOGICA QR AOI ---
+
+
         # --- MODIFICA CHIAVE: Logica Heatmap con Trasparenza ---
         if show_heatmap and self.last_gaze:
             heatmap_window_size = 60  # Finestra fissa di 60 frame (circa 2 secondi)
@@ -387,11 +447,21 @@ class RealtimeNeonAnalyzer:
         
         self.last_gazed_aoi = "N/A"
         if self.last_gaze and show_aois:
+            gaze_point = (int(self.last_gaze.x), int(self.last_gaze.y))
+            # Controlla prima le AOI statiche
             for aoi in self.static_aois:
                 name, (x1, y1, x2, y2) = aoi['name'], aoi['rect']
-                if x1 <= self.last_gaze.x <= x2 and y1 <= self.last_gaze.y <= y2:
+                if x1 <= gaze_point[0] <= x2 and y1 <= gaze_point[1] <= y2:
                     self.last_gazed_aoi = name
                     break
+            
+            # Se non trovato, controlla le AOI QR
+            if self.last_gazed_aoi == "N/A":
+                for aoi in self.qr_aois:
+                    if aoi['last_polygon'] is not None:
+                        if cv2.pointPolygonTest(aoi['last_polygon'], gaze_point, False) >= 0:
+                            self.last_gazed_aoi = aoi['name']
+                            break
         
         detected_objects = []
         if show_yolo and self.last_gaze:
@@ -464,6 +534,12 @@ class RealtimeNeonAnalyzer:
                 color = self.aoi_colors.get(name, (255, 0, 255))
                 cv2.rectangle(scene_img, (x1, y1), (x2, y2), color, 2)
                 cv2.putText(scene_img, name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            
+            # Disegna le AOI basate su QR
+            for aoi in self.qr_aois:
+                if aoi['last_polygon'] is not None:
+                    color = self.aoi_colors.get(aoi['name'], (0, 255, 255))
+                    cv2.polylines(scene_img, [aoi['last_polygon']], isClosed=True, color=color, thickness=2)
 
         if self.last_event_name:
             font_scale = 1.0

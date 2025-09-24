@@ -4,6 +4,8 @@ import numpy as np
 import time
 import threading
 from collections import namedtuple
+import qrcode
+from PIL import Image
 
 # Definiamo delle tuple simili a quelle usate dall'API di Pupil Labs
 GazeDatum = namedtuple('GazeDatum', ['x', 'y', 'pupil_diameter_mm', 'timestamp_unix_seconds'])
@@ -11,6 +13,20 @@ SceneFrame = namedtuple('SceneFrame', ['image', 'timestamp_unix_seconds'])
 EyesFrame = namedtuple('EyesFrame', ['image', 'timestamp_unix_seconds'])
 
 class MockNeonDevice:
+    # --- NUOVA FUNZIONE STATICA PER I QR CODE ---
+    @staticmethod
+    def _create_qr_code_image(data: str, size: int = 40):
+        qr = qrcode.QRCode(
+            version=1, error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10, border=2,
+        )
+        qr.add_data(data)
+        qr.make(fit=True)
+        img_pil = qr.make_image(fill_color="black", back_color="white").convert('RGB')
+        img_pil = img_pil.resize((size, size), Image.Resampling.NEAREST)
+        return np.array(img_pil)
+    # --- FINE NUOVA FUNZIONE ---
+
     """
     Un simulatore che imita l'API di un dispositivo Pupil Labs Neon per
     generare un flusso di dati sintetici in tempo reale.
@@ -25,6 +41,13 @@ class MockNeonDevice:
         self.object1_pos = (0, 0)
         self.object2_pos = (0, 0)
         self.gaze_target = self.object1_pos
+
+        # --- NUOVO: Genera le immagini dei QR code una sola volta ---
+        self.qr_size = 40
+        self.qr_tl_img = self._create_qr_code_image("TL", size=self.qr_size)
+        self.qr_tr_img = self._create_qr_code_image("TR", size=self.qr_size)
+        self.qr_bl_img = self._create_qr_code_image("BL", size=self.qr_size)
+        self.qr_br_img = self._create_qr_code_image("BR", size=self.qr_size)
 
     def _generate_scene_frame(self):
         """Genera un singolo frame della scena con oggetti in movimento."""
@@ -46,6 +69,26 @@ class MockNeonDevice:
         cv2.rectangle(frame, (self.object2_pos[0]-30, self.object2_pos[1]-30),
                       (self.object2_pos[0]+30, self.object2_pos[1]+30), (0, 255, 0), -1)
         
+        # --- NUOVO: Disegna i QR code in modo intermittente attorno all'oggetto 1 ---
+        # Appaiono per 10 secondi, scompaiono per 5 secondi
+        if (self.frame_count % (self.fps * 15)) < (self.fps * 10):
+            surface_w, surface_h = 250, 200
+            center_x, center_y = self.object1_pos
+            
+            tl = (int(center_x - surface_w/2), int(center_y - surface_h/2))
+            br = (int(center_x + surface_w/2), int(center_y + surface_h/2))
+
+            def overlay_image(background, overlay, pos):
+                x, y = pos; h, w, _ = overlay.shape
+                if x >= 0 and y >= 0 and y+h < background.shape[0] and x+w < background.shape[1]:
+                    background[y:y+h, x:x+w] = overlay
+
+            overlay_image(frame, self.qr_tl_img, (tl[0], tl[1]))
+            overlay_image(frame, self.qr_tr_img, (br[0] - self.qr_size, tl[1]))
+            overlay_image(frame, self.qr_bl_img, (tl[0], br[1] - self.qr_size))
+            overlay_image(frame, self.qr_br_img, (br[0] - self.qr_size, br[1] - self.qr_size))
+        # --- FINE NUOVA LOGICA ---
+
         # Cambia il target dello sguardo ogni 5 secondi
         if self.frame_count % (self.fps * 5) == 0:
             self.gaze_target = self.object2_pos if np.random.rand() > 0.5 else self.object1_pos
