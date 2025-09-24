@@ -35,6 +35,8 @@ from desktop_app.interactive_video_editor import InteractiveVideoEditor
 from desktop_app.aoi_editor import AoiEditor
 from desktop_app.manual_aoi_editor import ManualAoiEditor
 from desktop_app.marker_surface_editor import MarkerSurfaceEditor
+from desktop_app.realtime_qr_aoi_editor import RealtimeQRAoiEditor
+from desktop_app.qr_surface_editor import QRSurfaceEditor
 from device_converter_window import DeviceConverterWindow
 from src.speed_analyzer import run_full_analysis
 from src.speed_analyzer import _prepare_working_directory # Importazione diretta
@@ -205,6 +207,7 @@ class RealtimeDisplayWindow(tk.Toplevel):
         aoi_btn_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
         tk.Button(aoi_btn_frame, text="Add AOI", command=self.prepare_to_draw_aoi).pack()
         tk.Button(aoi_btn_frame, text="Remove", command=self.remove_selected_aoi).pack()
+        tk.Button(aoi_btn_frame, text="Add QR AOI", command=self.add_qr_aoi_dialog).pack() # NUOVO
 
         # --- MODIFICA: Frame per i controlli YOLO in tempo reale ---
         self.yolo_config_frame = tk.LabelFrame(main_control_frame, text="YOLO Real-Time Controls", padx=10, pady=10)
@@ -481,16 +484,44 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.is_paused_for_drawing = False
         self.status_label.config(text="Streaming...")
 
+    def add_qr_aoi_dialog(self):
+        """Apre una finestra di dialogo per aggiungere una AOI basata su QR code."""
+        if not self.analyzer or self.analyzer.last_scene_frame is None:
+            messagebox.showwarning("No Stream", "Cannot add QR AOI. Please start the stream and pause on a clear frame.", parent=self)
+            return
+
+        # Metti in pausa lo stream se è in esecuzione
+        was_running = self.is_running and not self.is_paused_for_drawing
+        if was_running:
+            self.is_paused_for_drawing = True
+
+        editor = RealtimeQRAoiEditor(self, self.analyzer, self.analyzer.last_scene_frame.image)
+        self.wait_window(editor)
+
+        if editor.result:
+            self.analyzer.add_qr_aoi(editor.aoi_name, editor.qr_data_list)
+            self.update_aoi_listbox()
+        self.is_paused_for_drawing = False # Riprendi lo stream
+
     def update_aoi_listbox(self):
         self.aoi_listbox.delete(0, tk.END)
-        for aoi in self.analyzer.static_aois:
-            self.aoi_listbox.insert(tk.END, aoi['name'])
+        if not self.analyzer: return
+        
+        for aoi in self.analyzer.static_aois: # AOI Statiche
+            self.aoi_listbox.insert(tk.END, f"{aoi['name']} (static)")
+        for aoi in self.analyzer.qr_aois: # AOI QR
+            self.aoi_listbox.insert(tk.END, f"{aoi['name']} (qr)")
             
     def remove_selected_aoi(self):
         selected_indices = self.aoi_listbox.curselection()
         if not selected_indices: return
-        aoi_name = self.aoi_listbox.get(selected_indices[0])
+        
+        full_name = self.aoi_listbox.get(selected_indices[0])
+        aoi_name = full_name.split(' (')[0]
+
+        # Prova a rimuovere da entrambe le liste (statica e qr)
         self.analyzer.remove_static_aoi(aoi_name)
+        self.analyzer.remove_qr_aoi(aoi_name)
         self.update_aoi_listbox()
             
     def on_close(self):
@@ -1438,6 +1469,7 @@ class SpeedApp:
         ttk.Radiobutton(choice_dialog, text="Dynamic AOI (Automatic Object Tracking)", variable=aoi_mode, value="dynamic_auto").pack(anchor='w', padx=20)
         ttk.Radiobutton(choice_dialog, text="Dynamic AOI (Manual Keyframes)", variable=aoi_mode, value="dynamic_manual").pack(anchor='w', padx=20)
         ttk.Radiobutton(choice_dialog, text="Surface from Markers (for Enrichment)", variable=aoi_mode, value="marker_surface").pack(anchor='w', padx=20)
+        ttk.Radiobutton(choice_dialog, text="Surface from QR Codes (for Enrichment)", variable=aoi_mode, value="qr_surface").pack(anchor='w', padx=20) # NUOVO
 
         def on_proceed():
             mode = aoi_mode.get()
@@ -1463,6 +1495,8 @@ class SpeedApp:
             editor = ManualAoiEditor(self.root, video_path)
         elif mode == 'marker_surface':
             editor = MarkerSurfaceEditor(self.root, video_path)
+        elif mode == 'qr_surface': # NUOVO
+            editor = QRSurfaceEditor(self.root, video_path)
 
         if editor:
             self.root.wait_window(editor)
@@ -1487,6 +1521,13 @@ class SpeedApp:
                     new_aoi = {
                         'name': editor.aoi_name,
                         'type': 'marker_surface',
+                        'data': editor.result
+                    }
+            elif isinstance(editor, QRSurfaceEditor): # NUOVO
+                if editor.result is not None:
+                    new_aoi = {
+                        'name': editor.aoi_name,
+                        'type': 'qr_surface',
                         'data': editor.result
                     }
 

@@ -178,6 +178,7 @@ if __name__ == '__main__':
 
     # Simula il click sui pulsanti della GUI per avviare il test
     app.connect_to_device()
+
     app.start_stream()
     
     root.mainloop()
