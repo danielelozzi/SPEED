@@ -43,10 +43,44 @@ logging.info(f"Creating directory structure inside {OUTPUT_DIR}")
 raw_dir = OUTPUT_DIR / "RAW"
 unenriched_dir = OUTPUT_DIR / "un-enriched"
 enriched_dir = OUTPUT_DIR / "enriched"
+VIV_SOURCE_DIR = OUTPUT_DIR / "VIV_source_videos" # NUOVO: Cartella per i video sorgente ViV
 
 raw_dir.mkdir(parents=True, exist_ok=True)
 unenriched_dir.mkdir(parents=True, exist_ok=True)
 enriched_dir.mkdir(parents=True, exist_ok=True)
+VIV_SOURCE_DIR.mkdir(parents=True, exist_ok=True) # NUOVO: Crea la cartella
+
+# --- NUOVA FUNZIONE: GENERAZIONE VIDEO PER VIDEO-IN-VIDEO ---
+def generate_viv_videos():
+    """Genera video di esempio da usare per la funzionalità Video-in-Video."""
+    logging.info(f"Generating Video-in-Video source videos in {VIV_SOURCE_DIR}...")
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    viv_fps = 30
+    viv_duration_s = 15
+    viv_frames = viv_fps * viv_duration_s
+    viv_w, viv_h = 640, 480
+
+    # Video 1: Quadrato blu in movimento
+    writer1 = cv2.VideoWriter(str(VIV_SOURCE_DIR / "viv_video_1.mp4"), fourcc, viv_fps, (viv_w, viv_h))
+    for i in range(viv_frames):
+        frame = np.full((viv_h, viv_w, 3), (50, 30, 30), dtype=np.uint8)
+        x = int(viv_w / 2 + np.sin(i / 30) * 100)
+        y = int(viv_h / 2 + np.cos(i / 30) * 100)
+        cv2.rectangle(frame, (x-20, y-20), (x+20, y+20), (255, 0, 0), -1)
+        cv2.putText(frame, f"Video 1 - Frame {i}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        writer1.write(frame)
+    writer1.release()
+
+    # Video 2: Cerchio giallo pulsante
+    writer2 = cv2.VideoWriter(str(VIV_SOURCE_DIR / "viv_video_2.mp4"), fourcc, viv_fps, (viv_w, viv_h))
+    for i in range(viv_frames):
+        frame = np.full((viv_h, viv_w, 3), (30, 50, 30), dtype=np.uint8)
+        radius = int(30 + np.sin(i / 10) * 15)
+        cv2.circle(frame, (viv_w//2, viv_h//2), radius, (0, 255, 255), -1)
+        cv2.putText(frame, f"Video 2 - Frame {i}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        writer2.write(frame)
+    writer2.release()
+    logging.info("Video-in-Video source videos generated.")
 
 # --- 4. FUNZIONI PER LA GENERAZIONE DEI VIDEO ---
 def generate_videos():
@@ -127,6 +161,22 @@ def generate_csv_data(surface_corners_df):
     new_event = pd.DataFrame([{'timestamp [ns]': new_event_ts, 'name': 'Manually_Added_Event', 'recording id': 'rec_001', 'source': 'manual'}])
     modified_events_df = pd.concat([modified_events_df, new_event], ignore_index=True).sort_values('timestamp [ns]')
     modified_events_df.to_csv(OUTPUT_DIR / 'modified_events.csv', index=False)
+
+    # NUOVO: Crea un file events-video-in-video.csv per simulare la mappatura
+    logging.info("Generating events-video-in-video.csv to simulate ViV editor output...")
+    viv_events_df = events_df.copy()
+    # Aggiungi le colonne necessarie per il ViV
+    viv_events_df['video_path'] = ""
+    viv_events_df['start_frame'] = pd.NA
+    viv_events_df['end_frame'] = pd.NA
+    # Mappa alcuni eventi ai video generati
+    if len(viv_events_df) > 1:
+        viv_events_df.loc[1, 'video_path'] = str((VIV_SOURCE_DIR / "viv_video_1.mp4").resolve())
+    if len(viv_events_df) > 3:
+        viv_events_df.loc[3, 'video_path'] = str((VIV_SOURCE_DIR / "viv_video_2.mp4").resolve())
+        viv_events_df.loc[3, 'start_frame'] = 30 # Esempio di taglio: inizia dal frame 30
+        viv_events_df.loc[3, 'end_frame'] = 200 # Esempio di taglio: finisce al frame 200
+    viv_events_df.to_csv(OUTPUT_DIR / 'events-video-in-video.csv', index=False)
     
     logging.info("Generating behavioral data (gaze, fixations, saccades, blinks)...")
     gaze_data, pupil_data, blinks_data, saccades_data, fixations_data = [], [], [], [], []
@@ -213,6 +263,7 @@ if __name__ == "__main__":
     logging.info("--- Starting Synthetic Data Generation ---")
     try:
         surface_df, object_paths = generate_videos()
+        generate_viv_videos() # NUOVO: Chiama la funzione per generare i video ViV
         generate_csv_data(surface_df)
 
         logging.info("="*60)
@@ -227,9 +278,13 @@ if __name__ == "__main__":
         logging.info(f"   - Un-enriched Folder:   {unenriched_dir.resolve()}")
         logging.info(f"   - Enriched Folder:      {enriched_dir.resolve()}")
         logging.info("3. Gli eventi di default (`events.csv`) verranno caricati automaticamente.")
-        logging.info("4. Clicca su 'Edit on Video'. Vedrai gli eventi e potrai modificarli.")
-        logging.info("5. Dopo aver salvato, un file `modified_events.csv` verrà creato in `synthetic_data_output`.")
-        logging.info("6. Esegui 'RUN CORE ANALYSIS'. L'analisi userà automaticamente `modified_events.csv`.")
+        logging.info("\n   --- PER USARE VIDEO-IN-VIDEO ---")
+        logging.info(f"   a. Clicca su 'Create Concatenated Video...' nella sezione 2.2.")
+        logging.info(f"   b. Nella finestra che si apre, clicca 'Load Mapping from CSV...' e seleziona il file 'events-video-in-video.csv' in '{OUTPUT_DIR.resolve()}'.")
+        logging.info(f"   c. Clicca 'Save Mapping & Proceed'. Verrà creato un video 'external-video-in-video.mp4'.")
+        logging.info("4. Clicca su 'Edit on Video'. Vedrai gli eventi e potrai modificarli sul video base o su quello concatenato.")
+        logging.info("5. Dopo aver salvato, un file `modified_events.csv` verrà creato nella cartella di output.")
+        logging.info("6. Esegui 'RUN CORE ANALYSIS'. Se hai creato il video concatenato, l'analisi lo userà automaticamente.")
         logging.info("7. Procedi con la generazione di plot e video come al solito.")
         logging.info("="*60)
 
