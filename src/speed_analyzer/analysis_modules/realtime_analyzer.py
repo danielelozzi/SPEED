@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 import threading
 from typing import Optional
+import torch
 from pupil_labs.realtime_api.simple import discover_one_device
 from ultralytics import YOLO
 from .video_generator import (_draw_pupil_plot, _draw_generic_plot, 
@@ -108,6 +109,10 @@ class RealtimeNeonAnalyzer:
 
     def _initialize_yolo_model(self, model_name, task, custom_classes):
         """Carica e configura il modello YOLO in base al task e alle classi custom."""
+        if not model_name:
+            self.yolo_model = None
+            return
+            
         try:
             # Gestione dei modelli specifici per task (es. -seg, -pose)
             model_file = Path(model_name)

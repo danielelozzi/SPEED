@@ -13,3 +13,4 @@ pylsl
 pydicom
 pygame
 qrcode
+torch

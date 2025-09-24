@@ -142,14 +142,18 @@ if __name__ == '__main__':
     # Monkey-patch (sostituisce temporaneamente) il metodo connect 
     # dell'analizzatore per usare sempre il nostro mock.
     from src.speed_analyzer.analysis_modules.realtime_analyzer import RealtimeNeonAnalyzer
+    from desktop_app.GUI import MODELS_DIR
     
     # Salva il metodo originale
     original_connect = RealtimeNeonAnalyzer.connect
     
     # Definisci il nuovo metodo che usa il mock
-    def mock_connect(self):
+    def mock_connect(analyzer_instance):
+        # Simula la connessione al mock device
         mock_device = MockNeonDevice()
-        return original_connect(self, mock_device=mock_device)
+        analyzer_instance.device = mock_device
+        print("Connected to Mock Neon Device for testing.")
+        return True
         
     # Sostituisci il metodo originale con quello mockato
     RealtimeNeonAnalyzer.connect = mock_connect
@@ -166,5 +170,14 @@ if __name__ == '__main__':
     
     # Avvia la finestra di visualizzazione che ora userà il nostro mock
     app = RealtimeDisplayWindow(root)
+
+    # --- CORREZIONE: Simula la selezione del modello nella GUI ---
+    # Imposta il modello e il task prima di avviare lo stream.
+    app.yolo_model_var.set('yolov8n.pt')
+    app.yolo_task_var.set('detect')
+
+    # Simula il click sui pulsanti della GUI per avviare il test
+    app.connect_to_device()
+    app.start_stream()
     
     root.mainloop()
