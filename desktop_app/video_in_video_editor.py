@@ -153,7 +153,10 @@ class VideoInVideoEditor(tk.Toplevel):
         event_name = self.viv_df.loc[df_index, 'name']
         filepath = filedialog.askopenfilename(
             title=f"Select video for event: {event_name}",
-            filetypes=[("Video Files", "*.mp4 *.avi *.mov"), ("All files", "*.*")],
+            filetypes=[("Media Files", "*.mp4 *.avi *.mov *.png *.jpg *.jpeg"), 
+                       ("Video Files", "*.mp4 *.avi *.mov"),
+                       ("Image Files", "*.png *.jpg *.jpeg"),
+                       ("All files", "*.*")],
             parent=self
         )
         if filepath:

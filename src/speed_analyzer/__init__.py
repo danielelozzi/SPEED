@@ -121,15 +121,19 @@ def _prepare_working_directory(
     events_df: pd.DataFrame,
     concatenated_video_path: Optional[Path] = None,
     viv_events_path: Optional[Path] = None
-):
-    working_dir = output_dir / 'eyetracking_files'
+): # MODIFIED: Added return type hint
+    """
+    Prepara la cartella di lavoro copiando e rinominando tutti i file necessari.
+    Usa il video concatenato come 'external.mp4' se fornito.
+    """
+    working_dir = output_dir / 'SPEED_workspace' # MODIFIED: Consistent naming
     working_dir.mkdir(parents=True, exist_ok=True)
     logging.info(f"Preparing working directory at: {working_dir}")
 
     # --- MODIFICA: Usa il video concatenato se fornito, altrimenti cerca quello di default ---
     if concatenated_video_path and concatenated_video_path.exists():
         external_video_path = concatenated_video_path
-        logging.info(f"Using provided concatenated video: {external_video_path}")
+        logging.info(f"Using provided concatenated video as the main scene video: {external_video_path.name}")
     else:
         try:
             external_video_path = next(unenriched_dir.glob('*.mp4'))
@@ -152,7 +156,9 @@ def _prepare_working_directory(
         all_enriched_fixations = []
 
         for enrich_dir in enriched_dirs:
-            aoi_name_from_folder = enrich_dir.name
+            # --- MODIFICA: Assicura che sia sempre un oggetto Path per evitare TypeError ---
+            enrich_dir = Path(enrich_dir)
+            aoi_name_from_folder = Path(enrich_dir).name
 
             gaze_path = enrich_dir / 'gaze.csv'
             if gaze_path.exists():
@@ -189,18 +195,26 @@ def run_full_analysis(
     raw_data_path: str, unenriched_data_path: str, output_path: str, subject_name: str,
     enriched_data_paths: Optional[List[str]] = None, events_df: Optional[pd.DataFrame] = None, 
     yolo_models: Optional[Dict[str, str]] = None, yolo_custom_classes: Optional[List[str]] = None,
-    yolo_detections_df: Optional[pd.DataFrame] = None, generate_plots: bool = True, 
+    yolo_detections_df: Optional[pd.DataFrame] = None, generate_plots: bool = False, 
     plot_selections: Optional[Dict[str, bool]] = None,
     generate_video: bool = True, video_options: Optional[Dict[str, Any]] = None,
     concatenated_video_path: Optional[str] = None,
     defined_aois: Optional[List[Dict[str, Any]]] = None
-) -> Path:
+): # MODIFIED: Removed return type hint to match previous state
     raw_dir = Path(raw_data_path)
     unenriched_dir = Path(unenriched_data_path)
     output_dir = Path(output_path)
     enriched_dirs = [Path(p) for p in enriched_data_paths] if enriched_data_paths else []
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # --- MODIFICA: Crea il file di configurazione all'inizio dell'analisi ---
+    # Questo garantisce che sia sempre presente per le operazioni successive come la generazione di grafici.
+    config = {
+        "unenriched_mode": not bool(enriched_dirs) and not bool(defined_aois),
+        "source_folders": {"raw": raw_data_path, "unenriched": unenriched_data_path, "enriched": enriched_data_paths}
+    }
+    with open(output_dir / 'config.json', 'w') as f: json.dump(config, f, indent=4)
+    # --- FINE MODIFICA ---
     un_enriched_mode = not bool(enriched_dirs) and not bool(defined_aois)
     enriched_gaze_df = pd.DataFrame()
     
@@ -240,7 +254,7 @@ def run_full_analysis(
         unenriched_dir,
         enriched_dirs,
         events_df,
-        Path(concatenated_video_path) if concatenated_video_path else None,
+        Path(concatenated_video_path) if concatenated_video_path and Path(concatenated_video_path).exists() else None,
         viv_events_path
     )
     selected_event_names = events_df['name'].tolist() if not events_df.empty else []
@@ -265,8 +279,6 @@ def run_full_analysis(
         logging.info("--- STARTING PLOT GENERATION ---")
         if plot_selections is None:
             plot_selections = { "path_plots": True, "heatmaps": True, "histograms": True, "pupillometry": True, "advanced_timeseries": True, "fragmentation": True }
-        config = {"unenriched_mode": un_enriched_mode, "source_folders": {"unenriched": str(unenriched_dir)}}
-        with open(output_dir / 'config.json', 'w') as f: json.dump(config, f)
         speed_script_events.generate_plots_on_demand(
             output_dir_str=str(output_dir), subj_name=subject_name,
             plot_selections=plot_selections, un_enriched_mode=un_enriched_mode
