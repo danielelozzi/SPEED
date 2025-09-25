@@ -10,10 +10,11 @@ class VideoInVideoEditor(tk.Toplevel):
     """
     A window for creating a "video-in-video" by mapping screen-recording
     videos to specific events from an eye-tracking session.
+    THIS EDITOR ONLY CREATES A MAPPING; IT DOES NOT MODIFY THE EVENTS THEMSELVES.
     """
     def __init__(self, parent, events_df: pd.DataFrame):
         super().__init__(parent)
-        self.title("Video-in-Video Event Table Editor")
+        self.title("Video-in-Video Event to Media Mapper")
         self.geometry("900x700")
         self.transient(parent)
         self.grab_set()
@@ -23,7 +24,8 @@ class VideoInVideoEditor(tk.Toplevel):
             self.destroy()
             return
 
-        # --- MODIFICA: Usa un DataFrame come sorgente dati ---
+        # --- MODIFIED: Use a DataFrame as the data source for mapping ---
+        # This DataFrame is a copy and will not affect the original events_df
         self.viv_df = events_df.copy()
         if 'video_path' not in self.viv_df.columns:
             self.viv_df['video_path'] = ""
@@ -32,7 +34,7 @@ class VideoInVideoEditor(tk.Toplevel):
         if 'end_frame' not in self.viv_df.columns:
             self.viv_df['end_frame'] = pd.NA
 
-        # Converte le colonne opzionali in tipi numerici che supportano NA
+        # Convert optional columns to numeric types that support NA
         self.viv_df['start_frame'] = pd.to_numeric(self.viv_df['start_frame'], errors='coerce')
         self.viv_df['end_frame'] = pd.to_numeric(self.viv_df['end_frame'], errors='coerce')
 
@@ -46,7 +48,7 @@ class VideoInVideoEditor(tk.Toplevel):
         controls_frame = tk.Frame(main_frame)
         controls_frame.pack(fill=tk.X, pady=(0, 10))
 
-        tk.Label(controls_frame, text="Map events to video files. Double-click cells to edit.", justify=tk.LEFT).pack(anchor='w')
+        tk.Label(controls_frame, text="Map events to video/image files. Double-click cells in the 'Path', 'Start', or 'End' columns to edit.", justify=tk.LEFT).pack(anchor='w')
         
         load_button = tk.Button(controls_frame, text="Load Mapping from CSV...", command=self.load_from_csv)
         load_button.pack(side=tk.LEFT, pady=5, padx=(0, 10))
@@ -55,16 +57,18 @@ class VideoInVideoEditor(tk.Toplevel):
         tree_frame = tk.Frame(main_frame)
         tree_frame.pack(fill=tk.BOTH, expand=True)
 
-        # --- MODIFICA: Aggiunta di nuove colonne ---
         cols = ("Event", "Timestamp (s)", "Video Path", "Start Frame", "End Frame")
         self.tree = ttk.Treeview(tree_frame, columns=cols, show="headings")
         self.tree.heading("Event", text="Event Name")
         self.tree.heading("Timestamp (s)", text="Timestamp (s)")
-        self.tree.heading("Video Path", text="Path to Video File")
+        self.tree.heading("Video Path", text="Path to Media File")
         self.tree.heading("Start Frame", text="Start Frame (Opt.)")
         self.tree.heading("End Frame", text="End Frame (Opt.)")
         self.tree.column("Event", width=250)
+        self.tree.column("Timestamp (s)", width=120, anchor=tk.CENTER)
         self.tree.column("Video Path", width=400)
+        self.tree.column("Start Frame", width=100, anchor=tk.CENTER)
+        self.tree.column("End Frame", width=100, anchor=tk.CENTER)
 
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -101,7 +105,7 @@ class VideoInVideoEditor(tk.Toplevel):
     def load_from_csv(self):
         """Loads event-video mappings from a user-selected CSV file."""
         filepath = filedialog.askopenfilename(
-            title="Select CSV with 'event' and 'path' columns",
+            title="Select CSV with mapping data",
             filetypes=[("CSV files", "*.csv")],
             parent=self
         )
@@ -110,18 +114,28 @@ class VideoInVideoEditor(tk.Toplevel):
 
         try:
             df = pd.read_csv(filepath)
-            if 'name' not in df.columns or 'timestamp [ns]' not in df.columns:
-                messagebox.showerror("Invalid CSV", "The CSV file must contain at least 'name' and 'timestamp [ns]' columns.", parent=self)
+            # Essential columns for mapping
+            required_cols = ['timestamp [ns]', 'video_path']
+            if not all(col in df.columns for col in required_cols):
+                messagebox.showerror("Invalid CSV", "The CSV file must contain at least 'timestamp [ns]' and 'video_path' columns.", parent=self)
                 return
 
-            # Unisci i dati basandoti sul timestamp per aggiornare i percorsi video
-            self.viv_df = pd.merge(self.viv_df.drop(columns=['video_path', 'start_frame', 'end_frame'], errors='ignore'),
-                                   df[['timestamp [ns]', 'video_path', 'start_frame', 'end_frame']],
-                                   on='timestamp [ns]',
-                                   how='left')
+            # Merge based on timestamp, updating only the mapping columns
+            merge_cols = ['timestamp [ns]', 'video_path']
+            if 'start_frame' in df.columns: merge_cols.append('start_frame')
+            if 'end_frame' in df.columns: merge_cols.append('end_frame')
+
+            # Drop old mapping columns and merge new ones
+            self.viv_df = self.viv_df.drop(columns=['video_path', 'start_frame', 'end_frame'], errors='ignore')
+            self.viv_df = pd.merge(self.viv_df, df[merge_cols], on='timestamp [ns]', how='left')
+            
+            # Clean up merged data
             self.viv_df['video_path'].fillna('', inplace=True)
-            self.viv_df['start_frame'] = pd.to_numeric(self.viv_df['start_frame'], errors='coerce')
-            self.viv_df['end_frame'] = pd.to_numeric(self.viv_df['end_frame'], errors='coerce')
+            if 'start_frame' in self.viv_df.columns:
+                self.viv_df['start_frame'] = pd.to_numeric(self.viv_df['start_frame'], errors='coerce')
+            if 'end_frame' in self.viv_df.columns:
+                self.viv_df['end_frame'] = pd.to_numeric(self.viv_df['end_frame'], errors='coerce')
+
             self.populate_tree()
             messagebox.showinfo("Success", "Successfully loaded mappings from CSV.", parent=self)
 
@@ -129,12 +143,8 @@ class VideoInVideoEditor(tk.Toplevel):
             logging.error(f"Failed to load video mapping CSV: {e}")
             messagebox.showerror("Error", f"An error occurred while reading the CSV:\n{e}", parent=self)
 
-    def add_mapping_row(self):
-        """Adds a new, empty row to the mapping for manual entry."""
-        pass # Questa funzionalità è ora gestita dall'editor di eventi principale
-
     def on_double_click(self, event):
-        """Handles double-clicking a row to edit it."""
+        """Handles double-clicking a cell to edit it."""
         region = self.tree.identify("region", event.x, event.y)
         if region != "cell":
             return
@@ -143,16 +153,20 @@ class VideoInVideoEditor(tk.Toplevel):
         column_id = self.tree.identify_column(event.x)
         df_index = int(item_id)
 
+        # Allow editing only for mapping-related columns
         if column_id == "#3":  # Video Path column
             self.edit_video_path(df_index)
         elif column_id in ["#4", "#5"]: # Start/End Frame columns
             self.edit_frame_value(df_index, column_id)
+        else:
+            # Prevent editing of event name and timestamp
+            messagebox.showinfo("Read-only", "Event Name and Timestamp cannot be edited in this window.", parent=self)
 
     def edit_video_path(self, df_index):
-        """Opens a file dialog to select a new video path."""
+        """Opens a file dialog to select a new video or image path."""
         event_name = self.viv_df.loc[df_index, 'name']
         filepath = filedialog.askopenfilename(
-            title=f"Select video for event: {event_name}",
+            title=f"Select Media for Event: {event_name}",
             filetypes=[("Media Files", "*.mp4 *.avi *.mov *.png *.jpg *.jpeg"), 
                        ("Video Files", "*.mp4 *.avi *.mov"),
                        ("Image Files", "*.png *.jpg *.jpeg"),
@@ -195,24 +209,30 @@ class VideoInVideoEditor(tk.Toplevel):
         entry.bind("<FocusOut>", save_edit)
 
     def save_and_close(self):
-        """Validates the mapping and closes the window."""
-        # Rimuovi righe dove il video path non è stato impostato
-        valid_df = self.viv_df[self.viv_df['video_path'] != ""].copy()
+        """Validates the mapping and closes the window, returning the mapping DataFrame."""
+        # Filter for rows that actually have a video path assigned
+        valid_df = self.viv_df[self.viv_df['video_path'].notna() & (self.viv_df['video_path'] != "")].copy()
 
         if valid_df.empty:
-            messagebox.showwarning("No Mapping", "Please map at least one event to a video file.", parent=self)
+            if messagebox.askyesno("No Mapping", "No events have been mapped to a video file. Do you want to proceed with an empty mapping?", parent=self):
+                self.result = pd.DataFrame() # Return an empty dataframe
+                self.destroy()
             return
         
-        # Final validation
+        # Final validation of paths
+        invalid_paths = []
         for index, row in valid_df.iterrows():
             path = Path(row['video_path'])
             if not path.exists():
-                messagebox.showwarning("Invalid Path", f"The path for event '{row['name']}' is invalid and will be skipped:\n{row['video_path']}", parent=self)
-                valid_df.drop(index, inplace=True)
-                continue
+                invalid_paths.append(row['name'])
+        
+        if invalid_paths:
+            messagebox.showerror("Invalid Paths", f"The media paths for the following events are invalid and will be ignored:\n\n" + "\n".join(invalid_paths), parent=self)
+            valid_df = valid_df[~valid_df['name'].isin(invalid_paths)]
+
 
         if valid_df.empty:
-            messagebox.showerror("Error", "No valid mappings were found. Please correct the paths.", parent=self)
+            messagebox.showerror("Error", "No valid mappings were found after validation. Please correct the paths.", parent=self)
             return
 
         self.result = valid_df

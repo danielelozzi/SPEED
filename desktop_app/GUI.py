@@ -719,6 +719,7 @@ class SpeedApp:
         self.unenriched_dir_var = tk.StringVar()
         self.enriched_dir_var = tk.StringVar()
         self.external_event_file_var = tk.StringVar()
+        self.viv_events_df = pd.DataFrame()
         self.events_df = pd.DataFrame()
         self.plot_vars = {}
         self.video_vars = {}
@@ -754,8 +755,6 @@ class SpeedApp:
         self.participant_name_var = tk.StringVar(); self.participant_name_var.trace_add("write", self.update_output_dir_default)
         tk.Entry(name_frame, textvariable=self.participant_name_var).pack(fill=tk.X, expand=True)
         output_frame = tk.Frame(setup_frame); output_frame.pack(fill=tk.X, pady=2)
-        self.viv_events_df = pd.DataFrame() # NUOVO: per la mappatura ViV
-        self.concatenated_video_path = None # NUOVO: per tracciare il video ViV
         tk.Label(output_frame, text="Output Folder:", width=20, anchor='w').pack(side=tk.LEFT)
         self.output_dir_entry = tk.Entry(output_frame); self.output_dir_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(output_frame, text="Browse...", command=self.select_output_dir).pack(side=tk.RIGHT)
@@ -1633,6 +1632,10 @@ class SpeedApp:
         if not output_dir or not subj_name:
             messagebox.showerror("Error", "Please enter participant name and output folder.")
             return None
+        
+        output_dir_path = Path(output_dir)
+        output_dir_path.mkdir(parents=True, exist_ok=True)
+
         return Path(output_dir), subj_name
 
     def run_plot_generation(self):
@@ -1679,17 +1682,14 @@ class SpeedApp:
             return
 
         try:
-            # 1. Raccogli le opzioni dalla GUI
             video_options = {key: var.get() for key, var in self.video_vars.items()}
             video_options['output_filename'] = self.video_filename_var.get()
             video_options['heatmap_window_seconds'] = self.heatmap_video_window_var.get()
             
-            # --- NUOVO: Passa i filtri YOLO al generatore video ---
+            # Passa i filtri YOLO al generatore video
             video_options['yolo_class_filter'] = self.yolo_class_filter
             video_options['yolo_id_filter'] = self.yolo_id_filter
-            # --- FINE NUOVO ---
 
-            # 2. Prepara la cartella di lavoro temporanea
             final_events_df = self.events_df.copy()
             if not final_events_df.empty and 'selected' in final_events_df.columns:
                 final_events_df = final_events_df[final_events_df['selected']]
@@ -1699,7 +1699,8 @@ class SpeedApp:
                 raw_dir=Path(raw_dir_str),
                 unenriched_dir=Path(unenriched_dir_str),
                 enriched_dirs=self.enriched_dir_paths,
-                events_df=final_events_df
+                events_df=final_events_df,
+                concatenated_video_path=self.concatenated_video_path
             )
 
             un_enriched_mode = not bool(self.enriched_dir_paths)
@@ -1721,21 +1722,36 @@ class SpeedApp:
         Apre l'editor per mappare gli eventi ai file video.
         """
         from desktop_app.video_in_video_editor import VideoInVideoEditor
-
         if self.events_df.empty:
             messagebox.showerror("Error", "Events must be loaded to create a video-in-video. Please load a dataset.", parent=self.root)
             return
+        
+        # Passa una copia degli eventi correnti all'editor
+        df_for_editor = self.events_df.copy()
 
-        # Passa il DataFrame corrente all'editor
-        editor = VideoInVideoEditor(self.root, self.viv_events_df if not self.viv_events_df.empty else self.events_df)
+        # Se esiste già una mappatura, uniscila.
+        if not self.viv_events_df.empty:
+            # Colonne da unire dalla mappatura esistente
+            map_cols = ['timestamp [ns]', 'video_path', 'start_frame', 'end_frame']
+            # Rimuovi le vecchie colonne di mappatura dal df principale per evitare duplicati
+            df_for_editor = df_for_editor.drop(columns=['video_path', 'start_frame', 'end_frame'], errors='ignore')
+            # Unisci la nuova mappatura
+            df_for_editor = pd.merge(df_for_editor, self.viv_events_df[map_cols], on='timestamp [ns]', how='left')
+
+        editor = VideoInVideoEditor(self.root, df_for_editor)
         self.root.wait_window(editor)
 
+        # Il risultato dell'editor è il nuovo DataFrame di mappatura, che salviamo separatamente.
         if editor.result is not None and not editor.result.empty:
             self.viv_events_df = editor.result
             self.create_viv_btn.config(state=tk.NORMAL) # Abilita il pulsante di creazione
             self.viv_status_label.config(text="Status: Event mapping is ready. Press 'Create' to generate the video.", fg="blue")
             logging.info("Video-in-video event mapping updated.")
-        else:
+        elif editor.result is not None: # L'utente ha salvato una mappatura vuota
+            # Se l'utente annulla o non mappa nulla, resetta la mappatura.
+            self.viv_events_df = pd.DataFrame()
+            self.create_viv_btn.config(state=tk.DISABLED)
+            self.viv_status_label.config(text="Status: Using original scene video.", fg="grey")
             logging.info("Video-in-video mapping cancelled or no valid mappings provided.")
 
     def run_video_in_video_creation(self):
@@ -1746,60 +1762,53 @@ class SpeedApp:
             messagebox.showerror("Error", "No event-to-video mapping found. Please map events first.", parent=self.root)
             return
 
-        common_paths = self._get_common_paths()
-        if not common_paths: return
-        output_dir_path, _ = common_paths
-
-        unenriched_dir = Path(self.unenriched_dir_var.get())
-        if not unenriched_dir.is_dir():
+        unenriched_dir_path = Path(self.unenriched_dir_var.get())
+        if not unenriched_dir_path.is_dir():
             messagebox.showerror("Error", "Un-enriched folder not set or not found.", parent=self.root)
             return
 
         try:
-            output_dir_path.mkdir(parents=True, exist_ok=True)
-            working_dir = output_dir_path / "SPEED_workspace"
+            output_dir = Path(self.output_dir_entry.get())
+            # Crea una cartella di lavoro temporanea per la generazione del video
+            working_dir = output_dir / "SPEED_viv_workspace"
             working_dir.mkdir(exist_ok=True)
 
-            # --- MODIFICA: Gestione separata dei file di eventi ---
-            # 1. Copia il file 'events.csv' originale dalla cartella un-enriched al workspace.
-            #    Questo file contiene gli eventi 'begin.recording' e 'end.recording'
-            #    necessari per determinare la durata corretta del video.
-            original_events_path = unenriched_dir / 'events.csv'
+            # Copia il file degli eventi originale nella cartella di lavoro.
+            # Questo è essenziale per calcolare la durata totale della registrazione.
+            original_events_path = unenriched_dir_path / 'events.csv'
             if original_events_path.exists():
                 shutil.copy(original_events_path, working_dir / 'events.csv')
             else:
-                messagebox.showwarning("Warning", "'events.csv' not found in un-enriched folder. Video duration might be incorrect.", parent=self.root)
+                messagebox.showerror("Error", "'events.csv' not found in un-enriched folder. Cannot determine video duration.", parent=self.root)
+                return
 
-            # 2. Salva la mappatura del video-in-video in un file separato.
-            #    La funzione di generazione lo userà specificamente per la mappatura.
-            self.viv_events_df.to_csv(working_dir / 'events-video-in-video.csv', index=False)
-            # --- FINE MODIFICA ---
-            messagebox.showinfo("In Progress", "Creating concatenated video...")
+            messagebox.showinfo("In Progress", "Creating new scene video from media mapping...")
             
-            # La funzione ora crea il video in una cartella temporanea e restituisce il percorso
             new_video_path = video_generator.generate_concatenated_video(
                 data_dir=working_dir,
                 viv_events_df=self.viv_events_df
             )
             
-            # Sposta il nuovo video nella cartella un-enriched, sovrascrivendo/rinominando il vecchio
-            original_video = next(unenriched_dir.glob('*.mp4'), None)
-            if original_video:
-                # Rinomina il video originale per conservarlo
-                backup_path = unenriched_dir / f"external-old-{int(time.time())}.mp4"
-                original_video.rename(backup_path)
-                logging.info(f"Original video renamed to '{backup_path.name}'")
-            
-            final_video_path = unenriched_dir / 'external.mp4'
-            new_video_path.rename(final_video_path)
-            logging.info(f"New concatenated video moved to: {final_video_path}")
-            
-            # Aggiorna lo stato per riflettere che il nuovo video è ora quello principale
-            self.concatenated_video_path = final_video_path 
+            # Esegui il backup del video originale e sostituiscilo con quello nuovo
+            original_video_path = next(unenriched_dir_path.glob('*.mp4'))
+            timestamp = time.strftime('%Y%m%d-%H%M%S')
+            backup_path = original_video_path.with_name(f"{original_video_path.stem}_old_{timestamp}.mp4")
+            original_video_path.rename(backup_path)
+            logging.info(f"Original video backed up to: {backup_path}")
 
-            self.viv_status_label.config(text="Status: New 'external.mp4' created in un-enriched folder.", fg="green")
+            final_video_path = unenriched_dir_path / 'external.mp4'
+            shutil.move(new_video_path, final_video_path)
+            logging.info(f"New concatenated video created at: {final_video_path}")
+
+            # Pulisci la cartella di lavoro temporanea
+            shutil.rmtree(working_dir)
+
+            # Memorizza il percorso del nuovo video e aggiorna la UI
+            self.concatenated_video_path = final_video_path
+
+            self.viv_status_label.config(text=f"Status: New 'external.mp4' created in un-enriched folder.", fg="green")
             self.create_viv_btn.config(state=tk.DISABLED) # Disabilita dopo la creazione per evitare duplicati
-            messagebox.showinfo("Success", f"New 'external.mp4' created successfully in the un-enriched folder.\nIt will now be used for all subsequent analyses.")
+            messagebox.showinfo("Success", f"New scene video 'external.mp4' created successfully in:\n{unenriched_dir_path}")
 
         except Exception as e:
             logging.error(f"Video-in-Video Generation Error: {e}\n{traceback.format_exc()}")
