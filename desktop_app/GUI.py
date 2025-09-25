@@ -724,6 +724,7 @@ class SpeedApp:
         self.plot_vars = {}
         self.video_vars = {}
         self.world_timestamps_df = pd.DataFrame()
+        self.concatenated_video_path = None
         
         self.user_defined_aois = []
 
@@ -1732,11 +1733,11 @@ class SpeedApp:
         # Se esiste già una mappatura, uniscila.
         if not self.viv_events_df.empty:
             # Colonne da unire dalla mappatura esistente
-            map_cols = ['timestamp [ns]', 'video_path', 'start_frame', 'end_frame']
+            map_cols = ['timestamp [ns]', 'video_path']
             # Rimuovi le vecchie colonne di mappatura dal df principale per evitare duplicati
-            df_for_editor = df_for_editor.drop(columns=['video_path', 'start_frame', 'end_frame'], errors='ignore')
+            df_for_editor = df_for_editor.drop(columns=['video_path'], errors='ignore')
             # Unisci la nuova mappatura
-            df_for_editor = pd.merge(df_for_editor, self.viv_events_df[map_cols], on='timestamp [ns]', how='left')
+            df_for_editor = pd.merge(df_for_editor, self.viv_events_df[map_cols].drop_duplicates(subset=['timestamp [ns]']), on='timestamp [ns]', how='left')
 
         editor = VideoInVideoEditor(self.root, df_for_editor)
         self.root.wait_window(editor)
