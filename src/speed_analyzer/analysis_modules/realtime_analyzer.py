@@ -61,11 +61,12 @@ class RealtimeNeonAnalyzer:
     Gestisce la connessione, l'acquisizione dati e l'analisi in tempo reale
     da un dispositivo Pupil Labs Neon.
     """
-    def __init__(self, model_name='yolov8n.pt', task='detect', custom_classes=None):
+    def __init__(self):
         print("Initializing Real-time Neon Analyzer...")
         self.device = None
-        self.yolo_model = None
-        self._initialize_yolo_model(model_name, task, custom_classes)
+        self.yolo_models = {} # Dizionario per i modelli {task: model}
+        self.reid_model = None # Modello Re-ID separato
+        self.tracker_config_path = None # Percorso del file YAML del tracker
 
         # Dati per grafici e overlay
         self.pupil_data = {"Left": [], "Right": [], "Mean": []}
@@ -107,46 +108,41 @@ class RealtimeNeonAnalyzer:
         self.logged_mps_pose_warning = False
 
 
-    def _initialize_yolo_model(self, model_name, task, custom_classes):
-        """Carica e configura il modello YOLO in base al task e alle classi custom."""
-        if not model_name:
-            self.yolo_model = None
+    def initialize_yolo_models(self, yolo_models: dict, custom_classes: Optional[list] = None, tracker_config_path: Optional[str] = None):
+        """Carica e configura i modelli YOLO in base ai task e alle classi custom."""
+        if not yolo_models:
+            self.yolo_models.clear()
+            self.reid_model = None
+            self.tracker_config_path = None
             return
             
         try:
-            # Gestione dei modelli specifici per task (es. -seg, -pose)
-            model_file = Path(model_name)
-            stem = model_file.stem.split('-')[0] # es. 'yolov8n' da 'yolov8n-seg'
+            self.yolo_models.clear()
+            self.reid_model = None
 
-            if task.startswith('segment') and not model_name.endswith('-seg.pt'):
-                model_name = f"{stem}-seg.pt"
-            elif task.startswith('pose') and not model_name.endswith('-pose.pt'):
-                model_name = f"{stem}-pose.pt"
+            for task, model_path in yolo_models.items():
+                if task == 'reid':
+                    self.reid_model = YOLO(model_path)
+                    print(f"Loaded Re-ID model '{Path(model_path).name}'.")
+                    continue
 
-            # Logica per YOLO-World con classi custom (salva e ricarica)
-            if task == 'detect_world' and custom_classes:
-                print(f"Configuring YOLO-World with custom classes: {custom_classes}")
-                base_model = YOLO(model_name)
-                base_model.set_classes(custom_classes)
+                model = YOLO(model_path)
                 
-                # Salva il modello custom in una cartella temporanea
-                temp_dir = Path(tempfile.gettempdir())
-                custom_model_path = temp_dir / f"yolo_world_custom_{'_'.join(custom_classes)}.pt"
+                if task == 'detect_world' and custom_classes:
+                    print(f"Configuring YOLO-World with custom classes: {custom_classes}")
+                    model.set_classes(custom_classes)
                 
-                print(f"Saving custom model to: {custom_model_path}")
-                base_model.save(custom_model_path)
-                
-                # Ricarica il modello custom per l'inferenza
-                self.yolo_model = YOLO(custom_model_path)
-            else:
-                # Caricamento standard per tutti gli altri casi
-                print(f"Loading standard YOLO model: {model_name}")
-                self.yolo_model = YOLO(model_name)
+                self.yolo_models[task] = model
+                print(f"Loaded YOLO model '{Path(model_path).name}' for task '{task}'.")
+            
+            if tracker_config_path:
+                self.tracker_config_path = tracker_config_path
+                print(f"Using custom tracker configuration: {tracker_config_path}")
             
             print("YOLO model initialized successfully.")
         except Exception as e:
             print(f"CRITICAL ERROR: Failed to initialize YOLO model: {e}")
-            self.yolo_model = None
+            self.yolo_models.clear()
 
     def connect(self, mock_device=None):
         if mock_device:
@@ -180,32 +176,37 @@ class RealtimeNeonAnalyzer:
 
     def _run_yolo_inference(self, scene_img):
         """Esegue il modello YOLO caricato sul frame e restituisce il frame annotato."""
-        if self.yolo_model is None:
+        if not self.yolo_models:
             return scene_img, "N/A", []
 
-        # --- NUOVO: Logica per forzare la CPU sui modelli di posa su MPS ---
-        device = 'cpu' if torch.backends.mps.is_available() and 'pose' in self.yolo_model.task else None
-        if device == 'cpu' and not self.logged_mps_pose_warning:
-            logging.warning("Pose model on Apple MPS detected. Forcing CPU to avoid known bugs.")
-            self.logged_mps_pose_warning = True
-        
-        # Se device è None, ultralytics sceglierà il migliore disponibile (es. MPS, CUDA)
-        results = self.yolo_model.track(scene_img, persist=True, verbose=False, device=device)
-        # --- FINE MODIFICA ---
+        all_results = {}
+        effective_device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
 
-        
-        # --- MODIFICA: Disegno manuale per applicare i filtri ---
+        for task, model in self.yolo_models.items():
+            device_for_task = effective_device
+            if task == 'pose' and effective_device == 'mps':
+                if not self.logged_mps_pose_warning:
+                    logging.warning("Pose model on Apple MPS detected. Forcing CPU to avoid known bugs.")
+                    self.logged_mps_pose_warning = True
+                device_for_task = 'cpu'
+            
+            all_results[task] = model.track(scene_img, persist=True, verbose=False, device=device_for_task, tracker=self.tracker_config_path)
+
         annotated_frame = scene_img.copy()
         detected_objects_this_frame = []
-        if results[0].boxes is not None and results[0].boxes.id is not None:
-            for box in results[0].boxes:
+        gazed_object_name = "No object"
+
+        for task, results in all_results.items():
+            res = results[0]
+            if res.boxes is None or res.boxes.id is None: continue
+
+            for box in res.boxes:
                 class_id = int(box.cls[0])
                 track_id = int(box.id[0])
-                class_name = self.yolo_model.names[class_id]
-                
+                class_name = self.yolo_models[task].names[class_id]
+
                 detected_objects_this_frame.append((class_name, track_id))
 
-                # Applica i filtri
                 if self.yolo_class_filter and class_name not in self.yolo_class_filter: continue
                 if self.yolo_id_filter and track_id not in self.yolo_id_filter: continue
 
@@ -213,11 +214,10 @@ class RealtimeNeonAnalyzer:
                 cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.putText(annotated_frame, f"{class_name}:{track_id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
+                if self.last_gaze and x1 <= self.last_gaze.x <= x2 and y1 <= self.last_gaze.y <= y2:
+                    gazed_object_name = f"{class_name}:{track_id}"
+
         # Logica per trovare l'oggetto sotto lo sguardo (opzionale ma utile)
-        gazed_object_name = "No object"
-        if self.last_gaze and results[0].boxes:
-            gaze_point = (int(self.last_gaze.x), int(self.last_gaze.y))
-            # ... (la logica esistente per trovare l'oggetto sotto lo sguardo può rimanere qui) ...
         
         return annotated_frame, gazed_object_name, detected_objects_this_frame
 

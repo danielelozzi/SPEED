@@ -1,0 +1,42 @@
+# Default Tracker Configuration for SPEED
+# This file uses the BoT-SORT tracker, a robust option for object tracking.
+
+# Type of tracker to use. Options: 'botsort', 'bytetrack'
+tracker_type: botsort
+
+# --- BoT-SORT specific settings ---
+
+# High-confidence detection threshold. Detections above this are used to start new tracks.
+track_high_thresh: 0.5
+
+# Low-confidence detection threshold. Detections between low and high are used to associate with existing tracks but not to start new ones.
+track_low_thresh: 0.1
+
+# If a detection has a score higher than this, it can be used to create a new track.
+new_track_thresh: 0.6
+
+# Number of frames to keep a track alive without any new detections.
+track_buffer: 30
+
+# IoU threshold for matching detections to existing tracks in the first association stage.
+match_thresh: 0.8
+
+# --- Re-identification (Re-ID) settings ---
+# These settings are only used if tracker_type is 'botsort'.
+
+# Set to True to enable the Re-ID model for more robust tracking across occlusions.
+# This requires more computational resources.
+# If set to True, you must also select a Re-ID model (e.g., yolov8n-reid.pt) in the GUI.
+with_reid: False
+
+# Minimum IoU for two tracks to be considered "close" enough for Re-ID comparison.
+proximity_thresh: 0.5
+
+# Minimum appearance similarity score for two detections to be considered the same object.
+# Lower values are more lenient, higher values are stricter.
+appearance_thresh: 0.25
+
+# --- Global Motion Compensation (GMC) settings ---
+# Helps stabilize tracking when the camera is moving.
+# Options: 'orb', 'ecc', 'none'
+gmc_method: 'orb'

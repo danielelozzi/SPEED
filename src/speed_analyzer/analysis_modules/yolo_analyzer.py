@@ -135,7 +135,8 @@ def run_yolo_analysis(
     subj_name: str,
     yolo_models: Optional[typing.Dict[str, str]] = None,
     custom_classes: Optional[List[str]] = None,
-    yolo_detections_df: Optional[pd.DataFrame] = None
+    yolo_detections_df: Optional[pd.DataFrame] = None,
+    tracker_config_path: Optional[str] = None
 ) -> None:
     """
     Runs YOLO object detection, correlates with fixations, and saves statistics.
@@ -155,11 +156,21 @@ def run_yolo_analysis(
 
     yolo_device = _get_yolo_device()
     models = {}
+    reid_model = None # Variabile per memorizzare il modello Re-ID
     try:
         for task, model_name in yolo_models.items():
+            # --- MODIFICA: Gestione speciale per i modelli Re-ID ---
+            if task == 'reid':
+                # Carica il modello Re-ID ma non lo aggiunge al dizionario dei modelli da eseguire per frame
+                reid_model = YOLO(model_name)
+                logging.info(f"Loaded Re-ID model '{model_name}'. It will be used by the tracker.")
+                continue
+            # --- FINE MODIFICA ---
+
             models[task] = YOLO(model_name)
             logging.info(f"Loaded YOLO model '{model_name}' for task '{task}'.")
 
+        # Imposta le classi custom per il modello world, se presente
         if 'detect_world' in models and custom_classes:
             logging.info(f"Setting custom classes for zero-shot detection: {custom_classes}")
             models['detect_world'].set_classes(custom_classes)
@@ -220,19 +231,18 @@ def run_yolo_analysis(
                     if task == 'pose' and effective_device == 'mps':
                         if not logged_mps_pose_warning:
                             logging.warning("Pose model on Apple MPS detected. Forcing CPU to avoid known bugs.")
+                            logged_mps_pose_warning = True # Logga solo una volta
                         device_for_task = 'cpu'
-                    all_results[task] = model.track(frame, persist=True, verbose=False, device=device_for_task)
+                    all_results[task] = model.track(frame, persist=True, verbose=False, device=device_for_task, tracker=tracker_config_path)
             except Exception as e:
                 if effective_device != 'cpu':
                     logging.warning(f"Inference on '{effective_device}' failed: {e}. Falling back to CPU.")
                     effective_device = 'cpu'
                     pbar.set_description(f"YOLO Tracking on {effective_device.upper()} (Fallback)")
                     for task, model in models.items():
-                        all_results[task] = model.track(frame, persist=True, verbose=False, device=effective_device)
+                        all_results[task] = model.track(frame, persist=True, verbose=False, device=effective_device, tracker=tracker_config_path)
                 else:
                     raise e # Se fallisce anche sulla CPU, l'errore è più grave
-            
-            logged_mps_pose_warning = True # Log only once
 
             frame_detections_list = []
             for task, results in all_results.items():

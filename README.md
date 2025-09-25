@@ -1,10 +1,10 @@
-# SPEED v5.3.1 - labScoc Processing and Extraction of Eye tracking Data
+# SPEED v5.3.2 - labScoc Processing and Extraction of Eye tracking Data
 
 Desktop App & Analysis Package
 
 *An Advanced Eye-Tracking Data Analysis Software*
 
-SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. Version 5.3.1 introduces a major restructuring, offering two distinct components:
+SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. Version 5.3.2 introduces a major restructuring, offering two distinct components:
 
 1.  **SPEED Desktop App**: A user-friendly GUI application for running a full analysis pipeline, designed for end-users and researchers.
 2.  **`speed-analyzer`**[![PyPI version](https://img.shields.io/pypi/v/speed-analyzer.svg)](https://pypi.org/project/speed-analyzer/): A Python package for developers who want to integrate the analysis logic into their own scripts.
@@ -44,7 +44,7 @@ The core analysis engine of SPEED, now available as a reusable package. It's des
 ### Installation from PyPI
 You can install the package directly from the Python Package Index (PyPI) using pip:
 ```bash
-pip install speed-analyzer==5.3.1
+pip install speed-analyzer==5.3.2
 ```
 ### How to Use the Package
 The package exposes a main function, `run_full_analysis`, that takes paths and options as arguments. See the `example_usage.py` file for a complete demonstration.
@@ -228,7 +228,7 @@ This approach guarantees that your analysis is always executed in the same contr
 ---
 
 ## The Modular Workflow (GUI)
-SPEED v5.3.1 operates on a two-step workflow designed to save time and computational resources.
+SPEED v5.3.2 operates on a two-step workflow designed to save time and computational resources.
 
 ### Step 1: Run Core Analysis
 This is the main data processing stage. You run this step only once per participant for a given set of events. The software will:
@@ -386,7 +386,7 @@ python lsl_stream_simulator.py
 
 ## Export to BIDS Format
 
-SPEED 5.3.1 introduces a new feature to convert processed eye-tracking data into a format compatible with the **Brain Imaging Data Structure (BIDS)**, following the [BEP020 for Eye Tracking](https://bids.neuroimaging.io/extensions/beps/bep_020.html) guidelines. This facilitates data sharing and standardization for the research community.
+SPEED 5.3.2 introduces a new feature to convert processed eye-tracking data into a format compatible with the **Brain Imaging Data Structure (BIDS)**, following the [BEP020 for Eye Tracking](https://bids.neuroimaging.io/extensions/beps/bep_020.html) guidelines. This facilitates data sharing and standardization for the research community.
 
 ### Use via Desktop App
 

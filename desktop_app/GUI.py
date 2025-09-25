@@ -209,29 +209,40 @@ class RealtimeDisplayWindow(tk.Toplevel):
         aoi_btn_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
         tk.Button(aoi_btn_frame, text="Add AOI", command=self.prepare_to_draw_aoi).pack()
         tk.Button(aoi_btn_frame, text="Remove", command=self.remove_selected_aoi).pack()
-        tk.Button(aoi_btn_frame, text="Add QR AOI", command=self.add_qr_aoi_dialog).pack() # NUOVO
+        tk.Button(aoi_btn_frame, text="Add QR AOI", command=self.add_qr_aoi_dialog).pack()
 
         # --- MODIFICA: Frame per i controlli YOLO in tempo reale ---
         self.yolo_config_frame = tk.LabelFrame(main_control_frame, text="YOLO Real-Time Controls", padx=10, pady=10)
         self.yolo_config_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
         
-        self.yolo_task_var = tk.StringVar(value='detect_v8')
-        self.yolo_model_var = tk.StringVar()
-        self.yolo_classes_var = tk.StringVar()
+        # --- MODIFICA: Selezione Multi-Modello per Real-time ---
+        self.rt_yolo_model_vars = {
+            'detect': tk.StringVar(), 'segment': tk.StringVar(), 'pose': tk.StringVar(),
+            'reid': tk.StringVar(), 'detect_world': tk.StringVar()
+        }
+        self.rt_yolo_model_combos = {}
 
-        tk.Label(self.yolo_config_frame, text="YOLO Task:").pack(anchor='w')
-        self.yolo_task_combo = ttk.Combobox(self.yolo_config_frame, textvariable=self.yolo_task_var, values=list(YOLO_MODELS.keys()), state='disabled', width=25)
-        self.yolo_task_combo.pack(pady=(0,5))
-        self.yolo_task_combo.bind('<<ComboboxSelected>>', self.update_yolo_model_options)
-
-        tk.Label(self.yolo_config_frame, text="YOLO Model:").pack(anchor='w')
-        self.yolo_model_combo = ttk.Combobox(self.yolo_config_frame, textvariable=self.yolo_model_var, state='disabled', width=25)
-        self.yolo_model_combo.pack()
+        for task, label in [('detect', 'Detection Model:'), ('segment', 'Segmentation Model:'), 
+                            ('pose', 'Pose Model:'), ('reid', 'Re-ID Model:'), 
+                            ('detect_world', 'World Model:')]:
+            tk.Label(self.yolo_config_frame, text=label).pack(anchor='w')
+            combo = ttk.Combobox(self.yolo_config_frame, textvariable=self.rt_yolo_model_vars[task], state='disabled', width=25)
+            combo.pack(fill=tk.X, pady=(0, 2))
+            self.rt_yolo_model_combos[task] = combo
 
         tk.Label(self.yolo_config_frame, text="Custom Classes (for -world models):").pack(anchor='w', pady=(5,0))
+        self.yolo_classes_var = tk.StringVar()
         self.yolo_classes_entry = tk.Entry(self.yolo_config_frame, textvariable=self.yolo_classes_var, width=28, state=tk.DISABLED)
         self.yolo_classes_entry.pack()
         SpeedApp.add_placeholder(self.yolo_classes_entry, "person, car, dog")
+
+        tk.Label(self.yolo_config_frame, text="Custom Tracker Config (.yaml):").pack(anchor='w', pady=(5,0))
+        self.rt_yolo_tracker_config_var = tk.StringVar()
+        tracker_frame = tk.Frame(self.yolo_config_frame)
+        tracker_frame.pack(fill=tk.X)
+        tk.Entry(tracker_frame, textvariable=self.rt_yolo_tracker_config_var, state=tk.DISABLED).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.rt_tracker_browse_btn = tk.Button(tracker_frame, text="...", command=lambda: self.select_file(self.rt_yolo_tracker_config_var, [("YAML files", "*.yaml")]), state=tk.DISABLED, width=3)
+        self.rt_tracker_browse_btn.pack(side=tk.RIGHT)
 
         
         vis_options_frame = tk.LabelFrame(main_control_frame, text="Visual Options", padx=10, pady=10)
@@ -271,16 +282,16 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def update_yolo_model_options(self, event=None):
-        selected_task = self.yolo_task_var.get()
-        available_models = YOLO_MODELS.get(selected_task, [])
-        self.yolo_model_combo['values'] = available_models
-        if available_models:
-            self.yolo_model_var.set(available_models[0])
-        else:
-            self.yolo_model_var.set('')
-            
-        # Abilita/disabilita l'entry per le classi custom
-        is_custom_detect_task = (selected_task == 'detect_world')
+        """Popola i combobox dei modelli YOLO con le opzioni corrette."""
+        for task, combo in self.rt_yolo_model_combos.items():
+            models_for_task = [""] + YOLO_MODELS.get(task, [])
+            combo['values'] = models_for_task
+            # Imposta un default o lascia vuoto
+            if self.rt_yolo_model_vars[task].get() not in models_for_task:
+                self.rt_yolo_model_vars[task].set(models_for_task[0])
+
+        # Abilita/disabilita l'entry per le classi custom in base alla selezione del world model
+        is_custom_detect_task = bool(self.rt_yolo_model_vars['detect_world'].get())
         self.yolo_classes_entry.config(state=tk.NORMAL if is_custom_detect_task else tk.DISABLED)
 
     def connect_to_device(self):
@@ -289,14 +300,17 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.connect_button.config(state=tk.DISABLED)
 
         # Istanzia l'analizzatore senza modello YOLO per ora
-        self.analyzer = RealtimeNeonAnalyzer(model_name=None, task=None)
+        self.analyzer = RealtimeNeonAnalyzer()
 
         if self.analyzer.connect():
             self.status_label.config(text="Device connected. Configure analysis and press 'Start Analysis'.")
             # Abilita i controlli per la fase successiva
             self.start_analysis_button.config(state=tk.NORMAL)
-            self.yolo_task_combo.config(state='readonly')
-            self.yolo_model_combo.config(state='readonly')
+            for combo in self.rt_yolo_model_combos.values():
+                combo.config(state='readonly')
+            self.yolo_classes_entry.config(state='normal')
+            self.rt_yolo_tracker_config_var.get()
+            self.rt_tracker_browse_btn.config(state=tk.NORMAL)
             self.update_yolo_model_options() # Aggiorna stato entry classi custom
         else:
             self.status_label.config(text="Failed to connect. Please check device.")
@@ -311,17 +325,20 @@ class RealtimeDisplayWindow(tk.Toplevel):
 
         self.start_analysis_button.config(state=tk.DISABLED)
 
-        # Prepara la lista delle classi custom
+        # --- MODIFICA: Recupera tutti i modelli selezionati ---
+        yolo_models_to_run = {task: str(MODELS_DIR / var.get()) for task, var in self.rt_yolo_model_vars.items() if var.get()}
+        
         custom_classes_str = self.yolo_classes_var.get().strip()
         yolo_custom_classes = None
         if custom_classes_str and custom_classes_str != "person, car, dog": # Ignora il placeholder
             yolo_custom_classes = [cls.strip() for cls in custom_classes_str.split(',') if cls.strip()]
+        yolo_tracker_config = self.rt_yolo_tracker_config_var.get() or None
 
         # Ora inizializza il modello YOLO nell'analizzatore esistente
-        self.analyzer._initialize_yolo_model(
-            model_name=str(MODELS_DIR / self.yolo_model_var.get()), # --- MODIFICA: Usa il percorso completo
-            task=self.yolo_task_var.get(),
-            custom_classes=yolo_custom_classes)
+        self.analyzer.initialize_yolo_models(
+            yolo_models=yolo_models_to_run,
+            custom_classes=yolo_custom_classes,
+            tracker_config_path=yolo_tracker_config)
         
         self.thread = threading.Thread(target=self.stream_loop, daemon=True)
         self.thread.start()
@@ -341,9 +358,10 @@ class RealtimeDisplayWindow(tk.Toplevel):
              self.status_label.config(text="Streaming...")
         
         # Disabilita i controlli di configurazione YOLO una volta avviato lo stream
-        self.yolo_model_combo.config(state=tk.DISABLED)
-        self.yolo_task_combo.config(state=tk.DISABLED)
+        for combo in self.rt_yolo_model_combos.values():
+            combo.config(state=tk.DISABLED)
         self.yolo_classes_entry.config(state=tk.DISABLED)
+        self.rt_tracker_browse_btn.config(state=tk.DISABLED)
 
         self.record_button.config(state=tk.NORMAL)
 
@@ -700,7 +718,10 @@ YOLO_MODELS = {
     'pose': [
         'yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt'
     ],
-    'detect_world': ['yolov8s-world.pt', 'yolov8m-world.pt', 'yolov8l-world.pt', 'yolov8x-world.pt']
+    'detect_world': ['yolov8s-world.pt', 'yolov8m-world.pt', 'yolov8l-world.pt', 'yolov8x-world.pt'],
+    'reid': [
+        'yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt'
+    ]
 }
 
 # --- NUOVO: Lista dei modelli di classificazione ufficiali ---
@@ -712,7 +733,7 @@ OFFICIAL_YOLO_CLS_MODELS = [
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.3.1")
+        self.root.title("SPEED v5.3.2")
         # --- MODIFICA: Avvia a schermo intero ---
         self.root.state('zoomed')
 
@@ -886,11 +907,12 @@ class SpeedApp:
             'detect': tk.StringVar(),
             'segment': tk.StringVar(),
             'pose': tk.StringVar(),
-            'detect_world': tk.StringVar()
+            'detect_world': tk.StringVar(),
+            'reid': tk.StringVar()
         }
         self.yolo_model_combos = {}
 
-        for task, label in [('detect', 'Detection Model:'), ('segment', 'Segmentation Model:'), ('pose', 'Pose Model:'), ('detect_world', 'World Model (for custom classes):')]:
+        for task, label in [('detect', 'Detection Model:'), ('segment', 'Segmentation Model:'), ('pose', 'Pose Model:'), ('reid', 'Re-ID Model:'), ('detect_world', 'World Model (for custom classes):')]:
             model_frame = tk.Frame(yolo_options_frame)
             model_frame.pack(fill=tk.X, pady=2)
             tk.Label(model_frame, text=label, width=22, anchor='w').pack(side=tk.LEFT)
@@ -905,6 +927,18 @@ class SpeedApp:
         self.yolo_classes_entry = tk.Entry(classes_frame, textvariable=self.yolo_classes_var)
         self.yolo_classes_entry.pack(fill=tk.X, expand=True)
         self.add_placeholder(self.yolo_classes_entry, "person, car, dog")
+
+        # --- NUOVO: Selezione del file di configurazione del tracker ---
+        tracker_frame = tk.Frame(yolo_options_frame)
+        tracker_frame.pack(fill=tk.X, pady=2)
+        tk.Label(tracker_frame, text="Custom Tracker Config (.yaml):", width=22, anchor='w').pack(side=tk.LEFT)
+        self.yolo_tracker_config_var = tk.StringVar()
+        # --- NUOVO: Imposta il valore predefinito per il tracker ---
+        default_tracker_path = project_root / 'desktop_app' / 'default_yaml.yaml'
+        if default_tracker_path.exists():
+            self.yolo_tracker_config_var.set(str(default_tracker_path))
+        tk.Entry(tracker_frame, textvariable=self.yolo_tracker_config_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        tk.Button(tracker_frame, text="Browse...", command=lambda: self.select_file(self.yolo_tracker_config_var, [("YAML files", "*.yaml")])).pack(side=tk.RIGHT)
         
         # Imposta lo stato iniziale
         self.toggle_yolo_options()
@@ -1315,6 +1349,11 @@ class SpeedApp:
         if filepath:
             self.external_event_file_var.set(filepath)
 
+    def select_file(self, var, filetypes):
+        """Funzione generica per selezionare un file e impostare una StringVar."""
+        filepath = filedialog.askopenfilename(title="Select File", filetypes=filetypes)
+        if filepath: var.set(filepath)
+
     def load_data_for_editors(self):
         self.update_aoi_list_display()
         unenriched_path_str = self.unenriched_dir_var.get()
@@ -1606,6 +1645,7 @@ class SpeedApp:
             yolo_custom_classes = None
             if custom_classes_str and custom_classes_str != "person, car, dog": # Ignora il placeholder
                 yolo_custom_classes = [cls.strip() for cls in custom_classes_str.split(',') if cls.strip()]
+            yolo_tracker_config = self.yolo_tracker_config_var.get() or None
             # --- FINE MODIFICA ---
             
             # --- NUOVO: Passa il DataFrame YOLO filtrato se esiste ---
@@ -1637,6 +1677,7 @@ class SpeedApp:
                 yolo_models=yolo_models_to_run if self.yolo_var.get() else None,
                 defined_aois=self.user_defined_aois,
                 yolo_detections_df=yolo_df_to_use, # Passa il df filtrato se disponibile
+                tracker_config_path=yolo_tracker_config, # Passa il file di config del tracker
                 concatenated_video_path=concatenated_video_path_str, # Passa il percorso del video ViV
                 generate_video=False # Non generare il video da qui
             )

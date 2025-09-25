@@ -12,6 +12,7 @@ import logging
 import torch
 from tqdm import tqdm
 import threading
+from typing import Optional
 import pygame
 
 try:
@@ -160,16 +161,39 @@ class InteractiveVideoEditor(tk.Toplevel):
         self.yolo_model_vars = {
             'detect': tk.StringVar(),
             'segment': tk.StringVar(),
-            'pose': tk.StringVar()
+            'pose': tk.StringVar(),
+            'reid': tk.StringVar()
         }
         self.yolo_model_combos = {}
 
-        for task in ['detect', 'segment', 'pose']:
+        for task in ['detect', 'segment', 'pose', 'reid']:
             tk.Label(yolo_run_frame, text=f"{task.capitalize()} Model:").pack(anchor='w', pady=(5,0))
             combo = ttk.Combobox(yolo_run_frame, textvariable=self.yolo_model_vars[task], state='readonly')
             combo.pack(fill=tk.X)
             self.yolo_model_combos[task] = combo
 
+        # --- NUOVO: Sezione per YOLO-World e classi custom ---
+        tk.Label(yolo_run_frame, text="World Model (for custom classes):").pack(anchor='w', pady=(5,0))
+        self.yolo_world_model_var = tk.StringVar()
+        self.yolo_world_model_combo = ttk.Combobox(yolo_run_frame, textvariable=self.yolo_world_model_var, state='readonly')
+        self.yolo_world_model_combo.pack(fill=tk.X)
+
+        tk.Label(yolo_run_frame, text="Custom Classes (comma-separated):").pack(anchor='w', pady=(5,0))
+        self.yolo_custom_classes_var = tk.StringVar()
+        self.yolo_custom_classes_entry = tk.Entry(yolo_run_frame, textvariable=self.yolo_custom_classes_var)
+        self.yolo_custom_classes_entry.pack(fill=tk.X)
+
+        # --- NUOVO: Selezione del file di configurazione del tracker ---
+        tk.Label(yolo_run_frame, text="Custom Tracker Config (.yaml):").pack(anchor='w', pady=(5,0))
+        self.yolo_tracker_config_var = tk.StringVar()
+        tracker_frame = tk.Frame(yolo_run_frame)
+        tracker_frame.pack(fill=tk.X)
+        tk.Entry(tracker_frame, textvariable=self.yolo_tracker_config_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        tk.Button(tracker_frame, text="...", command=lambda: self.select_file(self.yolo_tracker_config_var, [("YAML files", "*.yaml")])).pack(side=tk.RIGHT)
+        # --- NUOVO: Imposta il valore predefinito per il tracker ---
+        default_tracker_path = project_root / 'desktop_app' / 'default_yaml.yaml'
+        if default_tracker_path.exists():
+            self.yolo_tracker_config_var.set(str(default_tracker_path))
         self.update_yolo_model_options()
         # --- FINE MODIFICA ---
         
@@ -293,21 +317,38 @@ class InteractiveVideoEditor(tk.Toplevel):
         self.update_frame(0)
         
     def update_yolo_model_options(self, event=None):
+        """Funzione generica per selezionare un file e impostare una StringVar."""
+        filepath = filedialog.askopenfilename(title="Select File", filetypes=filetypes, parent=self)
+        if filepath: var.set(filepath)
+
+    def update_yolo_model_options(self, event=None):
         """Aggiorna i modelli disponibili in base al task."""
         # Usa la costante globale definita in GUI.py
-        from desktop_app.GUI import YOLO_MODELS
+        try:
+            from desktop_app.GUI import YOLO_MODELS
+        except ImportError:
+            YOLO_MODELS = {} # Fallback se l'importazione fallisce
 
         for task, combo in self.yolo_model_combos.items():
             # --- NUOVA LOGICA: Raccoglie tutti i modelli per un task base (es. 'detect') ---
             all_task_models = []
             for model_key, model_list in YOLO_MODELS.items():
                 if model_key.startswith(task):
+                    # Escludi i modelli 'world' dal combobox di detect generico
+                    if task == 'detect' and 'world' in model_key:
+                        continue
                     all_task_models.extend(model_list)
             
             # Rimuovi duplicati e ordina, aggiungendo l'opzione vuota
             task_models = [""] + sorted(list(set(all_task_models)))
             combo['values'] = task_models
             self.yolo_model_vars[task].set(task_models[0]) # Seleziona l'opzione vuota
+
+        # Popola il combobox per i modelli World
+        world_models = [""] + sorted(YOLO_MODELS.get('detect_world', []))
+        self.yolo_world_model_combo['values'] = world_models
+        self.yolo_world_model_var.set(world_models[0])
+
 
     def on_close(self):
         self.is_playing = False
@@ -542,7 +583,17 @@ class InteractiveVideoEditor(tk.Toplevel):
     def run_yolo_analysis(self):
         if YOLO is None: return
         
-        selected_models = {task: name for task, name in self.yolo_model_vars.items() if name.get()}
+        selected_models = {task: var.get() for task, var in self.yolo_model_vars.items() if var.get()}
+        world_model_name = self.yolo_world_model_var.get()
+        custom_classes_str = self.yolo_custom_classes_var.get().strip()
+        tracker_config_path = self.yolo_tracker_config_var.get() or None
+
+        if world_model_name:
+            selected_models['detect_world'] = world_model_name
+            if not custom_classes_str:
+                messagebox.showerror("Error", "Please provide custom classes for the World model.", parent=self)
+                return
+
         if not selected_models:
             messagebox.showerror("Error", "Please select at least one YOLO model to run.", parent=self)
             return
@@ -550,9 +601,18 @@ class InteractiveVideoEditor(tk.Toplevel):
         try:
             self.yolo_models.clear()
             for task, model_name in selected_models.items():
-                model_path = MODELS_DIR / model_name.get()
-                self.yolo_models[task] = YOLO(model_path)
-                logging.info(f"Loaded {task} model: {model_name.get()}")
+                model_path = MODELS_DIR / model_name
+                model = YOLO(model_path)
+
+                # Imposta le classi custom per il modello World
+                if task == 'detect_world' and custom_classes_str:
+                    custom_classes = [cls.strip() for cls in custom_classes_str.split(',')]
+                    logging.info(f"Setting custom classes for World model: {custom_classes}")
+                    model.set_classes(custom_classes)
+
+                self.yolo_models[task] = model
+                logging.info(f"Loaded {task} model: {model_name}")
+
         except Exception as e:
             logging.error(f"Failed to load/download one or more YOLO models: {e}")
             messagebox.showerror("YOLO Error", f"Failed to load model: {e}", parent=self)
@@ -562,10 +622,9 @@ class InteractiveVideoEditor(tk.Toplevel):
         self.root.update_idletasks()
 
         # Esegui l'analisi in un thread per non bloccare la GUI
-        import threading
-        threading.Thread(target=self._yolo_thread_worker, daemon=True).start()
+        threading.Thread(target=self._yolo_thread_worker, args=(tracker_config_path,), daemon=True).start()
 
-    def _yolo_thread_worker(self):
+    def _yolo_thread_worker(self, tracker_config_path: Optional[str]):
         cap = cv2.VideoCapture(str(self.video_path))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
@@ -588,7 +647,7 @@ class InteractiveVideoEditor(tk.Toplevel):
                         if not self.logged_mps_pose_warning:
                             logging.warning("Pose model on Apple MPS detected. Forcing CPU to avoid known bugs.")
                         device_for_task = 'cpu'
-                    all_results[task] = model.track(frame, persist=True, verbose=False, device=device_for_task)
+                    all_results[task] = model.track(frame, persist=True, verbose=False, device=device_for_task, tracker=tracker_config_path)
 
             except Exception as e:
                 # Fallback alla CPU se l'accelerazione GPU/MPS fallisce
@@ -597,7 +656,7 @@ class InteractiveVideoEditor(tk.Toplevel):
                     effective_device = 'cpu'
                     pbar_desc = f"YOLO Tracking on {effective_device.upper()} (Fallback)"
                     for task, model in self.yolo_models.items():
-                        all_results[task] = model.track(frame, persist=True, verbose=False, device=effective_device)
+                        all_results[task] = model.track(frame, persist=True, verbose=False, device=effective_device, tracker=tracker_config_path)
                 else:
                     raise e # Se fallisce anche sulla CPU, l'errore è più grave
             

@@ -1,10 +1,10 @@
-# SPEED v5.3.1 - labScoc Processing and Extraction of Eye tracking Data
+# SPEED v5.3.2 - labScoc Processing and Extraction of Eye tracking Data
 
 Desktop App & Analysis Package
 
 *An Advanced Eye-Tracking Data Analysis Software*
 
-SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. Version 5.3.1 introduces a major restructuring, offering two distinct components:
+SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. Version 5.3.2 introduces a major restructuring, offering two distinct components:
 
 1.  **SPEED Desktop App**: A user-friendly GUI application for running a full analysis pipeline, designed for end-users and researchers.
 2.  **`speed-analyzer`**[![PyPI version](https://img.shields.io/pypi/v/speed-analyzer.svg)](https://pypi.org/project/speed-analyzer/): A Python package for developers who want to integrate the analysis logic into their own scripts.
@@ -17,6 +17,7 @@ This version supports GPU acceleration for YOLO analysis and also offers three p
 4.  **Real-time visualization**: A real-time visualization of external and internal camera with YOLO AOI and manual multiple AOI, allowing the visualization of blink, pupillometry, fragmentation and events management. 
 5. **Data Viewer**: A separate window that allow the visualization of DICOM/BIDS metadata and the visualization/plot the data.
 6. **Multi-Task YOLO**: Pre-trained and custom object detection, segmentation, and pose estimation using various YOLO models.
+
 
 ---
 
@@ -43,7 +44,7 @@ The core analysis engine of SPEED, now available as a reusable package. It's des
 ### Installation from PyPI
 You can install the package directly from the Python Package Index (PyPI) using pip:
 ```bash
-pip install speed-analyzer==5.3.1
+pip install speed-analyzer==5.3.2
 ```
 ### How to Use the Package
 The package exposes a main function, `run_full_analysis`, that takes paths and options as arguments. See the `example_usage.py` file for a complete demonstration.
@@ -227,7 +228,7 @@ This approach guarantees that your analysis is always executed in the same contr
 ---
 
 ## The Modular Workflow (GUI)
-SPEED v5.3.1 operates on a two-step workflow designed to save time and computational resources.
+SPEED v5.3.2 operates on a two-step workflow designed to save time and computational resources.
 
 ### Step 1: Run Core Analysis
 This is the main data processing stage. You run this step only once per participant for a given set of events. The software will:
@@ -282,31 +283,30 @@ SPEED integrates the powerful **YOLO (You Only Look Once)** object detection mod
 
 This feature transforms raw gaze coordinates into meaningful interactions with the environment, opening up new possibilities for analyzing human behavior in complex scenes.
 
-#### Two-Stage Analysis: Detection and Classification
+#### Multi-Stage Analysis: Detection, Classification, and Re-ID
 
-SPEED now supports a powerful two-stage analysis workflow. After running object detection or segmentation, you can perform a second-level classification on the content *inside* the detected bounding boxes. This is ideal for tasks where you need to identify an object's general class (e.g., "animal") and then determine its specific species (e.g., "cat", "dog").
+SPEED now supports a powerful multi-stage analysis workflow.
+
+1.  **Detection/Segmentation**: First, run object detection or segmentation to identify and track all objects in the scene.
+2.  **Classification (Optional)**: You can then run a second-level classification on the content *inside* the detected bounding boxes. This is ideal for tasks where you need to identify an object's general class (e.g., "animal") and then determine its specific species (e.g., "cat", "dog").
+3.  **Re-identification (Re-ID)**: As a final step, you can run Re-ID analysis. This computes a "similarity score" between all detected objects (e.g., of the 'person' class). It is particularly useful for determining if a person who disappears and reappears later (and is assigned a new `track_id`) is the same individual.
 
 **How It Works in the GUI:**
 
 1.  **Run Core Analysis**: First, run a standard analysis with a YOLO detection or segmentation model enabled.
-2.  **Filter Detections (Optional)**: In the "4. YOLO Results & Filtering" section, you can select or deselect specific object classes or individual track IDs.
-3.  **Run Classification**: Go to the new "5. Classify Detections" section.
-    *   Choose a classification model (`*-cls.pt`) from the dropdown. This list includes official Ultralytics models (which will be downloaded automatically if not present) and any custom models you've placed in the `models/` folder.
-    *   Alternatively, select "Custom..." to browse for a `.pt` model file anywhere on your system.
-    *   Click **"RUN CLASSIFICATION ON FILTERED DETECTIONS"**.
-4.  **View Results**: The classification results (e.g., "cat", "dog") and their confidence scores will be added as new columns in the "9. YOLO Results" tab and saved to `yolo_classification_results.csv`.
+2.  **Filter Detections (Optional)**: In the "5. YOLO Results & Filtering" section, you can select or deselect specific object classes or individual track IDs to focus your analysis.
+3.  **Run Re-ID Analysis**: Go to the new "6. Re-identification" section.
+    *   Choose a Re-ID model (`-reid.pt`) from the dropdown.
+    *   Select the object class you want to analyze (e.g., `person`).
+    *   Click **"RUN RE-ID ON FILTERED DETECTIONS"**.
+4.  **View Results**: The results are saved to `reid_similarity_matrix.csv`, a matrix showing the similarity score (from 0 to 1) between every pair of tracked object instances.
 
-**Usage via Command-Line:**
+**Classification vs. Re-ID**
 
-A dedicated script, `classify_cli.py`, allows you to perform this step programmatically.
+*   **Use Classification** to answer "**What is this object?**" (e.g., Is it a cat or a dog?). It assigns a label to an object.
+*   **Use Re-ID** to answer "**Have I seen this specific object before?**" (e.g., Is `person_5` the same person as `person_1`?). It calculates similarity between pairs of objects.
 
-```bash
-# Example: Run classification on a previous analysis, using an official model
-python classify_cli.py ./path/to/analysis_output ./path/to/unenriched --model yolov8n-cls.pt
-
-# Example: Classify only 'person' objects with track IDs 1 and 3, using a custom model
-python classify_cli.py ./path/to/analysis_output ./path/to/unenriched --model ./custom_models/my_classifier.pt --classes person --ids 1 3
-```
+These tools can be used independently or together to build a rich, multi-layered understanding of the scene content.
 
 ---
 
@@ -371,7 +371,7 @@ python lsl_stream_simulator.py
 
 ## Export to BIDS Format
 
-SPEED 5.3.1 introduces a new feature to convert processed eye-tracking data into a format compatible with the **Brain Imaging Data Structure (BIDS)**, following the [BEP020 for Eye Tracking](https://bids.neuroimaging.io/extensions/beps/bep_020.html) guidelines. This facilitates data sharing and standardization for the research community.
+SPEED 5.3.2 introduces a new feature to convert processed eye-tracking data into a format compatible with the **Brain Imaging Data Structure (BIDS)**, following the [BEP020 for Eye Tracking](https://bids.neuroimaging.io/extensions/beps/bep_020.html) guidelines. This facilitates data sharing and standardization for the research community.
 
 ### Use via Desktop App
 

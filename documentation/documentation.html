@@ -67,6 +67,7 @@
                     <li><a href="#event-analysis" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Event-based Analysis</a></li>
                     <li><a href="#video-generator" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Video Generator</a></li>
                     <li><a href="#yolo-analyzer" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">YOLO Analyzer</a></li>
+                    <li><a href="#reid-analyzer" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Re-ID Analyzer</a></li>
                     <li><a href="#interactive-editor" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Interactive Editor</a></li>
                 </ul>
             </nav>
@@ -114,6 +115,10 @@
                      <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
                         <h3 class="font-bold text-xl mb-2 text-indigo-600">YOLO Analyzer</h3>
                         <p class="text-gray-600">Applies YOLO models to detect objects and correlates this information with eye-tracking data to generate statistics.</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+                        <h3 class="font-bold text-xl mb-2 text-indigo-600">Re-ID Analyzer</h3>
+                        <p class="text-gray-600">Performs re-identification analysis on tracked objects to compute similarity scores, helping to determine if different track IDs belong to the same object.</p>
                     </div>
                     <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
                         <h3 class="font-bold text-xl mb-2 text-indigo-600">Interactive Video Editor</h3>
@@ -306,6 +311,26 @@
                     </ul>
                 </div>
             </section>
+
+            <!-- Re-ID Analyzer Section -->
+            <section id="reid-analyzer" class="mb-16 scroll-mt-20">
+                <h2 class="text-3xl font-bold text-gray-900 border-b pb-4 mb-6">Re-ID Analyzer (<code>reid_analyzer.py</code>)</h2>
+                <p class="text-gray-600 mb-8">This module provides the <code>ReIDAnalyzer</code> class, which performs **Re-identification (Re-ID)** on objects previously detected by YOLO. Its purpose is to calculate a similarity score between different tracked instances to determine if they are the same object, even if they disappear and reappear with a new `track_id`.</p>
+                
+                <div class="bg-white p-6 rounded-lg border border-gray-200">
+                    <h3 class="text-2xl font-semibold text-gray-800 mb-3">Class: <code>ReIDAnalyzer</code></h3>
+                    <p class="text-gray-600 mb-4">Manages the Re-ID workflow, from loading data and models to computing and saving the similarity matrix.</p>
+                    <h4 class="font-semibold text-lg mt-4 mb-2">Key Methods:</h4>
+                    <ul class="list-disc list-inside space-y-2 text-gray-600">
+                        <li><code>__init__(...)</code>: Initializes the analyzer with paths to the analysis output and the original video.</li>
+                        <li><code>load_model(...)</code>: Loads a specified Re-ID model (e.g., `yolov8n-reid.pt`).</li>
+                        <li><code>extract_features(...)</code>: Processes the video to extract a feature vector (embedding) for each specified object instance. It crops the object from each frame and feeds it to the Re-ID model.</li>
+                        <li><code>compute_similarity_matrix(...)</code>: Calculates the cosine similarity between the feature vectors of every pair of object instances, producing a matrix of scores.</li>
+                        <li><code>run(...)</code>: The main method that orchestrates the entire process: loading the model, extracting features for a given class, computing the similarity matrix, and saving the results to `reid_similarity_matrix.csv`.</li>
+                    </ul>
+                </div>
+            </section>
+
 
             <!-- Interactive Video Editor Section -->
             <section id="interactive-editor" class="mb-16 scroll-mt-20">
