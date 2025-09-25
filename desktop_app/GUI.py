@@ -758,22 +758,28 @@ class SpeedApp:
         self.canvas.bind("<Leave>", lambda e: self.canvas.unbind_all("<MouseWheel>"))
         # --- FINE MODIFICA ---
         
+        # --- MODIFICA: Layout a colonne per un uso migliore dello spazio landscape ---
         main_frame = self.scrollable_frame
+        main_frame.grid_columnconfigure(0, weight=1, uniform="group1")
+        main_frame.grid_columnconfigure(1, weight=1, uniform="group1")
 
-        setup_frame = tk.LabelFrame(main_frame, text="1. Project Setup", padx=10, pady=10)
-        # --- MODIFICA: Imposta una larghezza fissa per centrare ---
-        setup_frame.pack(pady=10, padx=10, ipadx=10, ipady=5, fill=tk.X)
+        # --- COLONNA SINISTRA: Setup, Input, Real-time ---
+        left_column = tk.Frame(main_frame)
+        left_column.grid(row=0, column=0, sticky="nsew", padx=(5, 2), pady=5)
+
+        setup_frame = tk.LabelFrame(left_column, text="1. Project Setup", padx=5, pady=5)
+        setup_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
         name_frame = tk.Frame(setup_frame); name_frame.pack(fill=tk.X, pady=2)
-        tk.Label(name_frame, text="Participant Name:", width=20, anchor='w').pack(side=tk.LEFT)
+        tk.Label(name_frame, text="Participant Name:", width=15, anchor='w').pack(side=tk.LEFT)
         self.participant_name_var = tk.StringVar(); self.participant_name_var.trace_add("write", self.update_output_dir_default)
         tk.Entry(name_frame, textvariable=self.participant_name_var).pack(fill=tk.X, expand=True)
         output_frame = tk.Frame(setup_frame); output_frame.pack(fill=tk.X, pady=2)
-        tk.Label(output_frame, text="Output Folder:", width=20, anchor='w').pack(side=tk.LEFT)
+        tk.Label(output_frame, text="Output Folder:", width=15, anchor='w').pack(side=tk.LEFT)
         self.output_dir_entry = tk.Entry(output_frame); self.output_dir_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(output_frame, text="Browse...", command=self.select_output_dir).pack(side=tk.RIGHT)
 
-        folders_frame = tk.LabelFrame(main_frame, text="2. Input Folders", padx=10, pady=10)
-        folders_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
+        folders_frame = tk.LabelFrame(left_column, text="2. Input Data", padx=5, pady=5)
+        folders_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
 
         load_buttons_frame = tk.Frame(folders_frame)
         load_buttons_frame.pack(fill=tk.X, pady=5, side=tk.TOP)
@@ -784,16 +790,16 @@ class SpeedApp:
         self.enriched_dir_var.trace_add("write", lambda *args: self.update_aoi_list_display())
 
         raw_frame = tk.Frame(folders_frame); raw_frame.pack(fill=tk.X, pady=2)
-        tk.Label(raw_frame, text="RAW Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
+        tk.Label(raw_frame, text="RAW Data Folder:", width=18, anchor='w').pack(side=tk.LEFT)
         tk.Entry(raw_frame, textvariable=self.raw_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(raw_frame, text="Browse...", command=lambda: self.select_folder(self.raw_dir_var, "Select RAW Data Folder")).pack(side=tk.RIGHT)
         
         unenriched_frame = tk.Frame(folders_frame); unenriched_frame.pack(fill=tk.X, pady=2)
-        tk.Label(unenriched_frame, text="Un-enriched Data Folder:", width=25, anchor='w').pack(side=tk.LEFT)
+        tk.Label(unenriched_frame, text="Un-enriched Data Folder:", width=18, anchor='w').pack(side=tk.LEFT)
         tk.Entry(unenriched_frame, textvariable=self.unenriched_dir_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(unenriched_frame, text="Browse...", command=lambda: self.select_folder(self.unenriched_dir_var, "Select Un-enriched Data Folder")).pack(side=tk.RIGHT)
         
-        enriched_frame = tk.LabelFrame(folders_frame, text="Enriched Data Folders (Optional):", padx=10, pady=5)
+        enriched_frame = tk.LabelFrame(folders_frame, text="Enriched Data Folders (Optional):", padx=5, pady=5)
         enriched_frame.pack(fill=tk.X, pady=2)
         
         self.enriched_listbox = tk.Listbox(enriched_frame, height=3)
@@ -805,8 +811,8 @@ class SpeedApp:
         tk.Button(enriched_btn_frame, text="Remove", command=self.remove_enriched_dir).pack(pady=2)
         self.enriched_dir_paths = [] # Lista per memorizzare i percorsi
         
-        aoi_frame = tk.LabelFrame(main_frame, text="2.1 Area of Interest (AOI) Management", padx=10, pady=10)
-        aoi_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
+        aoi_frame = tk.LabelFrame(left_column, text="2.1 Area of Interest (AOI) Management", padx=5, pady=5)
+        aoi_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
 
         self.aoi_listbox = tk.Listbox(aoi_frame, height=4)
         self.aoi_listbox.pack(fill=tk.X, expand=True, pady=5)
@@ -820,8 +826,8 @@ class SpeedApp:
         self.aoi_listbox.bind('<<ListboxSelect>>', self.on_aoi_select)
 
         # --- NUOVO: Sezione per la creazione del Video-in-Video ---
-        viv_frame = tk.LabelFrame(main_frame, text="2.2 Video-in-Video Setup (Optional)", padx=10, pady=10)
-        viv_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
+        viv_frame = tk.LabelFrame(left_column, text="2.2 Video-in-Video Setup (Optional)", padx=5, pady=5)
+        viv_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
         viv_info_label = tk.Label(viv_frame, text="This feature replaces the scene video with screen recordings synchronized to events.", justify=tk.LEFT)
         viv_info_label.pack(anchor='w')
 
@@ -839,11 +845,11 @@ class SpeedApp:
         self.viv_status_label = tk.Label(viv_frame, text="Status: Using original scene video.", fg="grey")
         self.viv_status_label.pack(anchor='w', pady=(0, 5))
 
-        event_frame = tk.LabelFrame(main_frame, text="2.5 Event Management", padx=10, pady=10)
-        event_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
+        event_frame = tk.LabelFrame(left_column, text="2.5 Event Management", padx=5, pady=5)
+        event_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
         ext_event_file_frame = tk.Frame(event_frame)
         ext_event_file_frame.pack(fill=tk.X, pady=2)
-        tk.Label(ext_event_file_frame, text="Optional Events File:", width=25, anchor='w').pack(side=tk.LEFT)
+        tk.Label(ext_event_file_frame, text="Optional Events File:", width=18, anchor='w').pack(side=tk.LEFT)
         self.external_event_file_var.trace_add("write", lambda *args: self.load_data_for_editors())
         tk.Entry(ext_event_file_frame, textvariable=self.external_event_file_var).pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(ext_event_file_frame, text="Browse...", command=self.select_event_file).pack(side=tk.RIGHT)
@@ -858,10 +864,18 @@ class SpeedApp:
         self.edit_events_btn = tk.Button(event_buttons_frame, text="Edit in Table", command=self.open_event_manager_table, state=tk.DISABLED)
         self.edit_events_btn.pack(side=tk.RIGHT, padx=5)
 
-        analysis_frame = tk.LabelFrame(main_frame, text="3. Run Analysis", padx=10, pady=10)
-        analysis_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
+        realtime_frame = tk.LabelFrame(left_column, text="3. Real-time Analysis", padx=10, pady=10)
+        realtime_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
+        tk.Button(realtime_frame, text="START REAL-TIME STREAM", command=self.start_realtime_stream, font=('Helvetica', 10, 'bold'), bg='#a5d6a7').pack(pady=5, fill=tk.X)
+
+        # --- COLONNA DESTRA: Analisi, Filtri, Classificazione, Export, Generazione ---
+        right_column = tk.Frame(main_frame)
+        right_column.grid(row=0, column=1, sticky="nsew", padx=(2, 5), pady=5)
+
+        analysis_frame = tk.LabelFrame(right_column, text="4. Run Full Analysis", padx=5, pady=5)
+        analysis_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
         self.yolo_var = tk.BooleanVar(value=True)
-        yolo_checkbutton = tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (Required for Dynamic AOI, GPU Recommended)", variable=self.yolo_var, command=self.toggle_yolo_options)
+        yolo_checkbutton = tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (Required for Dynamic AOI, GPU Recommended)", variable=self.yolo_var, command=self.toggle_yolo_options, wraplength=350, justify=tk.LEFT)
         yolo_checkbutton.pack(anchor='w')
 
         # --- MODIFICA: Controlli YOLO Multi-Task ---
@@ -879,14 +893,14 @@ class SpeedApp:
         for task, label in [('detect', 'Detection Model:'), ('segment', 'Segmentation Model:'), ('pose', 'Pose Model:'), ('detect_world', 'World Model (for custom classes):')]:
             model_frame = tk.Frame(yolo_options_frame)
             model_frame.pack(fill=tk.X, pady=2)
-            tk.Label(model_frame, text=label, width=28, anchor='w').pack(side=tk.LEFT)
+            tk.Label(model_frame, text=label, width=22, anchor='w').pack(side=tk.LEFT)
             combo = ttk.Combobox(model_frame, textvariable=self.yolo_model_vars[task], state='readonly')
             combo.pack(fill=tk.X, expand=True)
             self.yolo_model_combos[task] = combo
 
         classes_frame = tk.Frame(yolo_options_frame)
         classes_frame.pack(fill=tk.X, pady=2)
-        tk.Label(classes_frame, text="Custom Classes (for World Model):", width=28, anchor='w').pack(side=tk.LEFT)
+        tk.Label(classes_frame, text="Custom Classes (for World Model):", width=22, anchor='w').pack(side=tk.LEFT)
         self.yolo_classes_var = tk.StringVar()
         self.yolo_classes_entry = tk.Entry(classes_frame, textvariable=self.yolo_classes_var)
         self.yolo_classes_entry.pack(fill=tk.X, expand=True)
@@ -895,16 +909,12 @@ class SpeedApp:
         # Imposta lo stato iniziale
         self.toggle_yolo_options()
         # --- FINE MODIFICA ---
-
-        tk.Button(analysis_frame, text="RUN FULL ANALYSIS", command=self.run_full_analysis_wrapper, font=('Helvetica', 10, 'bold'), bg='#c5e1a5').pack(pady=5)
         
-        realtime_frame = tk.LabelFrame(main_frame, text="3.5 Real-time Analysis", padx=10, pady=10)
-        realtime_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
-        tk.Button(realtime_frame, text="START REAL-TIME STREAM", command=self.start_realtime_stream, font=('Helvetica', 10, 'bold'), bg='#a5d6a7').pack(pady=5)
+        tk.Button(analysis_frame, text="RUN FULL ANALYSIS", command=self.run_full_analysis_wrapper, font=('Helvetica', 10, 'bold'), bg='#c5e1a5').pack(pady=5, fill=tk.X)
 
         # --- NUOVO: Frame per il filtraggio dei risultati YOLO ---
-        yolo_filter_frame = tk.LabelFrame(main_frame, text="4. YOLO Results & Filtering", padx=10, pady=10)
-        yolo_filter_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
+        yolo_filter_frame = tk.LabelFrame(right_column, text="5. YOLO Results & Filtering", padx=5, pady=5)
+        yolo_filter_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
 
         yolo_filter_controls = tk.Frame(yolo_filter_frame)
         yolo_filter_controls.pack(fill=tk.X, pady=5)
@@ -930,13 +940,13 @@ class SpeedApp:
         # --- FINE NUOVO FRAME ---
         
         # --- NUOVO: Frame per la classificazione delle detection ---
-        yolo_classify_frame = tk.LabelFrame(main_frame, text="5. Classify Detections", padx=10, pady=10)
-        yolo_classify_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
+        yolo_classify_frame = tk.LabelFrame(right_column, text="6. Classify Detections", padx=5, pady=5)
+        yolo_classify_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
 
         # --- MODIFICA: Sostituzione dell'Entry con un Combobox + opzione custom ---
         classify_combo_frame = tk.Frame(yolo_classify_frame)
         classify_combo_frame.pack(fill=tk.X, pady=2)
-        tk.Label(classify_combo_frame, text="Classification Model:", width=20, anchor='w').pack(side=tk.LEFT)
+        tk.Label(classify_combo_frame, text="Classification Model:", width=16, anchor='w').pack(side=tk.LEFT)
         self.yolo_classify_model_combo_var = tk.StringVar()
         self.yolo_classify_combo = ttk.Combobox(classify_combo_frame, textvariable=self.yolo_classify_model_combo_var, state='readonly')
         self.yolo_classify_combo.pack(fill=tk.X, expand=True, side=tk.LEFT)
@@ -946,14 +956,14 @@ class SpeedApp:
         self.classify_custom_path_frame = tk.Frame(yolo_classify_frame)
         # Non fare il pack() qui, verrà gestito da on_classify_model_selected
 
-        tk.Label(self.classify_custom_path_frame, text="Custom Model Path:", width=20, anchor='w').pack(side=tk.LEFT)
+        tk.Label(self.classify_custom_path_frame, text="Custom Model Path:", width=16, anchor='w').pack(side=tk.LEFT)
         self.yolo_classify_model_var = tk.StringVar()
         self.yolo_classify_custom_entry = tk.Entry(self.classify_custom_path_frame, textvariable=self.yolo_classify_model_var)
         self.yolo_classify_custom_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(self.classify_custom_path_frame, text="Browse...", command=self.select_classification_model).pack(side=tk.RIGHT)
         # --- FINE MODIFICA ---
 
-        tk.Button(yolo_classify_frame, text="RUN CLASSIFICATION ON FILTERED DETECTIONS", command=self.run_classification_on_detections, font=('Helvetica', 10, 'bold'), bg='#80deea').pack(pady=5)
+        tk.Button(yolo_classify_frame, text="RUN CLASSIFICATION ON FILTERED DETECTIONS", command=self.run_classification_on_detections, font=('Helvetica', 10, 'bold'), bg='#80deea').pack(pady=5, fill=tk.X)
         
         # Popola il combobox all'avvio
         self.update_classification_model_options()
@@ -962,8 +972,8 @@ class SpeedApp:
 
         # --- FINE NUOVO FRAME ---
 
-        bids_frame = tk.LabelFrame(main_frame, text="6. Data Export", padx=10, pady=10)
-        bids_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
+        bids_frame = tk.LabelFrame(right_column, text="7. Data Export & Tools", padx=5, pady=5)
+        bids_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
         export_buttons_frame = tk.Frame(bids_frame)
         export_buttons_frame.pack(fill=tk.X, pady=(0, 5))
         tk.Button(export_buttons_frame, text="CONVERT TO BIDS FORMAT", command=self.run_bids_conversion, font=('Helvetica', 10, 'bold'), bg='#FFD54F').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0,5), pady=5)
@@ -977,11 +987,11 @@ class SpeedApp:
                   font=('Helvetica', 10, 'bold'), bg='#B2EBF2').pack(expand=True, fill=tk.X, pady=(5, 0))
         # --- FINE NUOVO PULSANTE ---
 
-        notebook = ttk.Notebook(main_frame)
-        notebook.pack(fill=tk.X, expand=True, pady=10, padx=10)
-        plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='7. Generate Plots')
-        video_tab = tk.Frame(notebook); notebook.add(video_tab, text='8. Generate Videos')
-        yolo_tab = tk.Frame(notebook); notebook.add(yolo_tab, text='9. YOLO Results')
+        notebook = ttk.Notebook(right_column)
+        notebook.pack(fill=tk.X, expand=True, pady=5, padx=0)
+        plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='8. Generate Plots')
+        video_tab = tk.Frame(notebook); notebook.add(video_tab, text='9. Generate Videos')
+        yolo_tab = tk.Frame(notebook); notebook.add(yolo_tab, text='10. YOLO Stats')
         self.setup_plot_tab(plot_tab)
         self.setup_video_tab(video_tab)
         self.setup_yolo_tab(yolo_tab)
