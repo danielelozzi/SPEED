@@ -56,7 +56,7 @@ class VideoInVideoEditor(tk.Toplevel):
         self.tree.heading("Path to Media File", text="Path to Media File")
         self.tree.column("Event Name", width=250)
         self.tree.column("Timestamp (s)", width=120, anchor=tk.CENTER)
-        self.tree.column("Video Path", width=400)
+        self.tree.column("Path to Media File", width=400)
 
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -108,7 +108,6 @@ class VideoInVideoEditor(tk.Toplevel):
 
             # Merge based on timestamp, updating only the mapping columns
             merge_cols = ['timestamp [ns]', 'video_path']
-
             # Drop old mapping columns and merge new ones
             self.viv_df = self.viv_df.drop(columns=['video_path'], errors='ignore')
             self.viv_df = pd.merge(self.viv_df, df[merge_cols], on='timestamp [ns]', how='left')
@@ -137,6 +136,7 @@ class VideoInVideoEditor(tk.Toplevel):
         if column_id == "#3":
             self.edit_video_path(df_index)
         else:
+            pass
 
     def edit_video_path(self, df_index):
         """Opens a file dialog to select a new video or image path."""

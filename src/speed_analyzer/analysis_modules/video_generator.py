@@ -268,7 +268,10 @@ def generate_concatenated_video(data_dir: Path, viv_events_df: pd.DataFrame) -> 
         segments_df.rename(columns={'timestamp [ns]': 'event_start_ts'}, inplace=True)
 
         # Calculate the end of each event segment (which is the start of the next).
-        segments_df['event_end_ts'] = segments_df['event_start_ts'].shift(-1).fillna(max_ts)
+        # MODIFICA: Assicura che anche l'ultimo evento abbia una fine definita.
+        next_event_ts = segments_df['event_start_ts'].shift(-1)
+        segments_df['event_end_ts'] = next_event_ts.fillna(max_ts)
+
 
         # Map each frame of the output video to its corresponding event segment.
         sync_data = pd.merge_asof(
@@ -283,50 +286,56 @@ def generate_concatenated_video(data_dir: Path, viv_events_df: pd.DataFrame) -> 
         media_cache = {}
 
         with tqdm(total=total_frames, desc="Generating Concatenated Video") as pbar:
-            for _, frame_data in sync_data.iterrows():
-                media_path_str = frame_data.get('video_path') if pd.notna(frame_data.get('video_path')) else None
-
-                # If a media file is mapped for this frame's event
-                if media_path_str and media_path_str.strip():
-                    media_path = Path(media_path_str)
-
-                    # Cache the media object (image or VideoCapture).
-                    if media_path_str not in media_cache:
-                        if media_path.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                            img = cv2.imread(media_path_str)
-                            media_cache[media_path_str] = {'type': 'image', 'data': cv2.resize(img, (WIDTH, HEIGHT)), 'duration_s': float('inf')}
+            try:
+                for _, frame_data in sync_data.iterrows():
+                    media_path_str = frame_data.get('video_path') if pd.notna(frame_data.get('video_path')) else None
+    
+                    # If a media file is mapped for this frame's event
+                    if media_path_str and media_path_str.strip():
+                        media_path = Path(media_path_str)
+    
+                        # Cache the media object (image or VideoCapture).
+                        if media_path_str not in media_cache:
+                            if media_path.suffix.lower() in ['.png', '.jpg', '.jpeg']:
+                                img = cv2.imread(media_path_str)
+                                media_cache[media_path_str] = {'type': 'image', 'data': cv2.resize(img, (WIDTH, HEIGHT)), 'duration_s': float('inf')}
+                            else:
+                                cap = cv2.VideoCapture(media_path_str)
+                                source_fps = cap.get(cv2.CAP_PROP_FPS) or FPS
+                                source_duration_s = (cap.get(cv2.CAP_PROP_FRAME_COUNT) / source_fps) if source_fps > 0 else 0
+                                media_cache[media_path_str] = {'type': 'video', 'data': cap, 'fps': source_fps, 'duration_s': source_duration_s}
+    
+                        media_obj = media_cache[media_path_str]
+    
+                        if media_obj['type'] == 'image':
+                            frame = media_obj['data'].copy()
                         else:
-                            cap = cv2.VideoCapture(media_path_str)
-                            source_fps = cap.get(cv2.CAP_PROP_FPS) or FPS
-                            source_duration_s = (cap.get(cv2.CAP_PROP_FRAME_COUNT) / source_fps) if source_fps > 0 else 0
-                            media_cache[media_path_str] = {'type': 'video', 'data': cap, 'fps': source_fps, 'duration_s': source_duration_s}
-
-                    media_obj = media_cache[media_path_str]
-
-                    if media_obj['type'] == 'image':
-                        frame = media_obj['data'].copy()
-                    else:
-                        cap = media_obj['data']
-                        time_since_event_start_ns = frame_data['timestamp [ns]'] - frame_data['event_start_ts']
-                        time_since_event_start_s = time_since_event_start_ns / NS_TO_S
-
-                        # If the elapsed time exceeds the source video's duration, show gray.
-                        if time_since_event_start_s > media_obj['duration_s']:
-                            frame = GRAY_BG.copy()
-                        else:
-                            target_source_frame_idx = int(time_since_event_start_s * media_obj['fps'])
-                            cap.set(cv2.CAP_PROP_POS_FRAMES, target_source_frame_idx)
-                            ret, frame = cap.read()
-                            if not ret:
+                            cap = media_obj['data']
+                            time_since_event_start_ns = frame_data['timestamp [ns]'] - frame_data['event_start_ts']
+                            time_since_event_start_s = time_since_event_start_ns / NS_TO_S
+    
+                            # If the elapsed time exceeds the source video's duration, show gray.
+                            if time_since_event_start_s > media_obj['duration_s']:
                                 frame = GRAY_BG.copy()
-                else:
-                    # If no media is mapped for this segment, draw a gray background.
-                    frame = GRAY_BG.copy()
-
-                if frame.shape[0] != HEIGHT or frame.shape[1] != WIDTH:
-                    frame = cv2.resize(frame, (WIDTH, HEIGHT))
-
-                writer.write(frame)
+                            else:
+                                target_source_frame_idx = int(time_since_event_start_s * media_obj['fps'])
+                                cap.set(cv2.CAP_PROP_POS_FRAMES, target_source_frame_idx)
+                                ret, frame = cap.read()
+                                if not ret:
+                                    frame = GRAY_BG.copy()
+                    else:
+                        # If no media is mapped for this segment, draw a gray background.
+                        frame = GRAY_BG.copy()
+    
+                    if frame.shape[0] != HEIGHT or frame.shape[1] != WIDTH:
+                        frame = cv2.resize(frame, (WIDTH, HEIGHT))
+    
+                    writer.write(frame)
+                    pbar.update(1)
+            except Exception as e:
+                logging.error(f"Error during video frame generation: {e}", exc_info=True)
+                # Scrivi un frame grigio in caso di errore per non corrompere il video
+                writer.write(GRAY_BG.copy())
                 pbar.update(1)
     except FileNotFoundError:
         raise ValueError("Cannot determine video duration: 'gaze.csv' is missing in the working directory.")

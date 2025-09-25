@@ -713,9 +713,11 @@ class SpeedApp:
     def __init__(self, root):
         self.root = root
         self.root.title("SPEED v5.3.1")
-        self.root.geometry("850x850")
+        # --- MODIFICA: Avvia a schermo intero ---
+        self.root.state('zoomed')
 
         self.raw_dir_var = tk.StringVar()
+        # --- FINE MODIFICA ---
         self.unenriched_dir_var = tk.StringVar()
         self.enriched_dir_var = tk.StringVar()
         self.external_event_file_var = tk.StringVar()
@@ -728,11 +730,15 @@ class SpeedApp:
         
         self.user_defined_aois = []
 
+        # --- MODIFICA: Contenitore principale per centrare i contenuti ---
         main_container = tk.Frame(root)
         main_container.pack(fill=tk.BOTH, expand=True)
+        main_container.grid_rowconfigure(0, weight=1)
+        main_container.grid_columnconfigure(0, weight=1)
+        # --- FINE MODIFICA ---
 
-        self.canvas = tk.Canvas(main_container)
-        self.v_scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=self.canvas.yview)
+        self.canvas = tk.Canvas(main_container, highlightthickness=0)
+        self.v_scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=self.canvas.yview) # Rimane qui per il layout
         self.h_scrollbar = ttk.Scrollbar(main_container, orient="horizontal", command=self.canvas.xview)
         self.scrollable_frame = ttk.Frame(self.canvas)
 
@@ -740,17 +746,23 @@ class SpeedApp:
         self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         
         self.canvas.configure(yscrollcommand=self.v_scrollbar.set, xscrollcommand=self.h_scrollbar.set)
-        
-        self.v_scrollbar.pack(side="right", fill="y")
-        self.h_scrollbar.pack(side="bottom", fill="x")
-        self.canvas.pack(side="left", fill="both", expand=True)
 
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        # --- MODIFICA: Usa grid per il layout del canvas e delle scrollbar ---
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.v_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.h_scrollbar.grid(row=1, column=0, sticky="ew")
+        # --- FINE MODIFICA ---
+
+        # --- MODIFICA: Associa lo scroll del mouse al canvas per un comportamento corretto ---
+        self.canvas.bind("<Enter>", lambda e: self.canvas.bind_all("<MouseWheel>", self._on_mousewheel))
+        self.canvas.bind("<Leave>", lambda e: self.canvas.unbind_all("<MouseWheel>"))
+        # --- FINE MODIFICA ---
         
         main_frame = self.scrollable_frame
 
         setup_frame = tk.LabelFrame(main_frame, text="1. Project Setup", padx=10, pady=10)
-        setup_frame.pack(fill=tk.X, pady=10, padx=10)
+        # --- MODIFICA: Imposta una larghezza fissa per centrare ---
+        setup_frame.pack(pady=10, padx=10, ipadx=10, ipady=5, fill=tk.X)
         name_frame = tk.Frame(setup_frame); name_frame.pack(fill=tk.X, pady=2)
         tk.Label(name_frame, text="Participant Name:", width=20, anchor='w').pack(side=tk.LEFT)
         self.participant_name_var = tk.StringVar(); self.participant_name_var.trace_add("write", self.update_output_dir_default)
@@ -761,7 +773,7 @@ class SpeedApp:
         tk.Button(output_frame, text="Browse...", command=self.select_output_dir).pack(side=tk.RIGHT)
 
         folders_frame = tk.LabelFrame(main_frame, text="2. Input Folders", padx=10, pady=10)
-        folders_frame.pack(fill=tk.X, pady=5, padx=10)
+        folders_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
 
         load_buttons_frame = tk.Frame(folders_frame)
         load_buttons_frame.pack(fill=tk.X, pady=5, side=tk.TOP)
@@ -794,7 +806,7 @@ class SpeedApp:
         self.enriched_dir_paths = [] # Lista per memorizzare i percorsi
         
         aoi_frame = tk.LabelFrame(main_frame, text="2.1 Area of Interest (AOI) Management", padx=10, pady=10)
-        aoi_frame.pack(fill=tk.X, pady=5, padx=10)
+        aoi_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
 
         self.aoi_listbox = tk.Listbox(aoi_frame, height=4)
         self.aoi_listbox.pack(fill=tk.X, expand=True, pady=5)
@@ -809,7 +821,7 @@ class SpeedApp:
 
         # --- NUOVO: Sezione per la creazione del Video-in-Video ---
         viv_frame = tk.LabelFrame(main_frame, text="2.2 Video-in-Video Setup (Optional)", padx=10, pady=10)
-        viv_frame.pack(fill=tk.X, pady=5, padx=10)
+        viv_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
         viv_info_label = tk.Label(viv_frame, text="This feature replaces the scene video with screen recordings synchronized to events.", justify=tk.LEFT)
         viv_info_label.pack(anchor='w')
 
@@ -828,7 +840,7 @@ class SpeedApp:
         self.viv_status_label.pack(anchor='w', pady=(0, 5))
 
         event_frame = tk.LabelFrame(main_frame, text="2.5 Event Management", padx=10, pady=10)
-        event_frame.pack(fill=tk.X, pady=5, padx=10)
+        event_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
         ext_event_file_frame = tk.Frame(event_frame)
         ext_event_file_frame.pack(fill=tk.X, pady=2)
         tk.Label(ext_event_file_frame, text="Optional Events File:", width=25, anchor='w').pack(side=tk.LEFT)
@@ -847,7 +859,7 @@ class SpeedApp:
         self.edit_events_btn.pack(side=tk.RIGHT, padx=5)
 
         analysis_frame = tk.LabelFrame(main_frame, text="3. Run Analysis", padx=10, pady=10)
-        analysis_frame.pack(fill=tk.X, pady=5, padx=10)
+        analysis_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
         self.yolo_var = tk.BooleanVar(value=True)
         yolo_checkbutton = tk.Checkbutton(analysis_frame, text="Run YOLO Object Detection (Required for Dynamic AOI, GPU Recommended)", variable=self.yolo_var, command=self.toggle_yolo_options)
         yolo_checkbutton.pack(anchor='w')
@@ -887,12 +899,12 @@ class SpeedApp:
         tk.Button(analysis_frame, text="RUN FULL ANALYSIS", command=self.run_full_analysis_wrapper, font=('Helvetica', 10, 'bold'), bg='#c5e1a5').pack(pady=5)
         
         realtime_frame = tk.LabelFrame(main_frame, text="3.5 Real-time Analysis", padx=10, pady=10)
-        realtime_frame.pack(fill=tk.X, pady=5, padx=10)
+        realtime_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
         tk.Button(realtime_frame, text="START REAL-TIME STREAM", command=self.start_realtime_stream, font=('Helvetica', 10, 'bold'), bg='#a5d6a7').pack(pady=5)
 
         # --- NUOVO: Frame per il filtraggio dei risultati YOLO ---
         yolo_filter_frame = tk.LabelFrame(main_frame, text="4. YOLO Results & Filtering", padx=10, pady=10)
-        yolo_filter_frame.pack(fill=tk.X, pady=5, padx=10)
+        yolo_filter_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
 
         yolo_filter_controls = tk.Frame(yolo_filter_frame)
         yolo_filter_controls.pack(fill=tk.X, pady=5)
@@ -919,7 +931,7 @@ class SpeedApp:
         
         # --- NUOVO: Frame per la classificazione delle detection ---
         yolo_classify_frame = tk.LabelFrame(main_frame, text="5. Classify Detections", padx=10, pady=10)
-        yolo_classify_frame.pack(fill=tk.X, pady=5, padx=10)
+        yolo_classify_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
 
         # --- MODIFICA: Sostituzione dell'Entry con un Combobox + opzione custom ---
         classify_combo_frame = tk.Frame(yolo_classify_frame)
@@ -951,7 +963,7 @@ class SpeedApp:
         # --- FINE NUOVO FRAME ---
 
         bids_frame = tk.LabelFrame(main_frame, text="6. Data Export", padx=10, pady=10)
-        bids_frame.pack(fill=tk.X, pady=5, padx=10)
+        bids_frame.pack(pady=5, padx=10, ipadx=10, ipady=5, fill=tk.X)
         export_buttons_frame = tk.Frame(bids_frame)
         export_buttons_frame.pack(fill=tk.X, pady=(0, 5))
         tk.Button(export_buttons_frame, text="CONVERT TO BIDS FORMAT", command=self.run_bids_conversion, font=('Helvetica', 10, 'bold'), bg='#FFD54F').pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0,5), pady=5)
@@ -966,7 +978,7 @@ class SpeedApp:
         # --- FINE NUOVO PULSANTE ---
 
         notebook = ttk.Notebook(main_frame)
-        notebook.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
+        notebook.pack(fill=tk.X, expand=True, pady=10, padx=10)
         plot_tab = tk.Frame(notebook); notebook.add(plot_tab, text='7. Generate Plots')
         video_tab = tk.Frame(notebook); notebook.add(video_tab, text='8. Generate Videos')
         yolo_tab = tk.Frame(notebook); notebook.add(yolo_tab, text='9. YOLO Results')
@@ -1228,7 +1240,12 @@ class SpeedApp:
         webbrowser.open_new(r"https://github.com/danielelozzi/SPEED")
         
     def _on_mousewheel(self, event):
-        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        # --- MODIFICA: Gestione cross-platform dello scroll ---
+        if sys.platform.startswith('linux'):
+            if event.num == 4: self.canvas.yview_scroll(-1, "units")
+            elif event.num == 5: self.canvas.yview_scroll(1, "units")
+        else:
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def setup_plot_tab(self, parent_tab):
         plot_options_frame = tk.LabelFrame(parent_tab, text="Plot Options", padx=10, pady=10)
@@ -1596,7 +1613,8 @@ class SpeedApp:
                     yolo_df_to_use = self.yolo_detections_df
             
             # --- NUOVO: Passa il percorso del video concatenato se esiste ---
-            concatenated_video_path_str = str(self.concatenated_video_path) if self.concatenated_video_path else None
+            concatenated_video_path_str = str(
+                self.concatenated_video_path) if self.concatenated_video_path else None
             # --- FINE ---
 
             run_full_analysis(
@@ -1609,7 +1627,8 @@ class SpeedApp:
                 yolo_models=yolo_models_to_run if self.yolo_var.get() else None,
                 defined_aois=self.user_defined_aois,
                 yolo_detections_df=yolo_df_to_use, # Passa il df filtrato se disponibile
-                concatenated_video_path=concatenated_video_path_str # Passa il percorso del video ViV
+                concatenated_video_path=concatenated_video_path_str, # Passa il percorso del video ViV
+                generate_video=False # Non generare il video da qui
             )
 
             messagebox.showinfo("Success", f"Full analysis completed.\nResults in: {output_dir}")

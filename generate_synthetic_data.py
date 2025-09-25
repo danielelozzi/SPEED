@@ -210,15 +210,11 @@ def generate_csv_data(surface_corners_df):
     viv_events_df = events_df.copy()
     # Aggiungi le colonne necessarie per il ViV
     viv_events_df['video_path'] = ""
-    viv_events_df['start_frame'] = pd.NA
-    viv_events_df['end_frame'] = pd.NA
     # Mappa alcuni eventi ai video generati
     if len(viv_events_df) > 1:
         viv_events_df.loc[1, 'video_path'] = str((VIV_SOURCE_DIR / "viv_video_1.mp4").resolve())
     if len(viv_events_df) > 3:
         viv_events_df.loc[3, 'video_path'] = str((VIV_SOURCE_DIR / "viv_video_2.mp4").resolve())
-        viv_events_df.loc[3, 'start_frame'] = 30 # Esempio di taglio: inizia dal frame 30
-        viv_events_df.loc[3, 'end_frame'] = 200 # Esempio di taglio: finisce al frame 200
     viv_events_df.to_csv(OUTPUT_DIR / 'events-video-in-video.csv', index=False)
     
     logging.info("Generating behavioral data (gaze, fixations, saccades, blinks)...")

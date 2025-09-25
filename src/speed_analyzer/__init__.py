@@ -197,7 +197,7 @@ def run_full_analysis(
     yolo_models: Optional[Dict[str, str]] = None, yolo_custom_classes: Optional[List[str]] = None,
     yolo_detections_df: Optional[pd.DataFrame] = None, generate_plots: bool = False, 
     plot_selections: Optional[Dict[str, bool]] = None,
-    generate_video: bool = True, video_options: Optional[Dict[str, Any]] = None,
+    generate_video: bool = False, video_options: Optional[Dict[str, Any]] = None,
     concatenated_video_path: Optional[str] = None,
     defined_aois: Optional[List[Dict[str, Any]]] = None
 ): # MODIFIED: Removed return type hint to match previous state
