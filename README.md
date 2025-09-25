@@ -18,6 +18,7 @@ This version supports GPU acceleration for YOLO analysis and also offers three p
 5. **Data Viewer**: A separate window that allow the visualization of DICOM/BIDS metadata and the visualization/plot the data.
 6. **Multi-Task YOLO**: Pre-trained and custom object detection, segmentation, and pose estimation using various YOLO models.
 
+7. **Advanced Tracking and Re-identification (Re-ID)**: Utilize robust trackers like BoT-SORT and ByteTrack to maintain object identities across frames, even through occlusions. This is crucial for accurately analyzing interactions with specific objects or people over time.
 7. **Video-in-Video**: A specialized video generation mode that replaces the scene camera view with the on-screen content the user is watching, synchronized with gaze and events.
 ---
 
@@ -297,31 +298,38 @@ SPEED integrates the powerful **YOLO (You Only Look Once)** object detection mod
 
 This feature transforms raw gaze coordinates into meaningful interactions with the environment, opening up new possibilities for analyzing human behavior in complex scenes.
 
-#### Two-Stage Analysis: Detection and Classification
+#### Multi-Stage Analysis: Detection, Classification, and Advanced Tracking
 
-SPEED now supports a powerful two-stage analysis workflow. After running object detection or segmentation, you can perform a second-level classification on the content *inside* the detected bounding boxes. This is ideal for tasks where you need to identify an object's general class (e.g., "animal") and then determine its specific species (e.g., "cat", "dog").
+SPEED now supports a powerful multi-stage analysis workflow.
+
+1.  **Detection/Segmentation**: First, run object detection or segmentation to identify and track all objects in the scene.
+2.  **Advanced Tracking with Re-ID**: When running the analysis, you can select a **Re-ID model** (e.g., `yolov8n.pt` from the "Re-ID Model" dropdown) and a tracker configuration. This enhances the tracking algorithm (like BoT-SORT) by using appearance features to re-identify an object that has been occluded or has left and re-entered the scene. This helps ensure that `person_1` who disappears and reappears is still identified as `person_1`, rather than being assigned a new ID like `person_5`.
+3.  **Classification (Optional)**: After detection, you can run a second-level classification on the content *inside* the detected bounding boxes. This is ideal for tasks where you need to identify an object's general class (e.g., "animal") and then determine its specific species (e.g., "cat", "dog").
 
 **How It Works in the GUI:**
 
-1.  **Run Core Analysis**: First, run a standard analysis with a YOLO detection or segmentation model enabled.
-2.  **Filter Detections (Optional)**: In the "4. YOLO Results & Filtering" section, you can select or deselect specific object classes or individual track IDs.
-3.  **Run Classification**: Go to the new "5. Classify Detections" section.
-    *   Choose a classification model (`*-cls.pt`) from the dropdown. This list includes official Ultralytics models (which will be downloaded automatically if not present) and any custom models you've placed in the `models/` folder.
-    *   Alternatively, select "Custom..." to browse for a `.pt` model file anywhere on your system.
+1.  **Run Core Analysis**: First, run a standard analysis with a YOLO detection or segmentation model enabled. This generates the `yolo_detections_cache.csv` file.
+    - To enable Re-identification, select a model from the **"Re-ID Model"** dropdown. The system will automatically use the `default_yaml.yaml` tracker configuration, which is set up for Re-ID. You can also provide your own custom tracker configuration file.
+2.  **Filter Detections (Optional)**: In the "5. YOLO Results & Filtering" section, you can select or deselect specific object classes or individual track IDs to focus your analysis.
+3.  **Run Classification**: Go to the "6. Classify Detections" section.
+    *   Choose a classification model (`*-cls.pt`) from the dropdown.
     *   Click **"RUN CLASSIFICATION ON FILTERED DETECTIONS"**.
-4.  **View Results**: The classification results (e.g., "cat", "dog") and their confidence scores will be added as new columns in the "9. YOLO Results" tab and saved to `yolo_classification_results.csv`.
+4.  **View Results**: The tracking results will be more robust, and if you ran classification, the results will appear in the "10. YOLO Stats" tab and be saved to `yolo_classification_results.csv`.
 
-**Usage via Command-Line:**
+**Classification vs. Re-identification**
 
-A dedicated script, `classify_cli.py`, allows you to perform this step programmatically.
+*   **Use Classification** to answer "**What is this object?**" (e.g., Is it a cat or a dog?). It assigns a label to an object.
+*   **Use Re-identification** as part of the tracking process to answer "**Is this the same object I was tracking before it was occluded?**". It helps maintain a consistent `track_id` for the same object over time.
 
-```bash
-# Example: Run classification on a previous analysis, using an official model
-python classify_cli.py ./path/to/analysis_output ./path/to/unenriched --model yolov8n-cls.pt
+These tools can be used independently or together to build a rich, multi-layered understanding of the scene content.
 
-# Example: Classify only 'person' objects with track IDs 1 and 3, using a custom model
-python classify_cli.py ./path/to/analysis_output ./path/to/unenriched --model ./custom_models/my_classifier.pt --classes person --ids 1 3
-```
+
+---
+
+## R package
+
+An experimental version of speed-analyzer package is under contruction for R language, available in R folder.
+
 
 ---
 

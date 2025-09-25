@@ -119,7 +119,7 @@
                     <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
                         <h3 class="font-bold text-xl mb-2 text-indigo-600">Re-ID Analyzer</h3>
                         <p class="text-gray-600">Performs re-identification analysis on tracked objects to compute similarity scores, helping to determine if different track IDs belong to the same object.</p>
-                    </div>
+                    </div> 
                     <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
                         <h3 class="font-bold text-xl mb-2 text-indigo-600">Interactive Video Editor</h3>
                         <p class="text-gray-600">A powerful GUI tool for adding/editing events, running multi-task YOLO analysis, and exporting videos with custom overlays.</p>
@@ -230,7 +230,7 @@
                     <ul class="list-disc list-inside space-y-2 text-gray-600">
                         <li>**Audio Recording**: Can now record audio alongside video streams.</li>
                         <li>**Advanced Visualizations**: Includes a dynamic heatmap, gaze path with fading trail, and a dedicated blink detection plot.</li>
-                    </ul>
+                    </ul> 
                 </div>
             </section>
 
@@ -299,7 +299,7 @@
                         <li><code>yolo_models</code> (Dict[str, str]): A dictionary mapping a task (e.g., 'detect', 'segment') to a model file name (e.g., 'yolov8n.pt').</li>
                         <li><code>custom_classes</code> (Optional[List[str]]): A list of class names for zero-shot detection.</li>
                         <li><code>yolo_detections_df</code> (Optional[pd.DataFrame]): A pre-filtered DataFrame of YOLO detections to use, bypassing video analysis.</li>
-                    </ul>
+                    </ul> 
                      <h4 class="font-semibold text-lg mt-4 mb-2">Functionality:</h4>
                      <ul class="list-disc list-inside space-y-2 text-gray-600">
                         <li>**Multi-Task Analysis**: Can run detection, segmentation, and pose estimation models simultaneously on the video.</li>
@@ -308,7 +308,7 @@
                         <li>Calculates statistics like fixation count per object and average pupil size.</li>
                         <li>Computes a <strong>Normalized Switching Index (SI)</strong> to quantify attention shifts between objects.</li>
                         <li>Saves all results to CSV files.</li>
-                    </ul>
+                    </ul> 
                 </div>
             </section>
 
@@ -327,7 +327,7 @@
                         <li><code>extract_features(...)</code>: Processes the video to extract a feature vector (embedding) for each specified object instance. It crops the object from each frame and feeds it to the Re-ID model.</li>
                         <li><code>compute_similarity_matrix(...)</code>: Calculates the cosine similarity between the feature vectors of every pair of object instances, producing a matrix of scores.</li>
                         <li><code>run(...)</code>: The main method that orchestrates the entire process: loading the model, extracting features for a given class, computing the similarity matrix, and saving the results to `reid_similarity_matrix.csv`.</li>
-                    </ul>
+                    </ul> 
                 </div>
             </section>
 
@@ -349,7 +349,7 @@
                         <li><strong>Overlay Control</strong>: All YOLO results (bounding boxes, segmentation masks, and pose skeletons) are overlaid on the video, respecting the user's filter selections.</li>
                         <li><strong>Video Export</strong>: Export the current view as a new video file, with all selected overlays and optional audio baked in.</li>
                         <li><strong>Data Persistence</strong>: When saving, the editor returns both the modified event data and a DataFrame containing only the YOLO detections that were visible (not filtered out) by the user.</li>
-                    </ul>
+                    </ul> 
                 </div>
             </section>
 
