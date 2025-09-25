@@ -238,61 +238,80 @@ def generate_concatenated_video(data_dir: Path, viv_events_df: pd.DataFrame) -> 
     Creates a new base video by concatenating screen recordings or showing images
     synchronized with eye-tracking events.
     """
-    video_out_path = data_dir / 'external-video-in-video.mp4'
+    # 4. Output: Scrivi in un file temporaneo e restituisci il percorso.
+    video_out_path = data_dir / 'concatenated_video.mp4'
     logging.info(f"Starting concatenated video generation. Output will be saved to: {video_out_path}")
 
     FPS = 30
     WIDTH, HEIGHT = 1280, 720
     GRAY_BG = np.full((HEIGHT, WIDTH, 3), 60, dtype=np.uint8)
 
-    # 1. Determina la durata totale basandosi su events.csv.
+    # 1. Logica di Durata Basata su `gaze.csv`
     try:
-        events_df = pd.read_csv(data_dir / 'events.csv').sort_values('timestamp [ns]')
-        min_ts = events_df['timestamp [ns]'].min()
-        max_ts = events_df['timestamp [ns]'].max()
-        if pd.isna(max_ts) or min_ts == max_ts:
-            max_ts = min_ts + pd.Timedelta('10m').value # Fallback se c'è un solo evento
-        logging.info("Determined video duration from original 'events.csv'.")
+        gaze_df = pd.read_csv(data_dir / 'gaze.csv')
+        min_ts = gaze_df['timestamp [ns]'].min()
+        max_ts = gaze_df['timestamp [ns]'].max()
+        logging.info("Determined video duration from 'gaze.csv'.")
     except FileNotFoundError:
-        raise ValueError("Cannot determine video duration: 'events.csv' is missing.")
+        raise ValueError("Cannot determine video duration: 'gaze.csv' is missing in the working directory.")
 
     total_duration_ns = max_ts - min_ts
     total_frames = int((total_duration_ns / NS_TO_S) * FPS)
 
-    # 2. Crea una timeline completa e unisci la mappatura dei media.
+    # 2. Creazione della Timeline Completa
     timeline_df = pd.DataFrame({
         'timestamp [ns]': np.linspace(min_ts, max_ts, total_frames, dtype=np.int64),
         'frame_idx': np.arange(total_frames)
     })
 
+    # 3. Merge e Rendering dei Frame
     cols_to_merge = ['timestamp [ns]', 'name', 'video_path', 'start_frame', 'end_frame']
-    # Assicura che le colonne opzionali esistano nel DataFrame di mapping
     for col in ['video_path', 'start_frame', 'end_frame']:
         if col not in viv_events_df.columns:
             viv_events_df[col] = pd.NA if col != 'video_path' else ''
 
-    sync_data = pd.merge_asof(
-        timeline_df,
-        viv_events_df[cols_to_merge].rename(columns={'name': 'event_name'}),
-        on='timestamp [ns]',
-        direction='backward'
-    )
+    # Crea una copia della colonna timestamp per preservarla dopo il merge
+    mapping_df = viv_events_df[cols_to_merge].sort_values('timestamp [ns]').copy()
+    mapping_df['event_start_ts'] = mapping_df['timestamp [ns]']
+
+    # --- LOGICA RIVISTA: Costruzione di una timeline di segmenti esplicita ---
+    # 1. Calcola la fine di ogni evento mappato (l'inizio del successivo)
+    mapping_df['event_end_ts'] = mapping_df['timestamp [ns]'].shift(-1).fillna(max_ts)
+
+    # 2. Crea un DataFrame di "segmenti" che include anche gli spazi vuoti (grigi)
+    segments = []
+    last_ts = min_ts
+    for _, row in mapping_df.iterrows():
+        # Aggiungi un segmento grigio se c'è uno spazio vuoto prima dell'evento corrente
+        if row['timestamp [ns]'] > last_ts:
+            segments.append({'timestamp [ns]': last_ts, 'video_path': None, 'event_start_ts': last_ts, 'event_end_ts': row['timestamp [ns]']})
+        
+        # Aggiungi il segmento dell'evento mappato
+        segments.append(row.to_dict())
+        last_ts = row['event_end_ts']
+
+    # Aggiungi un segmento grigio finale se necessario
+    if last_ts < max_ts:
+        segments.append({'timestamp [ns]': last_ts, 'video_path': None, 'event_start_ts': last_ts, 'event_end_ts': max_ts})
+
+    segments_df = pd.DataFrame(segments).sort_values('timestamp [ns]')
+
+    # 3. Unisci la timeline dei frame con i segmenti definiti
+    sync_data = pd.merge_asof(timeline_df, segments_df, on='timestamp [ns]', direction='backward')
+    # --- FINE LOGICA RIVISTA ---
 
     writer = cv2.VideoWriter(str(video_out_path), cv2.VideoWriter_fourcc(*'mp4v'), FPS, (WIDTH, HEIGHT))
-
     media_cache = {}
-    # Usa viv_events_df per ottenere i timestamp di inizio degli eventi mappati
-    event_start_times = pd.Series(viv_events_df['timestamp [ns]'].values, index=viv_events_df['name']).to_dict()
 
     try:
         with tqdm(total=total_frames, desc="Generating Concatenated Video") as pbar:
             for _, frame_data in sync_data.iterrows():
                 media_path_str = frame_data.get('video_path') if pd.notna(frame_data.get('video_path')) else None
 
+                # Se un media è mappato per questo frame
                 if media_path_str and media_path_str.strip():
                     media_path = Path(media_path_str)
 
-                    # Carica il media nella cache se non è già presente
                     if media_path_str not in media_cache:
                         if media_path.suffix.lower() in ['.png', '.jpg', '.jpeg']:
                             img = cv2.imread(media_path_str)
@@ -301,32 +320,28 @@ def generate_concatenated_video(data_dir: Path, viv_events_df: pd.DataFrame) -> 
                             media_cache[media_path_str] = cv2.VideoCapture(media_path_str)
 
                     media_obj = media_cache[media_path_str]
-                    current_event = frame_data.get('event_name')
 
-                    # Se è un'immagine, disegnala
                     if isinstance(media_obj, np.ndarray):
                         frame = media_obj.copy()
-                    # Se è un video, calcola il frame corretto
                     else:
                         cap = media_obj
-                        event_start_ts = event_start_times.get(current_event)
+                        event_start_ts = frame_data.get('event_start_ts') # Timestamp dell'evento da viv_events_df
 
                         if event_start_ts is None:
-                            frame = GRAY_BG.copy()
-                            continue
+                            frame = GRAY_BG.copy() # Se non c'è un evento di inizio, usa lo sfondo grigio
+                            continue # Salta al prossimo fotogramma del ciclo
 
                         time_since_event_start_ns = frame_data['timestamp [ns]'] - event_start_ts
                         time_since_event_start_s = time_since_event_start_ns / NS_TO_S
                         source_video_fps = cap.get(cv2.CAP_PROP_FPS) or FPS
 
-                        start_frame_offset = frame_data.get('start_frame', 0)
-                        if pd.isna(start_frame_offset): start_frame_offset = 0
+                        start_frame_offset = frame_data.get('start_frame', 0) if pd.notna(frame_data.get('start_frame')) else 0
                         target_frame_idx = int(start_frame_offset + (time_since_event_start_s * source_video_fps))
 
                         end_frame_limit = frame_data.get('end_frame')
                         source_total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-                        # Se il tempo trascorso supera la durata del video o il limite di fine, mostra grigio
+                        # Se il tempo trascorso supera la durata del video o il limite di fine, disegna grigio
                         if target_frame_idx >= source_total_frames or (pd.notna(end_frame_limit) and target_frame_idx > end_frame_limit):
                             frame = GRAY_BG.copy()
                         else:
@@ -335,7 +350,7 @@ def generate_concatenated_video(data_dir: Path, viv_events_df: pd.DataFrame) -> 
                             if not ret:
                                 frame = GRAY_BG.copy()
                 else:
-                    # Se non c'è media mappato, disegna lo sfondo grigio
+                    # Se non c'è media mappato per questo frame, disegna lo sfondo grigio
                     frame = GRAY_BG.copy()
 
                 if frame.shape[1] != WIDTH or frame.shape[0] != HEIGHT:

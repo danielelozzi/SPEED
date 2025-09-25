@@ -1758,49 +1758,60 @@ class SpeedApp:
         """
         Crea il video concatenato usando la mappatura definita.
         """
-        if self.viv_events_df.empty:
-            messagebox.showerror("Error", "No event-to-video mapping found. Please map events first.", parent=self.root)
-            return
-
-        unenriched_dir_path = Path(self.unenriched_dir_var.get())
-        if not unenriched_dir_path.is_dir():
-            messagebox.showerror("Error", "Un-enriched folder not set or not found.", parent=self.root)
-            return
-
         try:
-            output_dir = Path(self.output_dir_entry.get())
-            # Crea una cartella di lavoro temporanea per la generazione del video
-            working_dir = output_dir / "SPEED_viv_workspace"
-            working_dir.mkdir(exist_ok=True)
-
-            # Copia il file degli eventi originale nella cartella di lavoro.
-            # Questo è essenziale per calcolare la durata totale della registrazione.
-            original_events_path = unenriched_dir_path / 'events.csv'
-            if original_events_path.exists():
-                shutil.copy(original_events_path, working_dir / 'events.csv')
-            else:
-                messagebox.showerror("Error", "'events.csv' not found in un-enriched folder. Cannot determine video duration.", parent=self.root)
+            if self.viv_events_df.empty:
+                messagebox.showerror("Error", "No event-to-video mapping found. Please map events first.", parent=self.root)
                 return
-
-            messagebox.showinfo("In Progress", "Creating new scene video from media mapping...")
+    
+            unenriched_dir_path = Path(self.unenriched_dir_var.get())
+            if not unenriched_dir_path.is_dir():
+                messagebox.showerror("Error", "Un-enriched folder not set or not found.", parent=self.root)
+                return
+    
+            output_dir = Path(self.output_dir_entry.get())
+            # 1. Crea una directory di lavoro temporanea
+            working_dir = output_dir / "SPEED_viv_workspace"
+            working_dir.mkdir(exist_ok=True, parents=True)
+    
+            # 2. Copia i file necessari nella directory temporanea
+            files_to_copy = ['events.csv', 'gaze.csv']
+            for filename in files_to_copy:
+                source_path = unenriched_dir_path / filename
+                if source_path.exists():
+                    shutil.copy(source_path, working_dir / filename)
+                else:
+                    messagebox.showerror("Error", f"'{filename}' not found in un-enriched folder. This file is required to generate the video.", parent=self.root)
+                    shutil.rmtree(working_dir)
+                    return
+    
+            messagebox.showinfo("In Progress", "Creating new scene video from media mapping. This may take a moment...", parent=self.root)
             
+            # 3. Chiama la funzione di generazione video
             new_video_path = video_generator.generate_concatenated_video(
                 data_dir=working_dir,
                 viv_events_df=self.viv_events_df
             )
             
-            # Esegui il backup del video originale e sostituiscilo con quello nuovo
-            original_video_path = next(unenriched_dir_path.glob('*.mp4'))
+            # 4. Esegui il backup del video originale e sostituiscilo con quello nuovo
+            original_video_path = unenriched_dir_path / 'external.mp4'
+            if not original_video_path.exists():
+                # Se non esiste, prova a cercare un qualsiasi .mp4 come fallback
+                try:
+                    original_video_path = next(unenriched_dir_path.glob('*.mp4'))
+                except StopIteration:
+                    raise FileNotFoundError("No original .mp4 video found in the un-enriched folder to replace.")
+
             timestamp = time.strftime('%Y%m%d-%H%M%S')
-            backup_path = original_video_path.with_name(f"{original_video_path.stem}_old_{timestamp}.mp4")
+            backup_path = original_video_path.with_name(f"{original_video_path.stem}-old-{timestamp}.mp4")
             original_video_path.rename(backup_path)
             logging.info(f"Original video backed up to: {backup_path}")
-
+    
+            # 5. Sposta il nuovo video e rinominalo
             final_video_path = unenriched_dir_path / 'external.mp4'
             shutil.move(new_video_path, final_video_path)
             logging.info(f"New concatenated video created at: {final_video_path}")
-
-            # Pulisci la cartella di lavoro temporanea
+    
+            # 6. Pulisci la cartella di lavoro temporanea
             shutil.rmtree(working_dir)
 
             # Memorizza il percorso del nuovo video e aggiorna la UI
