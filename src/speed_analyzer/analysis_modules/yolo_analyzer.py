@@ -233,14 +233,14 @@ def run_yolo_analysis(
                             logging.warning("Pose model on Apple MPS detected. Forcing CPU to avoid known bugs.")
                             logged_mps_pose_warning = True # Logga solo una volta
                         device_for_task = 'cpu'
-                    all_results[task] = model.track(frame, persist=True, verbose=False, device=device_for_task, tracker=tracker_config_path)
+                    all_results[task] = model.track(frame, persist=True, verbose=False, device=device_for_task)
             except Exception as e:
                 if effective_device != 'cpu':
                     logging.warning(f"Inference on '{effective_device}' failed: {e}. Falling back to CPU.")
                     effective_device = 'cpu'
                     pbar.set_description(f"YOLO Tracking on {effective_device.upper()} (Fallback)")
                     for task, model in models.items():
-                        all_results[task] = model.track(frame, persist=True, verbose=False, device=effective_device, tracker=tracker_config_path)
+                        all_results[task] = model.track(frame, persist=True, verbose=False, device=effective_device)
                 else:
                     raise e # Se fallisce anche sulla CPU, l'errore è più grave
 

@@ -647,7 +647,7 @@ class InteractiveVideoEditor(tk.Toplevel):
                         if not self.logged_mps_pose_warning:
                             logging.warning("Pose model on Apple MPS detected. Forcing CPU to avoid known bugs.")
                         device_for_task = 'cpu'
-                    all_results[task] = model.track(frame, persist=True, verbose=False, device=device_for_task, tracker=tracker_config_path)
+                    all_results[task] = model.track(frame, persist=True, verbose=False, device=device_for_task)
 
             except Exception as e:
                 # Fallback alla CPU se l'accelerazione GPU/MPS fallisce
@@ -656,7 +656,7 @@ class InteractiveVideoEditor(tk.Toplevel):
                     effective_device = 'cpu'
                     pbar_desc = f"YOLO Tracking on {effective_device.upper()} (Fallback)"
                     for task, model in self.yolo_models.items():
-                        all_results[task] = model.track(frame, persist=True, verbose=False, device=effective_device, tracker=tracker_config_path)
+                        all_results[task] = model.track(frame, persist=True, verbose=False, device=effective_device)
                 else:
                     raise e # Se fallisce anche sulla CPU, l'errore è più grave
             
