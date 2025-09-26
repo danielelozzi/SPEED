@@ -1,4 +1,4 @@
-# SPEED v5.3.3 - labScoc Processing and Extraction of Eye tracking Data
+# SPEED v5.3.3 - labScoc Software Processing and Extraction of Eye tracking Data
 
 Desktop App & Analysis Package
 

@@ -1,4 +1,4 @@
-# Welcome to the Official Page for SPEED 5.3.3 - labScoc Processing and Extraction of Eye tracking Data
+# Welcome to the Official Page for SPEED 5.3.3 - labScoc Software Processing and Extraction of Eye tracking Data
 
 *An Advanced Eye-Tracking Data Analysis Software for Researchers*
 
