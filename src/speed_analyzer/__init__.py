@@ -259,15 +259,6 @@ def run_full_analysis(
     )
     selected_event_names = events_df['name'].tolist() if not events_df.empty else []
 
-    # --- NUOVO: Calcolo Switching Index ---
-    if defined_aois and len(defined_aois) >= 2 and not enriched_gaze_df.empty:
-        logging.info("--- CALCULATING SWITCHING INDEX ---")
-        yolo_analyzer.calculate_switching_index_from_gaze(
-            enriched_gaze_df, output_dir, subject_name
-        )
-        logging.info("--- SWITCHING INDEX CALCULATION COMPLETE ---")
-
-
     logging.info(f"--- STARTING CORE ANALYSIS FOR {subject_name} ---")
     speed_script_events.run_analysis(
         subj_name=subject_name, data_dir_str=str(working_dir), output_dir_str=str(output_dir),

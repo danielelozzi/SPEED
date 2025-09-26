@@ -39,6 +39,7 @@ from desktop_app.marker_surface_editor import MarkerSurfaceEditor
 from desktop_app.realtime_qr_aoi_editor import RealtimeQRAoiEditor
 from desktop_app.qr_surface_editor import QRSurfaceEditor
 from device_converter_window import DeviceConverterWindow
+from src.speed_analyzer.nsi_calculator import NsiCalculatorWindow
 from src.speed_analyzer import run_full_analysis
 from src.speed_analyzer import _prepare_working_directory # Importazione diretta
 from src.speed_analyzer.analysis_modules import video_generator # Importazione diretta
@@ -733,7 +734,7 @@ OFFICIAL_YOLO_CLS_MODELS = [
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.3.2")
+        self.root.title("SPEED v5.3.3")
         # --- MODIFICA: Avvia a schermo intero ---
         self.root.state('zoomed')
 
@@ -747,6 +748,7 @@ class SpeedApp:
         self.plot_vars = {}
         self.video_vars = {}
         self.world_timestamps_df = pd.DataFrame()
+        self.analysis_completed = False # NUOVO: Flag per tracciare il completamento dell'analisi
         self.concatenated_video_path = None
         
         self.user_defined_aois = []
@@ -886,7 +888,7 @@ class SpeedApp:
         self.edit_events_btn.pack(side=tk.RIGHT, padx=5)
 
         realtime_frame = tk.LabelFrame(left_column, text="3. Real-time Analysis", padx=10, pady=10)
-        realtime_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
+        realtime_frame.pack(pady=(3, 15), ipadx=2, ipady=2, fill=tk.X)
         tk.Button(realtime_frame, text="START REAL-TIME STREAM", command=self.start_realtime_stream, font=('Helvetica', 10, 'bold'), bg='#a5d6a7').pack(pady=5, fill=tk.X)
 
         # --- COLONNA DESTRA: Analisi, Filtri, Classificazione, Export, Generazione ---
@@ -974,6 +976,15 @@ class SpeedApp:
         # --- FINE NUOVO FRAME ---
         
         # --- NUOVO: Frame per la classificazione delle detection ---
+        post_analysis_frame = tk.LabelFrame(right_column, text="6. Post-Analysis Tools", padx=5, pady=5)
+        post_analysis_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
+
+        self.nsi_button = tk.Button(post_analysis_frame, text="Calculate Normalized Switching Index (NSI)...", command=self.open_nsi_calculator, state=tk.DISABLED)
+        self.nsi_button.pack(fill=tk.X, pady=5)
+        nsi_info_label = tk.Label(post_analysis_frame, text="Requires at least 2 defined AOIs. Enabled after 'Run Full Analysis'.", fg="grey", font=('Helvetica', 8))
+        nsi_info_label.pack(anchor='w')
+
+
         yolo_classify_frame = tk.LabelFrame(right_column, text="6. Classify Detections", padx=5, pady=5)
         yolo_classify_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
 
@@ -1621,6 +1632,9 @@ class SpeedApp:
             messagebox.showerror("Error", "Participant Name, Output Folder, RAW, and Un-enriched folders are mandatory.")
             return
         
+        # Disabilita il pulsante NSI all'inizio di una nuova analisi
+        self.nsi_button.config(state=tk.DISABLED)
+        
         try:
             output_dir_path = Path(output_dir)
             output_dir_path.mkdir(parents=True, exist_ok=True)
@@ -1684,10 +1698,18 @@ class SpeedApp:
 
             messagebox.showinfo("Success", f"Full analysis completed.\nResults in: {output_dir}")
         except Exception as e:
+            self.analysis_completed = False # L'analisi è fallita
             logging.error(f"Full Analysis Error: {e}\n{traceback.format_exc()}")
             messagebox.showerror("Analysis Error", f"An error occurred: {e}\n\nSee log for details.")
+        else:
+            # Se l'analisi ha successo, aggiorna lo stato
+            self.analysis_completed = True
+            self.update_post_analysis_buttons_state()
 
     def update_output_dir_default(self, *args):
+        # Disabilita i pulsanti post-analisi se il nome del partecipante cambia
+        self.analysis_completed = False
+        self.update_post_analysis_buttons_state()
         subj_name = self.participant_name_var.get().strip()
         if subj_name:
             self.output_dir_entry.delete(0, tk.END)
@@ -1696,6 +1718,21 @@ class SpeedApp:
     def select_output_dir(self):
         dir_path = filedialog.askdirectory(title="Select Output Folder")
         if dir_path: self.output_dir_entry.delete(0, tk.END); self.output_dir_entry.insert(0, dir_path)
+
+    def update_post_analysis_buttons_state(self):
+        """Abilita o disabilita i pulsanti degli strumenti post-analisi."""
+        # Logica per il pulsante NSI
+        can_run_nsi = self.analysis_completed and len(self.user_defined_aois) >= 2
+        self.nsi_button.config(state=tk.NORMAL if can_run_nsi else tk.DISABLED)
+
+    def open_nsi_calculator(self):
+        """Apre la finestra per il calcolo dell'NSI."""
+        output_dir = self.output_dir_entry.get().strip()
+        if not output_dir or not Path(output_dir).is_dir():
+            messagebox.showerror("Errore", "La cartella di output dell'analisi non è valida o non esiste.", parent=self)
+            return
+        
+        NsiCalculatorWindow(self, Path(output_dir), self.user_defined_aois)
 
     def _get_common_paths(self):
         output_dir = self.output_dir_entry.get().strip()

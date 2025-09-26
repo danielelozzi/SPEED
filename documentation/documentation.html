@@ -69,6 +69,7 @@
                     <li><a href="#yolo-analyzer" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">YOLO Analyzer</a></li>
                     <li><a href="#reid-analyzer" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Re-ID Analyzer</a></li>
                     <li><a href="#interactive-editor" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Interactive Editor</a></li>
+                    <li><a href="#nsi-calculator" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">NSI Calculator</a></li>
                 </ul>
             </nav>
         </aside>
@@ -123,6 +124,10 @@
                     <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
                         <h3 class="font-bold text-xl mb-2 text-indigo-600">Interactive Video Editor</h3>
                         <p class="text-gray-600">A powerful GUI tool for adding/editing events, running multi-task YOLO analysis, and exporting videos with custom overlays.</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+                        <h3 class="font-bold text-xl mb-2 text-indigo-600">NSI Calculator</h3>
+                        <p class="text-gray-600">A post-analysis interactive tool to calculate the Normalized Switching Index (NSI) within user-defined time windows.</p>
                     </div>
                 </div>
             </section>
@@ -305,8 +310,7 @@
                         <li>**Multi-Task Analysis**: Can run detection, segmentation, and pose estimation models simultaneously on the video.</li>
                         <li>Runs YOLO tracking on the video or loads from a cache file.</li>
                         <li>Correlates fixations with detected object bounding boxes (or segmentation masks).</li>
-                        <li>Calculates statistics like fixation count per object and average pupil size.</li>
-                        <li>Computes a <strong>Normalized Switching Index (SI)</strong> to quantify attention shifts between objects.</li>
+                        <li>Calculates statistics like fixation count per object and average pupil size.</li>                        
                         <li>Saves all results to CSV files.</li>
                     </ul> 
                 </div>
@@ -352,6 +356,26 @@
                     </ul> 
                 </div>
             </section>
+
+            <!-- NSI Calculator Section -->
+            <section id="nsi-calculator" class="mb-16 scroll-mt-20">
+                <h2 class="text-3xl font-bold text-gray-900 border-b pb-4 mb-6">NSI Calculator (<code>nsi_calculator.py</code>)</h2>
+                <p class="text-gray-600 mb-8">This module provides an interactive, post-analysis tool for calculating the <strong>Normalized Switching Index (NSI)</strong>. The NSI is a metric that quantifies the frequency of gaze shifts between different Areas of Interest (AOIs). This tool is available in the main GUI after a full analysis has been completed with at least two AOIs defined.</p>
+                
+                <div class="bg-white p-6 rounded-lg border border-gray-200">
+                    <h3 class="text-2xl font-semibold text-gray-800 mb-3">Class: <code>NsiCalculatorWindow</code></h3>
+                    <p class="text-gray-600 mb-4">A Toplevel Tkinter window that allows users to define time windows and calculate NSI for those specific periods.</p>
+                    <h4 class="font-semibold text-lg mt-4 mb-2">Key Features:</h4>
+                    <ul class="list-disc list-inside space-y-2 text-gray-600">
+                        <li><strong>Interactive Timeline</strong>: Users can drag on the video timeline to create one or more time windows for analysis.</li>
+                        <li><strong>Contextual Activation</strong>: The tool is only enabled in the GUI after a `RUN FULL ANALYSIS` is complete and if at least two AOIs were used in that analysis.</li>
+                        <li><strong>Targeted Calculation</strong>: The NSI is calculated for each defined time window, considering only the gaze data within that window.</li>
+                        <li><strong>Data-driven</strong>: It uses the `gaze_enriched.csv` file generated during the main analysis, which contains the mapping of gaze points to AOI names.</li>
+                        <li><strong>CSV Output</strong>: The results are saved to `nsi_results.csv`, with each row containing the NSI value, the list of AOIs, and the start/end timestamps of the analysis window.</li>
+                    </ul> 
+                </div>
+            </section>
+
 
         </main>
     </div>

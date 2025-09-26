@@ -15,70 +15,6 @@ except ImportError:
     logging.error("Ultralytics (YOLO) not installed. Cannot run object detection.")
     YOLO = None
 
-# --- FUNZIONI PER LO SWITCHING INDEX (ORA PIÙ GENERICHE) ---
-
-def _calculate_aoi_sequence(mapped_aoi_series: pd.Series) -> list:
-    """
-    Calcola la sequenza di AOI visitate (V).
-    L'input è una serie di nomi/ID di AOI mappati per ogni punto di sguardo.
-    """
-    v_sequence = []
-    last_aoi = None
-    for curr_aoi in mapped_aoi_series.dropna():
-        if curr_aoi != last_aoi:
-            v_sequence.append(curr_aoi)
-            last_aoi = curr_aoi
-    return v_sequence
-
-def _calculate_switching_index(v_sequence_len: int, total_gaze_points: int) -> float:
-    """
-    Calcola il Normalized Switching Index (SI).
-    """
-    if total_gaze_points <= 1:
-        return 0.0
-    
-    k = v_sequence_len
-    l_in = total_gaze_points
-    
-    si = max(0, k - 1) / (l_in - 1)
-    return si
-
-def calculate_switching_index_from_gaze(enriched_gaze_df: pd.DataFrame, output_dir: Path, subj_name: str):
-    """
-    Funzione principale per calcolare lo SI da un dataframe di sguardi già mappato su AOI.
-    MODIFIED: Always creates the output file, even if no gaze is mapped to AOIs.
-    """
-    logging.info("Calculating AOI sequence (V_G) and Switching Index (SI_G)...")
-    
-    # Initialize default values
-    v_gaze_sequence = []
-    k_gaze = 0
-    l_in_gaze = len(enriched_gaze_df.dropna(subset=['gaze x [px]']))
-    si_gaze = 0.0
-
-    if 'aoi_name' in enriched_gaze_df.columns and not enriched_gaze_df['aoi_name'].dropna().empty:
-        # 1. Calcola la sequenza V (V_Gaze)
-        v_gaze_sequence = _calculate_aoi_sequence(enriched_gaze_df['aoi_name'])
-        
-        # 2. Calcola lo Switching Index (SI_Gaze)
-        k_gaze = len(v_gaze_sequence)
-        si_gaze = _calculate_switching_index(k_gaze, l_in_gaze)
-        logging.info(f"Switching Index analysis complete. SI_G = {si_gaze:.4f}")
-    else:
-        logging.warning("No gaze points were mapped to any manually defined AOI. Switching Index is 0.")
-
-    # 3. Salva i risultati, SEMPRE
-    si_results = {
-        'participant': subj_name,
-        'total_gaze_points_analyzed (L_in)': l_in_gaze,
-        'aoi_sequence_length (K)': k_gaze,
-        'gaze_switching_index (SI_G)': si_gaze,
-        'aoi_sequence (V_G)': v_gaze_sequence
-    }
-    pd.DataFrame([si_results]).to_csv(output_dir / 'switching_index_results.csv', index=False)
-    
-    logging.info(f"Results for manually defined AOIs saved to: {output_dir / 'switching_index_results.csv'}")
-
 
 # --- FUNZIONI DI ANALISI YOLO ---
 
@@ -386,54 +322,5 @@ def run_yolo_analysis(
     stats_instance_df.to_csv(output_dir / 'stats_per_instance.csv', index=False)
     stats_class_df.to_csv(output_dir / 'stats_per_class.csv', index=False)
     id_map_df.to_csv(output_dir / 'class_id_map.csv', index=False)
-
-    # --- CALCOLO DELLO SWITCHING INDEX (SEMPRE ESEGUITO CON YOLO) ---
-    logging.info("Correlating detections with gaze data for Switching Index calculation...")
-    merged_df_gaze = pd.merge(detections_df, synced_et_data_gaze, left_on='frame_idx', right_on='frame', how='inner')
-    
-    # Mappa ogni punto di sguardo a un track_id
-    mapped_gaze_to_tid = []
-    if not merged_df_gaze.empty:
-        # Applica la stessa logica di hit-testing delle fissazioni anche ai dati di sguardo
-        def find_gaze_hit_track_id(row):
-            if pd.isna(row['gaze x [px]']):
-                return None
-
-            px, py = row['gaze x [px]'], row['gaze y [px]']
-            
-            if row.get('task') == 'segment' and 'mask_contours' in row and pd.notna(row['mask_contours']):
-                try:
-                    contour_points = np.array(json.loads(row['mask_contours'])).astype(np.int32)
-                    if cv2.pointPolygonTest(contour_points, (px, py), False) >= 0:
-                        return row['track_id']
-                except (json.JSONDecodeError, ValueError, IndexError):
-                    pass # Fallback al bounding box
-            
-            # Comportamento di default o fallback: usa il bounding box
-            if _is_inside(px, py, row['x1'], row['y1'], row['x2'], row['y2']):
-                return row['track_id']
-            
-            return None
-
-        merged_df_gaze['mapped_track_id'] = merged_df_gaze.apply(find_gaze_hit_track_id, axis=1)
-        final_gaze_mapping = merged_df_gaze.groupby('timestamp [ns]')['mapped_track_id'].first() # Prendi il primo oggetto se ci sono sovrapposizioni
-    else:
-        final_gaze_mapping = pd.Series([])
-
-    # Calcola e salva SI
-    v_gaze_sequence = _calculate_aoi_sequence(final_gaze_mapping)
-    k_gaze = len(v_gaze_sequence)
-    l_in_gaze = len(synced_et_data_gaze.dropna(subset=['gaze x [px]']))
-    si_gaze = _calculate_switching_index(k_gaze, l_in_gaze)
-    
-    si_results = {
-        'participant': subj_name,
-        'total_gaze_points_analyzed (L_in)': l_in_gaze,
-        'aoi_sequence_length (K)': k_gaze,
-        'gaze_switching_index (SI_G)': si_gaze,
-        'aoi_sequence (V_G)': v_gaze_sequence
-    }
-    pd.DataFrame([si_results]).to_csv(output_dir / 'switching_index_yolo_results.csv', index=False)
-    logging.info(f"YOLO-based Switching Index calculated and saved. SI_G = {si_gaze:.4f}")
 
     logging.info("YOLO analysis part completed.")
