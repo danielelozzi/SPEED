@@ -162,7 +162,7 @@ def run_yolo_analysis(
             try:
                 all_results = {}
                 for task, model in models.items():
-                    # --- NUOVO: Logica per forzare la CPU sui modelli di posa su MPS ---
+                    # Logica per forzare la CPU sui modelli di posa su MPS
                     device_for_task = effective_device
                     if task == 'pose' and effective_device == 'mps':
                         if not logged_mps_pose_warning:
@@ -193,6 +193,12 @@ def run_yolo_analysis(
                     class_name = models[task].names[class_id]
                     xyxy = box.xyxy[0].cpu().numpy()
 
+                    # --- NUOVO: Estrai i dati OBB se disponibili ---
+                    obb_coords_json = None
+                    if hasattr(box, 'xywhr') and box.xywhr is not None:
+                        obb_coords = box.xywhr[0].cpu().numpy().tolist()
+                        obb_coords_json = json.dumps(obb_coords)
+
                     detection_data = {
                         'frame_idx': frame_idx, 'track_id': track_id, 'task': task_base_name,
                         'class_id': class_id, 'class_name': class_name,
@@ -200,6 +206,9 @@ def run_yolo_analysis(
                     }
                     
                     # Aggiungi dati di segmentazione
+                    if obb_coords_json:
+                        detection_data['obb_coords'] = obb_coords_json
+
                     if task_base_name == 'segment' and res.masks and i < len(res.masks.xy):
                         detection_data['mask_contours'] = json.dumps(res.masks.xy[i].tolist())
 

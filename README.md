@@ -16,7 +16,7 @@ This version supports GPU acceleration for YOLO analysis and also offers three p
 3.  **Dynamic AOI (Manual Keyframes)**: A user-defined AOI path created by setting its position and size at key moments in the video.
 4.  **Real-time visualization**: A real-time visualization of external and internal camera with YOLO AOI and manual multiple AOI, allowing the visualization of blink, pupillometry, fragmentation and events management. 
 5. **Data Viewer**: A separate window that allow the visualization of DICOM/BIDS metadata and the visualization/plot the data.
-6. **Multi-Task YOLO**: Pre-trained and custom object detection, segmentation, and pose estimation using various YOLO models.
+6. **Multi-Task YOLO**: Pre-trained and custom object detection, segmentation, pose estimation, and oriented bounding box (OBB) detection using various YOLO models.
 
 7. **Advanced Tracking and Re-identification (Re-ID)**: Utilize robust trackers like BoT-SORT and ByteTrack to maintain object identities across frames, even through occlusions. This is crucial for accurately analyzing interactions with specific objects or people over time.
 7. **Video-in-Video**: A specialized video generation mode that replaces the scene camera view with the on-screen content the user is watching, synchronized with gaze and events.
@@ -311,7 +311,7 @@ This feature transforms raw gaze coordinates into meaningful interactions with t
 #### Multi-Stage Analysis: Detection, Classification, and Advanced Tracking
 
 SPEED now supports a powerful multi-stage analysis workflow.
-
+ 
 1.  **Detection/Segmentation**: First, run object detection or segmentation to identify and track all objects in the scene.
 2.  **Advanced Tracking with Re-ID**: When running the analysis, you can select a **Re-ID model** (e.g., `yolov8n.pt` from the "Re-ID Model" dropdown) and a tracker configuration. This enhances the tracking algorithm (like BoT-SORT) by using appearance features to re-identify an object that has been occluded or has left and re-entered the scene. This helps ensure that `person_1` who disappears and reappears is still identified as `person_1`, rather than being assigned a new ID like `person_5`.
 3.  **Classification (Optional)**: After detection, you can run a second-level classification on the content *inside* the detected bounding boxes. This is ideal for tasks where you need to identify an object's general class (e.g., "animal") and then determine its specific species (e.g., "cat", "dog").

@@ -210,10 +210,20 @@ class RealtimeNeonAnalyzer:
                 if self.yolo_class_filter and class_name not in self.yolo_class_filter: continue
                 if self.yolo_id_filter and track_id not in self.yolo_id_filter: continue
 
-                x1, y1, x2, y2 = [int(i) for i in box.xyxy[0]]
-                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(annotated_frame, f"{class_name}:{track_id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                # --- NUOVO: Disegna OBB se disponibile, altrimenti disegna un rettangolo normale ---
+                if hasattr(box, 'xywhr') and box.xywhr is not None:
+                    # Dati OBB: [cx, cy, w, h, angle_degrees]
+                    cx, cy, w, h, angle = box.xywhr[0].cpu().numpy()
+                    # Crea i punti del rettangolo ruotato
+                    rect_points = cv2.boxPoints(((cx, cy), (w, h), angle))
+                    rect_points = np.int0(rect_points)
+                    cv2.drawContours(annotated_frame, [rect_points], 0, (0, 255, 255), 2) # Ciano per OBB
+                    x1, y1 = int(cx - w/2), int(cy - h/2) # Posizione approssimativa per il testo
+                else:
+                    x1, y1, x2, y2 = [int(i) for i in box.xyxy[0]]
+                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2) # Verde per bbox normale
 
+                cv2.putText(annotated_frame, f"{class_name}:{track_id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 if self.last_gaze and x1 <= self.last_gaze.x <= x2 and y1 <= self.last_gaze.y <= y2:
                     gazed_object_name = f"{class_name}:{track_id}"
 

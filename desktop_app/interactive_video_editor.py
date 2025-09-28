@@ -162,11 +162,12 @@ class InteractiveVideoEditor(tk.Toplevel):
             'detect': tk.StringVar(),
             'segment': tk.StringVar(),
             'pose': tk.StringVar(),
+            'obb': tk.StringVar(),
             'reid': tk.StringVar()
         }
         self.yolo_model_combos = {}
 
-        for task in ['detect', 'segment', 'pose', 'reid']:
+        for task in ['detect', 'segment', 'pose', 'obb', 'reid']:
             tk.Label(yolo_run_frame, text=f"{task.capitalize()} Model:").pack(anchor='w', pady=(5,0))
             combo = ttk.Combobox(yolo_run_frame, textvariable=self.yolo_model_vars[task], state='readonly')
             combo.pack(fill=tk.X)
@@ -210,8 +211,8 @@ class InteractiveVideoEditor(tk.Toplevel):
         self.yolo_filter_notebook = ttk.Notebook(yolo_filter_frame)
         self.yolo_filter_notebook.pack(fill=tk.BOTH, expand=True)
         self.yolo_filter_trees = {}
-
-        for task in ['detection', 'segmentation', 'pose']:
+        
+        for task in ['detection', 'segmentation', 'pose', 'obb']:
             tab = ttk.Frame(self.yolo_filter_notebook)
             # Non aggiungiamo le schede subito, ma solo se ci sono dati per quel task
             tree = ttk.Treeview(tab, columns=("#1"), show="tree headings")
@@ -445,10 +446,23 @@ class InteractiveVideoEditor(tk.Toplevel):
 
         for _, det in detections_for_frame.iterrows():
             # Disegna Bounding Box (sempre)
-            x1, y1 = int(det['x1'] * scale_w), int(det['y1'] * scale_h)
-            x2, y2 = int(det['x2'] * scale_w), int(det['y2'] * scale_h)
-            color = (0, 255, 255) # Ciano per i box
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
+            color = (0, 255, 255)  # Ciano
+            
+            # --- NUOVO: Disegna OBB se disponibile, altrimenti bbox normale ---
+            if 'obb_coords' in det and pd.notna(det['obb_coords']):
+                cx, cy, w, h, angle = json.loads(det['obb_coords'])
+                # Scala le coordinate OBB
+                cx, w = cx * scale_w, w * scale_w
+                cy, h = cy * scale_h, h * scale_h
+                rect_points = cv2.boxPoints(((cx, cy), (w, h), angle))
+                rect_points = np.int0(rect_points)
+                cv2.drawContours(frame, [rect_points], 0, color, 1)
+                x1, y1 = int(cx - w/2), int(cy - h/2) # Posizione approssimativa per il testo
+            else:
+                x1, y1 = int(det['x1'] * scale_w), int(det['y1'] * scale_h)
+                x2, y2 = int(det['x2'] * scale_w), int(det['y2'] * scale_h)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
+
             label = f"{det.get('class_name', 'Obj')}:{int(det['track_id'])}"
             cv2.putText(frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
@@ -679,6 +693,12 @@ class InteractiveVideoEditor(tk.Toplevel):
                     class_name = self.yolo_models[task].names[class_id]
                     xyxy = box.xyxy[0].cpu().numpy()
 
+                    # --- NUOVO: Estrai i dati OBB se disponibili ---
+                    obb_coords_json = None
+                    if hasattr(box, 'xywhr') and box.xywhr is not None:
+                        obb_coords = box.xywhr[0].cpu().numpy().tolist()
+                        obb_coords_json = json.dumps(obb_coords)
+
                     detection_data = {
                         'frame_idx': frame_idx, 'track_id': track_id, 'task': task_base_name,
                         'class_id': class_id, 'class_name': class_name,
@@ -686,6 +706,9 @@ class InteractiveVideoEditor(tk.Toplevel):
                     }
                     
                     # Aggiungi dati di segmentazione
+                    if obb_coords_json:
+                        detection_data['obb_coords'] = obb_coords_json
+
                     if task == 'segment' and res.masks and i < len(res.masks.xy):
                         detection_data['mask_contours'] = json.dumps(res.masks.xy[i].tolist())
 
@@ -723,8 +746,8 @@ class InteractiveVideoEditor(tk.Toplevel):
             return
 
         # Raggruppa per task e popola ogni scheda/treeview
-        for task, group_df in self.yolo_df.groupby('task'):
-            task_name_map = {'detect': 'detection', 'segment': 'segmentation', 'pose': 'pose'}
+        for task, group_df in self.yolo_df.groupby('task'):            
+            task_name_map = {'detect': 'detection', 'segment': 'segmentation', 'pose': 'pose', 'obb': 'obb'}
             task_key = task_name_map.get(task)
             if task_key not in self.yolo_filter_trees: continue
 

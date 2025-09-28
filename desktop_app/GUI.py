@@ -219,12 +219,12 @@ class RealtimeDisplayWindow(tk.Toplevel):
         # --- MODIFICA: Selezione Multi-Modello per Real-time ---
         self.rt_yolo_model_vars = {
             'detect': tk.StringVar(), 'segment': tk.StringVar(), 'pose': tk.StringVar(),
-            'reid': tk.StringVar(), 'detect_world': tk.StringVar()
+            'reid': tk.StringVar(), 'detect_world': tk.StringVar(), 'obb': tk.StringVar()
         }
         self.rt_yolo_model_combos = {}
 
         for task, label in [('detect', 'Detection Model:'), ('segment', 'Segmentation Model:'), 
-                            ('pose', 'Pose Model:'), ('reid', 'Re-ID Model:'), 
+                            ('pose', 'Pose Model:'), ('obb', 'OBB Model:'), ('reid', 'Re-ID Model:'), 
                             ('detect_world', 'World Model:')]:
             tk.Label(self.yolo_config_frame, text=label).pack(anchor='w')
             combo = ttk.Combobox(self.yolo_config_frame, textvariable=self.rt_yolo_model_vars[task], state='disabled', width=25)
@@ -719,7 +719,8 @@ YOLO_MODELS = {
     'pose': [
         'yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt'
     ],
-    'detect_world': ['yolov8s-world.pt', 'yolov8m-world.pt', 'yolov8l-world.pt', 'yolov8x-world.pt'],
+    'obb': ['yolov8n-obb.pt', 'yolov8s-obb.pt', 'yolov8m-obb.pt', 'yolov8l-obb.pt', 'yolov8x-obb.pt'],
+    'detect_world': ['yolov8s-world.pt', 'yolov8m-world.pt', 'yolov8l-world.pt', 'yolov8x-world.pt'],    
     'reid': [
         'yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt'
     ]
@@ -909,12 +910,13 @@ class SpeedApp:
             'detect': tk.StringVar(),
             'segment': tk.StringVar(),
             'pose': tk.StringVar(),
+            'obb': tk.StringVar(),
             'detect_world': tk.StringVar(),
             'reid': tk.StringVar()
         }
         self.yolo_model_combos = {}
-
-        for task, label in [('detect', 'Detection Model:'), ('segment', 'Segmentation Model:'), ('pose', 'Pose Model:'), ('reid', 'Re-ID Model:'), ('detect_world', 'World Model (for custom classes):')]:
+        
+        for task, label in [('detect', 'Detection Model:'), ('segment', 'Segmentation Model:'), ('pose', 'Pose Model:'), ('obb', 'OBB Model:'), ('reid', 'Re-ID Model:'), ('detect_world', 'World Model (for custom classes):')]:
             model_frame = tk.Frame(yolo_options_frame)
             model_frame.pack(fill=tk.X, pady=2)
             tk.Label(model_frame, text=label, width=22, anchor='w').pack(side=tk.LEFT)
@@ -964,7 +966,7 @@ class SpeedApp:
         self.yolo_class_filter = set()
         self.yolo_id_filter = set()
 
-        for task in ['detection', 'segmentation', 'pose']:
+        for task in ['detection', 'segmentation', 'pose', 'obb']:
             tab = ttk.Frame(self.yolo_filter_notebook)
             tree = ttk.Treeview(tab, columns=("#1"), show="tree headings")
             tree.heading("#0", text="Object")
@@ -2035,7 +2037,7 @@ class SpeedApp:
             self._reset_yolo_filter_ui()
 
             for task, group_df in self.yolo_detections_df.groupby('task'):
-                task_name_map = {'detect': 'detection', 'segment': 'segmentation', 'pose': 'pose'}
+                task_name_map = {'detect': 'detection', 'segment': 'segmentation', 'pose': 'pose', 'obb': 'obb'}
                 task_key = task_name_map.get(task)
                 if task_key not in self.yolo_filter_trees: continue
 
