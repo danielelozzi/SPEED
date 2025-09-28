@@ -986,6 +986,14 @@ class SpeedApp:
         nsi_info_label = tk.Label(post_analysis_frame, text="Requires at least 2 defined AOIs. Enabled after 'Run Full Analysis'.", fg="grey", font=('Helvetica', 8))
         nsi_info_label.pack(anchor='w')
 
+        # --- NUOVO: Pulsante per EyeNet ---
+        eyenet_separator = ttk.Separator(post_analysis_frame, orient='horizontal')
+        eyenet_separator.pack(fill='x', pady=10)
+        self.eyenet_button = tk.Button(post_analysis_frame, text="Launch EyeNet...", command=self.launch_eyenet, bg='#B2EBF2')
+        self.eyenet_button.pack(fill=tk.X, pady=5)
+        eyenet_info_label = tk.Label(post_analysis_frame, text="Launch the EyeNet application for advanced neural analysis.", fg="grey", font=('Helvetica', 8))
+        eyenet_info_label.pack(anchor='w')
+
 
         yolo_classify_frame = tk.LabelFrame(right_column, text="6. Classify Detections", padx=5, pady=5)
         yolo_classify_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
@@ -1735,6 +1743,10 @@ class SpeedApp:
             return
         
         NsiCalculatorWindow(self, Path(output_dir), self.user_defined_aois)
+
+    def launch_eyenet(self):
+        """Placeholder function to launch the EyeNet application."""
+        messagebox.showinfo("EyeNet Launcher", "This will launch the EyeNet application in a future version.", parent=self.root)
 
     def _get_common_paths(self):
         output_dir = self.output_dir_entry.get().strip()
