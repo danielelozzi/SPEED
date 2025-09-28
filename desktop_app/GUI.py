@@ -735,7 +735,7 @@ OFFICIAL_YOLO_CLS_MODELS = [
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.3.3")
+        self.root.title("SPEED v5.3.4")
         # --- MODIFICA: Avvia a schermo intero ---
         self.root.state('zoomed')
 
