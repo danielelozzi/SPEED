@@ -1,4 +1,4 @@
-# Welcome to the Official Page for SPEED 5.3.5 - labScoc Software Processing and Extraction of Eye tracking Data
+# Welcome to the Official Page for SPEED 5.3.6 - labScoc Software Processing and Extraction of Eye tracking Data
 
 *An Advanced Eye-Tracking Data Analysis Software for Researchers*
 
@@ -26,14 +26,16 @@ SPEED is designed for cognitive and behavioral experiments, providing a modular 
 * **Advanced Event Editors**: Manage experimental events in a table or directly on an interactive video timeline.
 * **Computer Vision Integration**: Leverage YOLO object detection to correlate gaze with objects in the scene.
 * **Rich Visual Outputs**: Create heatmaps, gaze paths, pupillometry plots, and highly customized video overlays.
-* **AOI**: create and manager multiple AOIs in static, dynamic and YOLO-based modality.
-* **Real-time visualization**: A real-time visualization of external and internal camera with YOLO AOI and manual multiple AOI, allowing the visualization of blink, pupillometry, fragmentation and events management. 
-* **Data Viewer**: A separate window that allows the visualization of DICOM/BIDS metadata and the visualization/plotting of the data.
-* **Multi-Task YOLO**: Pre-trained and custom object detection, segmentation, and pose estimation using a wide range of YOLO models.
+* **Multiple AOI Methods**: Define Areas of Interest as static rectangles, dynamic objects tracked by YOLO, manually animated keyframes, or surfaces mapped to QR codes.
+* **Real-time Analysis**: Live visualization with multi-task YOLO, dynamic AOIs, LSL streaming, audio recording, and interactive filtering.
+* **Data Viewer**: A powerful window for interactive visualization of BIDS/DICOM/Un-enriched data, with video playback, event editing, on-the-fly YOLO analysis, and data export.
+* **Data Plotter**: An interactive tool to plot all time-series data (pupil, gaze, fixations, etc.) and calculate statistics on user-selected time ranges.
+* **Multi-Task YOLO**: Pre-trained and custom object detection, segmentation, pose estimation, and oriented bounding box (OBB) detection.
 * **Data Interoperability**: Convert data to and from standard formats like BIDS and DICOM.
 * **Video-in-Video**: A specialized video generation mode that replaces the scene camera view with the on-screen content the user is watching, synchronized with gaze and events. 
 * **Interactive NSI Calculator**: A post-analysis tool to calculate the Normalized Switching Index within user-defined time windows.
 * **Advanced Tracking and Re-identification (Re-ID)**: Utilize robust trackers like BoT-SORT and ByteTrack to maintain object identities across frames, even through occlusions. This is crucial for accurately analyzing interactions with specific objects or people over time.
+* **Device Converters**: Utilities to convert data from other eye-tracking devices (e.g., Tobii) into the BIDS format.
 
 
 ## Getting Started
@@ -63,7 +65,7 @@ The core analysis engine of SPEED, now available as a reusable package. It's des
 ### Installation from PyPI
 You can install the package directly from the Python Package Index (PyPI) using pip:
 ```bash
-pip install speed-analyzer==5.3.5
+pip install speed-analyzer==5.3.6
 ```
 ### How to Use the Package
 The package exposes a main function, `run_full_analysis`, that takes paths and options as arguments. See the `example_usage.py` file for a complete demonstration.
@@ -173,21 +175,24 @@ run_full_analysis(
 ### Real-time
 
 The real-time window provides a suite of interactive tools:
-
+ 
 * **Live Data Overlays**: Toggle various visualizations on the fly:
-    * **YOLO Detections**: See what objects the system is identifying in real-time.
+    * **Multi-Task YOLO**: See detections, segmentations, and poses in real-time.
     * **Gaze Point**: A circle indicating the current gaze position.
     * **Pupil & Fragmentation Plots**: Live graphs showing pupillometry and gaze speed.
     * **Blink Detector**: An on-screen indicator that appears during a blink.
     * **AOIs**: View your defined Areas of Interest overlaid on the video.
+    * **Dynamic Heatmap**: A heatmap showing recent gaze positions.
 * **Recording**:
     * Start and stop recordings directly from the interface.
-    * Data (gaze, events, video) is saved into a selected folder.
+    * Data (gaze, events, video, and **audio**) is saved into a selected folder.
 * **Event Management**:
     * Add timestamped events during a live recording by typing a name and clicking "Add Event".
 * **On-the-fly AOI Definition**:
     * Pause the stream to draw, name, and add static rectangular AOIs directly on the video feed.
-    * These AOIs are visualized instantly and used for analysis when the recording is stopped. At the end of the recording, a `gaze_in_aoi_results.csv` file is automatically generated.
+    * Define dynamic AOIs based on QR codes.
+* **LSL Streaming**: Enable a checkbox to stream gaze, video, and event data over the network using Lab Streaming Layer (LSL) for integration with other research software.
+* **Interactive Filtering**: A new panel allows you to dynamically show or hide specific object classes or individual tracked objects from the YOLO overlay.
 
 #### Command-Line Interface (for Developers)
 
@@ -246,7 +251,7 @@ This approach guarantees that your analysis is always executed in the same contr
 ---
 
 ## The Modular Workflow (GUI)
-SPEED 5.3.5 operates on a two-step workflow designed to save time and computational resources.
+SPEED 5.3.6 operates on a two-step workflow designed to save time and computational resources.
 
 ### Step 1: Run Core Analysis
 This is the main data processing stage. You run this step only once per participant for a given set of events. The software will:
@@ -297,12 +302,19 @@ To generate a video:
 
 #### Post-Analysis Tools 🛠️
 
-After a successful core analysis, new tools become available for more in-depth, interactive analysis.
+New tools become available for more in-depth, interactive analysis.
 
 *   **Normalized Switching Index (NSI) Calculator**: This tool becomes active after an analysis is run with at least two defined Areas of Interest (AOIs). It opens an interactive video player where you can:
     *   Define one or more time windows directly on the video timeline.
     *   Calculate the NSI, which measures the frequency of gaze shifts between the defined AOIs, specifically for each selected time window.
     *   Save the results to a `nsi_results.csv` file, containing the NSI value for each time window.
+*   **Data Viewer**: A powerful, standalone window for interactive data exploration. Load data from BIDS, DICOM, or un-enriched folders to:
+    *   Play the video with synchronized audio.
+    *   View and edit events on an interactive timeline.
+    *   Run multi-task YOLO analysis on the fly and filter results.
+    *   Export a new video with custom overlays.
+*   **Data Plotter**: An interactive tool to visualize all time-series data (pupil, gaze, fixations, saccades, blinks, events) on a single, scrollable, and zoomable chart. Select a time range to instantly calculate and display descriptive statistics for that interval.
+*   **Device Converter**: A utility to convert data from other eye-tracking devices (e.g., Tobii) into the BIDS format.
 
 This feature provides a powerful, user-driven way to analyze visual attention patterns during specific moments of a recording.
 
@@ -412,7 +424,7 @@ python lsl_stream_simulator.py
 
 ## Export to BIDS Format
 
-SPEED 5.3.5 introduces a new feature to convert processed eye-tracking data into a format compatible with the **Brain Imaging Data Structure (BIDS)**, following the [BEP020 for Eye Tracking](https://bids.neuroimaging.io/extensions/beps/bep_020.html) guidelines. This facilitates data sharing and standardization for the research community.
+SPEED 5.3.6 introduces a new feature to convert processed eye-tracking data into a format compatible with the **Brain Imaging Data Structure (BIDS)**, following the [BEP020 for Eye Tracking](https://bids.neuroimaging.io/extensions/beps/bep_020.html) guidelines. This facilitates data sharing and standardization for the research community.
 
 ### Use via Desktop App
 

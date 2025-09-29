@@ -69,13 +69,14 @@
                     <li><a href="#yolo-analyzer" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">YOLO Analyzer</a></li>
                     <li><a href="#reid-analyzer" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Re-ID Analyzer</a></li>
                     <li><a href="#interactive-editor" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Interactive Editor</a></li>
+                    <li><a href="#data-plotter" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Data Plotter</a></li>
                     <li><a href="#nsi-calculator" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">NSI Calculator</a></li>
                 </ul>
             </nav>
         </aside>
 
         <!-- Main Content -->
-        <main class="ml-64 p-10 w-full">
+        <main class="ml-72 p-10 w-full">
             
             <!-- Introduction Section -->
             <section id="introduction" class="mb-16 scroll-mt-20">
@@ -103,7 +104,7 @@
                     </div>
                     <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
                         <h3 class="font-bold text-xl mb-2 text-indigo-600">Real-time Analyzer</h3>
-                        <p class="text-gray-600">Connect to a Pupil Labs Neon device, stream data in real-time, perform live object detection, and visualize data on the live video feed.</p>
+                        <p class="text-gray-600">Connect to a Pupil Labs Neon device, stream data in real-time (including LSL), perform live multi-task object detection, and visualize data on the live video feed.</p>
                     </div>
                      <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
                         <h3 class="font-bold text-xl mb-2 text-indigo-600">Event-based Analysis</h3>
@@ -122,8 +123,12 @@
                         <p class="text-gray-600">Performs re-identification analysis on tracked objects to compute similarity scores, helping to determine if different track IDs belong to the same object.</p>
                     </div> 
                     <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
-                        <h3 class="font-bold text-xl mb-2 text-indigo-600">Interactive Video Editor</h3>
-                        <p class="text-gray-600">A powerful GUI tool for adding/editing events, running multi-task YOLO analysis, and exporting videos with custom overlays.</p>
+                        <h3 class="font-bold text-xl mb-2 text-indigo-600">Data Viewer / Editor</h3>
+                        <p class="text-gray-600">A powerful GUI tool for visualizing BIDS/DICOM/Un-enriched data, adding/editing events, running multi-task YOLO analysis, and exporting videos with custom overlays.</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+                        <h3 class="font-bold text-xl mb-2 text-indigo-600">Data Plotter</h3>
+                        <p class="text-gray-600">An interactive tool to plot time-series data (pupil, gaze, fixations, etc.) and calculate statistics on user-selected time ranges.</p>
                     </div>
                     <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
                         <h3 class="font-bold text-xl mb-2 text-indigo-600">NSI Calculator</h3>
@@ -232,8 +237,10 @@
                         <li><code>close()</code>: Safely disconnects from the device.</li>
                     </ul>
                     <h4 class="font-semibold text-lg mt-4 mb-2">New Features:</h4>
-                    <ul class="list-disc list-inside space-y-2 text-gray-600">
+                     <ul class="list-disc list-inside space-y-2 text-gray-600">
                         <li>**Audio Recording**: Can now record audio alongside video streams.</li>
+                        <li>**LSL Streaming**: Can stream gaze, events, and video data over the network via Lab Streaming Layer.</li>
+                        <li>**Interactive Filtering**: A panel to dynamically show/hide specific object classes or individual tracked objects from the YOLO overlay.</li>
                         <li>**Advanced Visualizations**: Includes a dynamic heatmap, gaze path with fading trail, and a dedicated blink detection plot.</li>
                     </ul> 
                 </div>
@@ -338,11 +345,11 @@
 
             <!-- Interactive Video Editor Section -->
             <section id="interactive-editor" class="mb-16 scroll-mt-20">
-                <h2 class="text-3xl font-bold text-gray-900 border-b pb-4 mb-6">Interactive Video Editor (<code>interactive_video_editor.py</code>)</h2>
-                <p class="text-gray-600 mb-8">This module provides a comprehensive graphical interface for advanced, interactive analysis of a recorded session. It combines event management with powerful, on-the-fly computer vision analysis.</p>
+                <h2 class="text-3xl font-bold text-gray-900 border-b pb-4 mb-6">Data Viewer / Editor (<code>interactive_video_editor.py</code>)</h2>
+                <p class="text-gray-600 mb-8">This module provides a comprehensive graphical interface for advanced, interactive exploration and analysis of a recorded session. It can load data from BIDS, DICOM, or un-enriched folders and combines event management with powerful, on-the-fly computer vision analysis.</p>
                 
                 <div class="bg-white p-6 rounded-lg border border-gray-200">
-                    <h3 class="text-2xl font-semibold text-gray-800 mb-3">Class: <code>InteractiveVideoEditor</code></h3>
+                    <h3 class="text-2xl font-semibold text-gray-800 mb-3">Class: <code>InteractiveVideoEditor</code> (Data Viewer)</h3>
                     <p class="text-gray-600 mb-4">A Toplevel Tkinter window that allows users to visualize data, manage events, and run complex analyses directly on a video.</p>
                     <h4 class="font-semibold text-lg mt-4 mb-2">Key Features:</h4>
                     <ul class="list-disc list-inside space-y-2 text-gray-600">
@@ -353,6 +360,25 @@
                         <li><strong>Overlay Control</strong>: All YOLO results (bounding boxes, segmentation masks, and pose skeletons) are overlaid on the video, respecting the user's filter selections.</li>
                         <li><strong>Video Export</strong>: Export the current view as a new video file, with all selected overlays and optional audio baked in.</li>
                         <li><strong>Data Persistence</strong>: When saving, the editor returns both the modified event data and a DataFrame containing only the YOLO detections that were visible (not filtered out) by the user.</li>
+                    </ul> 
+                </div>
+            </section>
+
+            <!-- Data Plotter Section -->
+            <section id="data-plotter" class="mb-16 scroll-mt-20">
+                <h2 class="text-3xl font-bold text-gray-900 border-b pb-4 mb-6">Data Plotter (<code>data_plotter.py</code>)</h2>
+                <p class="text-gray-600 mb-8">This module provides an interactive window for visualizing all time-series data from an analysis on a single, scrollable, and zoomable chart. It's an excellent tool for detailed data exploration and quick statistical analysis.</p>
+                
+                <div class="bg-white p-6 rounded-lg border border-gray-200">
+                    <h3 class="text-2xl font-semibold text-gray-800 mb-3">Class: <code>DataPlotterWindow</code></h3>
+                    <p class="text-gray-600 mb-4">A Toplevel Tkinter window that loads data from an output folder (or an un-enriched folder) and plots it on synchronized axes.</p>
+                    <h4 class="font-semibold text-lg mt-4 mb-2">Key Features:</h4>
+                    <ul class="list-disc list-inside space-y-2 text-gray-600">
+                        <li><strong>Synchronized Plots</strong>: Visualizes pupillometry, gaze position, fixations, saccades, and events on a shared time axis.</li>
+                        <li><strong>Interactive Navigation</strong>: Use the standard Matplotlib toolbar to zoom and pan. A horizontal scrollbar allows for easy navigation through long recordings.</li>
+                        <li><strong>Statistical Analysis on Selection</strong>: Click and drag on any plot to select a time range. The tool instantly calculates and displays descriptive statistics (mean, median, std dev, etc.) for all data types within that specific interval.</li>
+                        <li><strong>Event and Blink Visualization</strong>: Events are marked with vertical lines and labels, while blinks are shown as shaded regions, providing context to the time-series data.</li>
+                        <li><strong>Flexible Data Loading</strong>: Can load data from a full SPEED analysis output folder or directly from an un-enriched data folder.</li>
                     </ul> 
                 </div>
             </section>

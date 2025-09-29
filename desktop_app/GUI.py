@@ -17,6 +17,7 @@ from ultralytics import YOLO
 from src.speed_analyzer.analysis_modules.dicom_converter import convert_to_dicom, load_from_dicom 
 from desktop_app.data_viewer import DataViewerWindow
 
+from desktop_app.data_plotter import DataPlotterWindow
 # Importazione della libreria LSL
 try:
     from pylsl import StreamInfo, StreamOutlet
@@ -735,7 +736,7 @@ OFFICIAL_YOLO_CLS_MODELS = [
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.3.5")
+        self.root.title("SPEED v5.3.6")
         # --- MODIFICA: Avvia a schermo intero ---
         self.root.state('zoomed')
 
@@ -985,7 +986,7 @@ class SpeedApp:
         self.nsi_button.pack(fill=tk.X, pady=5)
         nsi_info_label = tk.Label(post_analysis_frame, text="Requires at least 2 defined AOIs. Enabled after 'Run Full Analysis'.", fg="grey", font=('Helvetica', 8))
         nsi_info_label.pack(anchor='w')
-
+        
         # --- NUOVO: Pulsante per EyeNet ---
         eyenet_separator = ttk.Separator(post_analysis_frame, orient='horizontal')
         eyenet_separator.pack(fill='x', pady=10)
@@ -994,6 +995,8 @@ class SpeedApp:
         eyenet_info_label = tk.Label(post_analysis_frame, text="Launch the EyeNet application for advanced neural analysis.", fg="grey", font=('Helvetica', 8))
         eyenet_info_label.pack(anchor='w')
 
+        self.data_plotter_button = tk.Button(post_analysis_frame, text="Open Data Plotter...", command=self.open_data_plotter, state=tk.NORMAL, bg='#B2EBF2')
+        self.data_plotter_button.pack(fill=tk.X, pady=5)
 
         yolo_classify_frame = tk.LabelFrame(right_column, text="6. Classify Detections", padx=5, pady=5)
         yolo_classify_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
@@ -1734,6 +1737,7 @@ class SpeedApp:
         # Logica per il pulsante NSI
         can_run_nsi = self.analysis_completed and len(self.user_defined_aois) >= 2
         self.nsi_button.config(state=tk.NORMAL if can_run_nsi else tk.DISABLED)
+        self.data_plotter_button.config(state=tk.NORMAL if  self.analysis_completed else tk.DISABLED)
 
     def open_nsi_calculator(self):
         """Apre la finestra per il calcolo dell'NSI."""
@@ -1747,6 +1751,14 @@ class SpeedApp:
     def launch_eyenet(self):
         """Placeholder function to launch the EyeNet application."""
         messagebox.showinfo("EyeNet Launcher", "This will launch the EyeNet application in a future version.", parent=self.root)
+
+    def open_data_plotter(self):
+        unenriched_dir = self.unenriched_dir_var.get().strip()
+        if not unenriched_dir or not Path(unenriched_dir).is_dir():
+            messagebox.showerror("Error", "La cartella 'Un-enriched' non è valida o non esiste.", parent=self.root)
+            return
+        
+        DataPlotterWindow(self.root, Path(unenriched_dir))
 
     def _get_common_paths(self):
         output_dir = self.output_dir_entry.get().strip()

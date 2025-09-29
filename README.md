@@ -1,6 +1,6 @@
-# SPEED v5.3.5 - labScoc Software Processing and Extraction of Eye tracking Data
-
-Desktop App & Analysis Package
+ # SPEED v5.3.5 - labScoc Software Processing and Extraction of Eye tracking Data
+ 
+ Desktop App & Analysis Package
 
 *An Advanced Eye-Tracking Data Analysis Software*
 
@@ -9,24 +9,25 @@ SPEED is a Python-based project for processing, analyzing, and visualizing eye-t
 1.  **SPEED Desktop App**: A user-friendly GUI application for running a full analysis pipeline, designed for end-users and researchers.
 2.  **`speed-analyzer`**[![PyPI version](https://img.shields.io/pypi/v/speed-analyzer.svg)](https://pypi.org/project/speed-analyzer/): A Python package for developers who want to integrate the analysis logic into their own scripts.
 3.  **`speedAnalyzerR`**: An experimental command-line package for the R programming language. Documentation -> [CLICK HERE](https://danielelozzi.github.io/SPEED)
-
-This version supports GPU acceleration for YOLO analysis and also offers three powerful AOI definition methods:
+ 
+ This version supports GPU acceleration for YOLO analysis and also offers four powerful AOI definition methods:
 1.  **Static AOI**: A fixed rectangle for stationary scenes.
 2.  **Dynamic AOI (Object Tracking)**: An AOI that automatically follows a selected object detected by YOLO.
 3.  **Dynamic AOI (Manual Keyframes)**: A user-defined AOI path created by setting its position and size at key moments in the video.
-4.  **Real-time visualization**: A real-time visualization of external and internal camera with YOLO AOI and manual multiple AOI, allowing the visualization of blink, pupillometry, fragmentation and events management. 
-5. **Data Viewer**: A separate window that allow the visualization of DICOM/BIDS metadata and the visualization/plot the data.
-6. **Multi-Task YOLO**: Pre-trained and custom object detection, segmentation, pose estimation, and oriented bounding box (OBB) detection using various YOLO models.
-
-7. **Advanced Tracking and Re-identification (Re-ID)**: Utilize robust trackers like BoT-SORT and ByteTrack to maintain object identities across frames, even through occlusions. This is crucial for accurately analyzing interactions with specific objects or people over time.
-7. **Video-in-Video**: A specialized video generation mode that replaces the scene camera view with the on-screen content the user is watching, synchronized with gaze and events.
----
+4.  **Surface from Markers/QR Codes**: Define a dynamic, non-rectangular surface for enrichment by mapping its corners to ArUco or QR code markers.
+5.  **Real-time visualization**: A real-time visualization of external and internal camera with multi-task YOLO, dynamic AOIs, and LSL streaming. It allows for live visualization of blinks, pupillometry, fragmentation, and event management.
+6.  **Data Viewer**: A separate, powerful window that allows for the interactive visualization of BIDS/DICOM/Un-enriched data, with video playback, event editing, on-the-fly YOLO analysis, and data export.
+7.  **Data Plotter**: An interactive tool to plot time-series data (pupil, gaze, fixations, etc.) and calculate statistics on user-selected time ranges.
+8.  **Multi-Task YOLO**: Pre-trained and custom object detection, segmentation, pose estimation, and oriented bounding box (OBB) detection using various YOLO models.
+9.  **Advanced Tracking and Re-identification (Re-ID)**: Utilize robust trackers like BoT-SORT and ByteTrack to maintain object identities across frames, even through occlusions. This is crucial for accurately analyzing interactions with specific objects or people over time.
+10. **Video-in-Video**: A specialized video generation mode that replaces the scene camera view with the on-screen content the user is watching, synchronized with gaze and events.
+ ---
 * **Interactive NSI Calculator**: A post-analysis tool to calculate the Normalized Switching Index within user-defined time windows.
-
+ 
 ## 1. SPEED Desktop Application (For End Users)
-
+ 
 An application with a graphical user interface (GUI) for a complete, visually-driven analysis workflow.
-
+ 
 ### How to Use the Application
 1.  **Download the latest version**: Go to the [Releases page](https://github.com/danielelozzi/SPEED/releases) and download the `.zip` file for your operating system (Windows or macOS).
 2.  **Extract and Run**: Unzip the file and run the `SpeedApp` executable.
@@ -35,14 +36,14 @@ An application with a graphical user interface (GUI) for a complete, visually-dr
     - If you do not provide an "Enriched" data folder, a **"Define AOI..."** button will become active.
     - Click it to choose your preferred AOI method (Static, Dynamic Auto, or Dynamic Manual) and follow the on-screen instructions in the interactive editor.
     - Manage events, run the analysis, and generate outputs as before.
-
-
+ 
+ 
 ---
-
+ 
 ## 2. `speed-analyzer` (Python Package for Developers)
-
+ 
 The core analysis engine of SPEED, now available as a reusable package. It's designed for automation and integration into custom data pipelines.
-
+ 
 ### Installation from PyPI
 You can install the package directly from the Python Package Index (PyPI) using pip:
 ```bash
