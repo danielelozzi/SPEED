@@ -77,6 +77,17 @@ class DataPlotterWindow(tk.Toplevel):
         )
         self.selection_patches = []
 
+        # --- NUOVO: Aggiunta guida comandi ---
+        controls_guide_text = (
+            "Controls:\n"
+            "• Zoom: Mouse Wheel\n"
+            "• Pan: Shift + Mouse Wheel\n"
+            "• Stats: Left-Click + Drag"
+        )
+        self.fig.text(0.99, 0.98, controls_guide_text,
+                      ha='right', va='top', fontsize=8,
+                      bbox=dict(boxstyle='round,pad=0.5', fc='lightyellow', alpha=0.7))
+
         self._plot_data() # Disegna i dati
         self.setup_view() # Imposta la vista iniziale e la scrollbar
 
