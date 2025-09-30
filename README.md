@@ -355,7 +355,7 @@ conda create --name speed
 conda activate speed
 conda install pip
 conda install git
-git clone https://github.com/danielelozzi/SPEED
+git clone https://github.com/danielelozzi/SPEED.git
 ```
 4. **Install the required libraries**:
 ```bash
