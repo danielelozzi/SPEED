@@ -354,6 +354,8 @@ To run the project from source or contribute to development, you'll need Python 
 conda create --name speed
 conda activate speed
 conda install pip
+conda install git
+git clone https://github.com/danielelozzi/SPEED
 ```
 4. **Install the required libraries**:
 ```bash
