@@ -59,6 +59,9 @@ class DataPlotterWindow(tk.Toplevel):
         toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
         toolbar.update()
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        # --- NUOVO: Connessione dell'evento di scroll del mouse per lo zoom ---
+        self.fig.canvas.mpl_connect('scroll_event', self.on_mouse_scroll)
         
         # --- NUOVO: Scrollbar orizzontale ---
         self.scrollbar = ttk.Scrollbar(plot_frame, orient=tk.HORIZONTAL, command=self.on_scroll)
@@ -87,6 +90,43 @@ class DataPlotterWindow(tk.Toplevel):
     def on_close(self):
         plt.close(self.fig)
         self.destroy()
+
+    def on_mouse_scroll(self, event):
+        """Callback per lo zoom con la rotellina del mouse."""
+        ax = event.inaxes
+        if ax is None:
+            return
+
+        x_min, x_max = ax.get_xlim()
+        x_range = x_max - x_min
+
+        # Se il tasto Shift è premuto, esegui lo scorrimento (pan)
+        if event.key == 'shift':
+            # Fattore di scorrimento (più è piccolo, più veloce è lo scroll)
+            pan_factor = 0.1
+            pan_amount = x_range * pan_factor
+
+            if event.button == 'up': # Scroll verso l'alto/destra
+                new_x_min = x_min - pan_amount
+                new_x_max = x_max - pan_amount
+            else: # Scroll verso il basso/sinistra
+                new_x_min = x_min + pan_amount
+                new_x_max = x_max + pan_amount
+        else: # Altrimenti, esegui lo zoom
+            # Fattore di zoom
+            zoom_factor = 1.1 if event.button == 'up' else 1 / 1.1
+            
+            # Posizione del cursore come punto focale dello zoom
+            x_cursor = event.xdata
+            
+            # Calcola i nuovi limiti per lo zoom
+            new_x_min = x_cursor - (x_cursor - x_min) / zoom_factor
+            new_x_max = x_cursor + (x_max - x_cursor) / zoom_factor
+
+        # Applica i nuovi limiti
+        ax.set_xlim(new_x_min, new_x_max)
+        
+        self.canvas.draw_idle()
 
     def _load_data(self):
         """Carica tutti i file CSV necessari dalla cartella di output."""
