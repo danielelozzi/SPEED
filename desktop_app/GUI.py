@@ -1709,6 +1709,7 @@ class SpeedApp:
             if self.yolo_var.get():
                 analysis_args["yolo_models"] = yolo_models_to_run
                 analysis_args["yolo_detections_df"] = yolo_df_to_use
+                analysis_args["tracker_config_path"] = yolo_tracker_config
 
             run_full_analysis(**analysis_args)
 
