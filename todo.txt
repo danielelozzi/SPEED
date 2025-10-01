@@ -7,3 +7,6 @@ sovrapposizione delle info dai tre modelli nel video
 implementare taglio QR code direttamente da SPEED
 rete neurale
 multisoggetto
+apertura occhio come CSV 
+manuale e guida e link
+credits
