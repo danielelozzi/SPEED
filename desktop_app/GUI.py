@@ -1693,21 +1693,24 @@ class SpeedApp:
             concatenated_video_path_str = str(
                 self.concatenated_video_path) if self.concatenated_video_path else None
             # --- FINE ---
+            
+            analysis_args = {
+                "raw_data_path": self.raw_dir_var.get(),
+                "unenriched_data_path": self.unenriched_dir_var.get(),
+                "enriched_data_paths": self.enriched_dir_paths if not self.user_defined_aois else None,
+                "output_path": output_dir,
+                "subject_name": subj_name,
+                "events_df": final_events_df,
+                "defined_aois": self.user_defined_aois,
+                "concatenated_video_path": concatenated_video_path_str,
+                "generate_video": False
+            }
 
-            run_full_analysis(
-                raw_data_path=self.raw_dir_var.get(),
-                unenriched_data_path=self.unenriched_dir_var.get(),
-                enriched_data_paths=self.enriched_dir_paths if not self.user_defined_aois else None,
-                output_path=output_dir,
-                subject_name=subj_name,
-                events_df=final_events_df,
-                yolo_models=yolo_models_to_run if self.yolo_var.get() else None,
-                defined_aois=self.user_defined_aois,
-                yolo_detections_df=yolo_df_to_use, # Passa il df filtrato se disponibile
-                tracker_config_path=yolo_tracker_config, # Passa il file di config del tracker
-                concatenated_video_path=concatenated_video_path_str, # Passa il percorso del video ViV
-                generate_video=False # Non generare il video da qui
-            )
+            if self.yolo_var.get():
+                analysis_args["yolo_models"] = yolo_models_to_run
+                analysis_args["yolo_detections_df"] = yolo_df_to_use
+
+            run_full_analysis(**analysis_args)
 
             messagebox.showinfo("Success", f"Full analysis completed.\nResults in: {output_dir}")
         except Exception as e:

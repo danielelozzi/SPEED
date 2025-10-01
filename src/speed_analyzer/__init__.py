@@ -199,7 +199,8 @@ def run_full_analysis(
     plot_selections: Optional[Dict[str, bool]] = None,
     generate_video: bool = False, video_options: Optional[Dict[str, Any]] = None,
     concatenated_video_path: Optional[str] = None,
-    defined_aois: Optional[List[Dict[str, Any]]] = None
+    defined_aois: Optional[List[Dict[str, Any]]] = None,
+    tracker_config_path: Optional[str] = None
 ): # MODIFIED: Removed return type hint to match previous state
     raw_dir = Path(raw_data_path)
     unenriched_dir = Path(unenriched_data_path)
@@ -235,7 +236,8 @@ def run_full_analysis(
             subj_name=subject_name,
             yolo_detections_df=yolo_detections_df,
             yolo_models=yolo_models,
-            custom_classes=yolo_custom_classes # Nuovo
+            custom_classes=yolo_custom_classes,
+            tracker_config_path=tracker_config_path
         )
         logging.info("--- YOLO ANALYSIS COMPLETE ---")
 
