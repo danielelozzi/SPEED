@@ -419,6 +419,7 @@ pip install -r requirements.txt
 ```bash
 # Navigate to the desktop_app folder
 cd SPEED
+conda activate speed
 python -m desktop_app.GUI
 ```
 ### Setup and Analysis:
