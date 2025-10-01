@@ -6,3 +6,4 @@ selezionare e deselezionare classi e id per detect, pose, segment sia per editor
 sovrapposizione delle info dai tre modelli nel video
 implementare taglio QR code direttamente da SPEED
 rete neurale
+multisoggetto
