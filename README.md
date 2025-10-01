@@ -382,6 +382,9 @@ To run the project from source or contribute to development, you'll need Python 
 1. **Install Anaconda**: [Link](https://www.anaconda.com/)
 2. *(Optional)* Install CUDA Toolkit: For GPU acceleration with NVIDIA. [Link](https://developer.nvidia.com/cuda-downloads)
 3. **Create a virtual environment**:
+
+Open Anaconda Prompt
+
 ```bash
 conda create --name speed
 conda activate speed
@@ -390,6 +393,15 @@ conda install git
 git clone https://github.com/danielelozzi/SPEED.git
 ```
 4. **Install the required libraries**:
+
+enter in the SPEED folder
+
+```bash
+cd SPEED
+```
+
+install requirements
+
 ```bash
 pip install -r requirements.txt
 ```
