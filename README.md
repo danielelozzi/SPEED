@@ -23,6 +23,28 @@ SPEED is a Python-based project for processing, analyzing, and visualizing eye-t
 10. **Video-in-Video**: A specialized video generation mode that replaces the scene camera view with the on-screen content the user is watching, synchronized with gaze and events.
  ---
 * **Interactive NSI Calculator**: A post-analysis tool to calculate the Normalized Switching Index within user-defined time windows.
+
+---
+
+## Table of Contents
+
+- [1. SPEED Desktop Application (For End Users)](#1-speed-desktop-application-for-end-users)
+- [2. `speed-analyzer` (Python Package for Developers)](#2-speed-analyzer-python-package-for-developers)
+  - Installation from PyPI
+  - How to Use the Package
+  - Choose Your AOI Strategy
+  - Real-time
+- 3. Docker Container (For Maximum Reproducibility)
+- The Modular Workflow (GUI)
+  - Computer Vision Analysis with YOLO 🤖
+- R package
+- Environment Setup (For Development) ⚙️
+- How to Use the Application from Source 🚀
+- 🧪 Synthetic Data Generator (`generate_synthetic_data.py`)
+- Export to BIDS Format
+- DICOM Integration (Import/Export)
+- ✍️ Authors & Citation
+- 💻 Artificial Intelligence disclosure
  
 ## 1. SPEED Desktop Application (For End Users)
  
