@@ -28,22 +28,32 @@ SPEED is a Python-based project for processing, analyzing, and visualizing eye-t
 
 ## Table of Contents
 
+
 - [1. SPEED Desktop Application (For End Users)](#1-speed-desktop-application-for-end-users)
 - [2. `speed-analyzer` (Python Package for Developers)](#2-speed-analyzer-python-package-for-developers)
-  - Installation from PyPI
-  - How to Use the Package
-  - Choose Your AOI Strategy
-  - Real-time
-- 3. Docker Container (For Maximum Reproducibility)
-- The Modular Workflow (GUI)
-  - Computer Vision Analysis with YOLO 🤖
-- R package
-- Environment Setup (For Development) ⚙️
-- How to Use the Application from Source 🚀
-- 🧪 Synthetic Data Generator (`generate_synthetic_data.py`)
-- Export to BIDS Format
-- DICOM Integration (Import/Export)
-- ✍️ Authors & Citation
+  - [Installation from PyPI](#installation-from-pypi)
+  - [How to Use the Package](#how-to-use-the-package)
+  - [Choose Your AOI Strategy](#choose-your-aoi-strategy)
+  - [Real-time](#real-time)
+  - [Command-Line Interface (for Developers)](#command-line-interface-for-developers)
+- [3. Docker Container (For Maximum Reproducibility)](#3-docker-container-for-maximum-reproducibility)
+- [The Modular Workflow (GUI)](#the-modular-workflow-gui)
+  - [Step 1: Run Core Analysis](#step-1-run-core-analysis)
+  - [Step 2: Generate Outputs On-Demand](#step-2-generate-outputs-on-demand)
+    - [Generate Plots 📊](#generate-plots-)
+    - [Generate Videos 🎬](#generate-videos-)
+    - [Post-Analysis Tools 🛠️](#post-analysis-tools-️)
+  - [Computer Vision Analysis with YOLO 🤖](#computer-vision-analysis-with-yolo-)
+- [R package](#r-package)
+- [Environment Setup (For Development) ⚙️](#environment-setup-for-development-️)
+- [How to Use the Application from Source 🚀](#how-to-use-the-application-from-source-)
+- [🧪 Synthetic Data Generator (`generate_synthetic_data.py`)](#-synthetic-data-generator-generate_synthetic_datapy)
+- [Export to BIDS Format](#export-to-bids-format)
+- [DICOM Integration (Import/Export)](#dicom-integration-importexport)
+- [R package (Experimental)](#r-package)
+- [✍️ Authors & Citation](#-authors--citation)
+- [💻 Artificial Intelligence disclosure](#-artificial-intelligence-disclosure)
+
 - 💻 Artificial Intelligence disclosure
  
 ## 1. SPEED Desktop Application (For End Users)
