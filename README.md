@@ -405,7 +405,13 @@ install requirements
 ```bash
 pip install -r requirements.txt
 ```
+5. **(optional) Install Pytorch CUDA**:
 
+[https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
+
+```bash
+<command>
+```
 ---
 
 ## How to Use the Application from Source 🚀
