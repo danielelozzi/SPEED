@@ -210,7 +210,7 @@ def run_analysis(subj_name: str, data_dir_str: str, output_dir_str: str, un_enri
     if all_results:
         results_df = pd.DataFrame(all_results)
         results_df.to_csv(output_dir / f'summary_results_{subj_name}.csv', index=False)
-        results_df.to_excel(output_dir / f'summary_results_{subj_name}.xls', index=False)
+        results_df.to_excel(output_dir / f'summary_results_{subj_name}.xlsx', index=False)
         logging.info("\nAggregated summary results saved.")
     else:
         logging.warning("\nNo results were generated from the analysis.")
