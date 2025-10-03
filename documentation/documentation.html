@@ -67,9 +67,9 @@
                     <li><a href="#event-analysis" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Event-based Analysis</a></li>
                     <li><a href="#video-generator" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Video Generator</a></li>
                     <li><a href="#yolo-analyzer" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">YOLO Analyzer</a></li>
-                    <li><a href="#reid-analyzer" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Re-ID Analyzer</a></li>
-                    <li><a href="#interactive-editor" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Interactive Editor</a></li>
+                    <li><a href="#data-viewer" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Data Viewer</a></li>
                     <li><a href="#data-plotter" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">Data Plotter</a></li>
+                    <li><a href="#lsl-viewer" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">LSL Time Series Viewer</a></li>
                     <li><a href="#nsi-calculator" class="nav-link block px-4 py-2 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors duration-200">NSI Calculator</a></li>
                 </ul>
             </nav>
@@ -119,16 +119,16 @@
                         <p class="text-gray-600">Applies YOLO models to detect objects and correlates this information with eye-tracking data to generate statistics.</p>
                     </div>
                     <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
-                        <h3 class="font-bold text-xl mb-2 text-indigo-600">Re-ID Analyzer</h3>
-                        <p class="text-gray-600">Performs re-identification analysis on tracked objects to compute similarity scores, helping to determine if different track IDs belong to the same object.</p>
-                    </div> 
-                    <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
                         <h3 class="font-bold text-xl mb-2 text-indigo-600">Data Viewer / Editor</h3>
                         <p class="text-gray-600">A powerful GUI tool for visualizing BIDS/DICOM/Un-enriched data, adding/editing events, running multi-task YOLO analysis, and exporting videos with custom overlays.</p>
                     </div>
                     <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
                         <h3 class="font-bold text-xl mb-2 text-indigo-600">Data Plotter</h3>
                         <p class="text-gray-600">An interactive tool to plot time-series data (pupil, gaze, fixations, etc.) and calculate statistics on user-selected time ranges.</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+                        <h3 class="font-bold text-xl mb-2 text-indigo-600">LSL Time Series Viewer</h3>
+                        <p class="text-gray-600">A real-time plotting tool that discovers and displays any LSL data stream on the network, ideal for monitoring live data.</p>
                     </div>
                     <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
                         <h3 class="font-bold text-xl mb-2 text-indigo-600">NSI Calculator</h3>
@@ -323,41 +323,21 @@
                 </div>
             </section>
 
-            <!-- Re-ID Analyzer Section -->
-            <section id="reid-analyzer" class="mb-16 scroll-mt-20">
-                <h2 class="text-3xl font-bold text-gray-900 border-b pb-4 mb-6">Re-ID Analyzer (<code>reid_analyzer.py</code>)</h2>
-                <p class="text-gray-600 mb-8">This module provides the <code>ReIDAnalyzer</code> class, which performs **Re-identification (Re-ID)** on objects previously detected by YOLO. Its purpose is to calculate a similarity score between different tracked instances to determine if they are the same object, even if they disappear and reappear with a new `track_id`.</p>
-                
-                <div class="bg-white p-6 rounded-lg border border-gray-200">
-                    <h3 class="text-2xl font-semibold text-gray-800 mb-3">Class: <code>ReIDAnalyzer</code></h3>
-                    <p class="text-gray-600 mb-4">Manages the Re-ID workflow, from loading data and models to computing and saving the similarity matrix.</p>
-                    <h4 class="font-semibold text-lg mt-4 mb-2">Key Methods:</h4>
-                    <ul class="list-disc list-inside space-y-2 text-gray-600">
-                        <li><code>__init__(...)</code>: Initializes the analyzer with paths to the analysis output and the original video.</li>
-                        <li><code>load_model(...)</code>: Loads a specified Re-ID model (e.g., `yolov8n-reid.pt`).</li>
-                        <li><code>extract_features(...)</code>: Processes the video to extract a feature vector (embedding) for each specified object instance. It crops the object from each frame and feeds it to the Re-ID model.</li>
-                        <li><code>compute_similarity_matrix(...)</code>: Calculates the cosine similarity between the feature vectors of every pair of object instances, producing a matrix of scores.</li>
-                        <li><code>run(...)</code>: The main method that orchestrates the entire process: loading the model, extracting features for a given class, computing the similarity matrix, and saving the results to `reid_similarity_matrix.csv`.</li>
-                    </ul> 
-                </div>
-            </section>
-
-
-            <!-- Interactive Video Editor Section -->
-            <section id="interactive-editor" class="mb-16 scroll-mt-20">
-                <h2 class="text-3xl font-bold text-gray-900 border-b pb-4 mb-6">Data Viewer / Editor (<code>interactive_video_editor.py</code>)</h2>
+            <!-- Data Viewer Section -->
+            <section id="data-viewer" class="mb-16 scroll-mt-20">
+                <h2 class="text-3xl font-bold text-gray-900 border-b pb-4 mb-6">Data Viewer (<code>data_viewer.py</code>)</h2>
                 <p class="text-gray-600 mb-8">This module provides a comprehensive graphical interface for advanced, interactive exploration and analysis of a recorded session. It can load data from BIDS, DICOM, or un-enriched folders and combines event management with powerful, on-the-fly computer vision analysis.</p>
                 
                 <div class="bg-white p-6 rounded-lg border border-gray-200">
-                    <h3 class="text-2xl font-semibold text-gray-800 mb-3">Class: <code>InteractiveVideoEditor</code> (Data Viewer)</h3>
+                    <h3 class="text-2xl font-semibold text-gray-800 mb-3">Class: <code>DataViewerWindow</code></h3>
                     <p class="text-gray-600 mb-4">A Toplevel Tkinter window that allows users to visualize data, manage events, and run complex analyses directly on a video.</p>
-                    <h4 class="font-semibold text-lg mt-4 mb-2">Key Features:</h4>
+                    <h4 class="font-semibold text-lg mt-4 mb-2">Key Methods:</h4>
                     <ul class="list-disc list-inside space-y-2 text-gray-600">
-                        <li><strong>Event Management</strong>: Add, remove, and drag-and-drop event markers directly on an interactive timeline.</li>
+                        <li><strong>Flexible Data Loading</strong>: Load data from BIDS, DICOM, un-enriched folders, or even a single video file.</li>
+                        <li><strong>Interactive Timeline</strong>: Play video with synchronized audio. Add, remove, and drag-and-drop event markers directly on the timeline.</li>
                         <li><strong>Multi-Task YOLO Analysis</strong>: Select and run different YOLO models for object detection, segmentation, and pose estimation simultaneously. The results from all tasks are merged and visualized.</li>
                         <li><strong>Interactive Filtering</strong>: Use a tabbed interface to view detected objects, segmented areas, and poses. Users can toggle the visibility of entire classes or individual tracked instances.</li>
-                        <li><strong>Audio Playback</strong>: Plays the video with its original audio, which can be muted or unmuted.</li>
-                        <li><strong>Overlay Control</strong>: All YOLO results (bounding boxes, segmentation masks, and pose skeletons) are overlaid on the video, respecting the user's filter selections.</li>
+                        <li><strong>Rich Overlays</strong>: Toggle visualizations for gaze point, gaze path, dynamic heatmaps, pupillometry plots, and AOIs.</li>
                         <li><strong>Video Export</strong>: Export the current view as a new video file, with all selected overlays and optional audio baked in.</li>
                         <li><strong>Data Persistence</strong>: When saving, the editor returns both the modified event data and a DataFrame containing only the YOLO detections that were visible (not filtered out) by the user.</li>
                     </ul> 
@@ -379,6 +359,26 @@
                         <li><strong>Statistical Analysis on Selection</strong>: Click and drag on any plot to select a time range. The tool instantly calculates and displays descriptive statistics (mean, median, std dev, etc.) for all data types within that specific interval.</li>
                         <li><strong>Event and Blink Visualization</strong>: Events are marked with vertical lines and labels, while blinks are shown as shaded regions, providing context to the time-series data.</li>
                         <li><strong>Flexible Data Loading</strong>: Can load data from a full SPEED analysis output folder or directly from an un-enriched data folder.</li>
+                    </ul> 
+                </div>
+            </section>
+
+            <!-- LSL Time Series Viewer Section -->
+            <section id="lsl-viewer" class="mb-16 scroll-mt-20">
+                <h2 class="text-3xl font-bold text-gray-900 border-b pb-4 mb-6">LSL Time Series Viewer (<code>lsl_time_series_viewer.py</code>)</h2>
+                <p class="text-gray-600 mb-8">This module provides a real-time data visualization tool for any data stream available on the local network via <strong>Lab Streaming Layer (LSL)</strong>. It is designed to function like a simple EEG or oscilloscope, plotting multi-channel numerical data as it arrives.</p>
+                
+                <div class="bg-white p-6 rounded-lg border border-gray-200">
+                    <h3 class="text-2xl font-semibold text-gray-800 mb-3">Class: <code>LSLTimeSeriesViewer</code></h3>
+                    <p class="text-gray-600 mb-4">A Toplevel Tkinter window that discovers, connects to, and plots LSL streams.</p>
+                    <h4 class="font-semibold text-lg mt-4 mb-2">Key Features:</h4>
+                    <ul class="list-disc list-inside space-y-2 text-gray-600">
+                        <li><strong>Stream Discovery</strong>: Automatically scans the network for available LSL streams and displays them in a list for selection.</li>
+                        <li><strong>Multi-Stream Visualization</strong>: Can connect to and display multiple streams simultaneously on the same plot.</li>
+                        <li><strong>Real-time Plotting</strong>: Uses Matplotlib to render scrolling time-series plots, showing the most recent data within a configurable time window (default: 10 seconds).</li>
+                        <li><strong>Event Marker Support</strong>: If a stream of type 'Markers' is selected, it displays incoming string events as labeled vertical lines on the plot.</li>
+                        <li><strong>Thread-Safe Operation</strong>: All LSL data reception and processing happens in background threads to ensure the user interface remains responsive.</li>
+                        <li><strong>Simple Controls</strong>: Includes buttons to refresh the stream list and to start/stop the real-time visualization.</li>
                     </ul> 
                 </div>
             </section>

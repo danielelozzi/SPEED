@@ -12,12 +12,22 @@ import sys
 import webbrowser
 import threading
 from PIL import Image, ImageTk
+from collections import deque
+import numpy as np
 from src.speed_analyzer.analysis_modules.bids_converter import convert_to_bids, load_from_bids
 from ultralytics import YOLO
 from src.speed_analyzer.analysis_modules.dicom_converter import convert_to_dicom, load_from_dicom 
 from desktop_app.data_viewer import DataViewerWindow
 
 from desktop_app.data_plotter import DataPlotterWindow
+from desktop_app.lsl_time_series_viewer import LSLTimeSeriesViewer
+# --- NUOVO: Import per il viewer LSL Time Series ---
+try:
+    from pylsl import resolve_streams, StreamInlet
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+except ImportError:
+    resolve_streams, StreamInlet, plt, FigureCanvasTkAgg = None, None, None, None
 # Importazione della libreria LSL
 try:
     from pylsl import StreamInfo, StreamOutlet
@@ -90,17 +100,20 @@ class LSLBridge:
         """
         Ciclo principale che recupera dati dall'analizzatore e li invia a LSL.
         """
+        device_name = self.analyzer.device.name if self.analyzer.device else "SPEED_Realtime"
+
         # --- Setup Stream Gaze ---
-        info_gaze = StreamInfo('PupilNeonGaze', 'Gaze', 3, 120, 'float32', 'PupilNeonGazeID1')
+        gaze_stream_name = f"{device_name}_Neon Gaze"
+        info_gaze = StreamInfo(gaze_stream_name, 'Gaze', 3, 120, 'float32', f'{device_name}_GazeID1')
         info_gaze.desc().append_child_value("manufacturer", "Pupil Labs")
         channels_gaze = info_gaze.desc().append_child("channels")
-        channels_gaze.append_child("channel").append_child_value("label", "x_position_px")
-        channels_gaze.append_child("channel").append_child_value("label", "y_position_px")
-        channels_gaze.append_child("channel").append_child_value("label", "pupil_diameter_mm")
+        channels_gaze.append_child("channel").append_child_value("label", "x")
+        channels_gaze.append_child("channel").append_child_value("label", "y")
+        channels_gaze.append_child("channel").append_child_value("label", "PupilDiameter")
         self.outlet_gaze = StreamOutlet(info_gaze)
 
         # --- Setup Stream Eventi ---
-        info_event = StreamInfo('GUI_Events', 'Markers', 1, 0, 'string', 'GUI_EventID1')
+        info_event = StreamInfo(f'{device_name}_Neon Events', 'Markers', 1, 0, 'string', f'{device_name}_EventID1')
         self.outlet_event = StreamOutlet(info_event)
 
         print("Stream LSL (Gaze, Events) creati. In attesa di dati video...")
@@ -736,7 +749,7 @@ OFFICIAL_YOLO_CLS_MODELS = [
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.3.7.1")
+        self.root.title("SPEED v5.3.8")
         # --- MODIFICA: Avvia a schermo intero ---
         self.root.state('zoomed')
 
@@ -892,6 +905,9 @@ class SpeedApp:
         realtime_frame = tk.LabelFrame(left_column, text="3. Real-time Analysis", padx=10, pady=10)
         realtime_frame.pack(pady=(3, 15), ipadx=2, ipady=2, fill=tk.X)
         tk.Button(realtime_frame, text="START REAL-TIME STREAM", command=self.start_realtime_stream, font=('Helvetica', 10, 'bold'), bg='#a5d6a7').pack(pady=5, fill=tk.X)
+        # --- NUOVO PULSANTE PER IL VIEWER LSL TIME SERIES ---
+        tk.Button(realtime_frame, text="START LSL TIME SERIES VIEWER", command=self.start_lsl_timeseries_viewer, font=('Helvetica', 10, 'bold'), bg='#81d4fa').pack(pady=5, fill=tk.X)
+        # --- FINE NUOVO PULSANTE ---
 
         # --- COLONNA DESTRA: Analisi, Filtri, Classificazione, Export, Generazione ---
         right_column = tk.Frame(main_frame)
@@ -1303,6 +1319,12 @@ class SpeedApp:
 
     def start_realtime_stream(self):
         RealtimeDisplayWindow(self.root)
+
+    # --- NUOVA FUNZIONE PER AVVIARE IL VIEWER LSL TIME SERIES ---
+    def start_lsl_timeseries_viewer(self):
+        """Avvia la finestra per visualizzare stream LSL di serie temporali."""
+        LSLTimeSeriesViewer(self.root)
+    # --- FINE NUOVA FUNZIONE ---
 
     def open_github(self):
         webbrowser.open_new(r"https://github.com/danielelozzi/SPEED")

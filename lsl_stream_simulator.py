@@ -8,16 +8,16 @@ from pylsl import StreamInfo, StreamOutlet, local_clock
 
 # --- COSTANTI DI CONFIGURAZIONE ---
 # Impostazioni dello stream
-GAZE_STREAM_NAME = 'SimulatedGaze'
+GAZE_STREAM_NAME = 'SimulatedDevice_Neon Gaze'
 GAZE_STREAM_TYPE = 'Gaze'
 GAZE_CHANNEL_COUNT = 3  # (x, y, pupil_diameter)
 GAZE_RATE = 120  # Hz
 
-VIDEO_STREAM_NAME = 'SimulatedVideo'
+VIDEO_STREAM_NAME = 'SimulatedDevice_Neon Video'
 VIDEO_STREAM_TYPE = 'Video'
 VIDEO_RATE = 30  # FPS
 
-EVENT_STREAM_NAME = 'SimulatedEvents'
+EVENT_STREAM_NAME = 'SimulatedDevice_Neon Events'
 EVENT_STREAM_TYPE = 'Markers'
 EVENT_RATE = 0.2  # Hz (un evento ogni 5 secondi in media)
 
@@ -118,9 +118,9 @@ if __name__ == "__main__":
     info_gaze = StreamInfo(GAZE_STREAM_NAME, GAZE_STREAM_TYPE, GAZE_CHANNEL_COUNT, GAZE_RATE, 'float32', 'GazeSimID1')
     info_gaze.desc().append_child_value("manufacturer", "Simulated Inc.")
     channels = info_gaze.desc().append_child("channels")
-    channels.append_child("channel").append_child_value("label", "x_position_px")
-    channels.append_child("channel").append_child_value("label", "y_position_px")
-    channels.append_child("channel").append_child_value("label", "pupil_diameter_mm")
+    channels.append_child("channel").append_child_value("label", "x")
+    channels.append_child("channel").append_child_value("label", "y")
+    channels.append_child("channel").append_child_value("label", "PupilDiameter")
     outlet_gaze = StreamOutlet(info_gaze)
 
     # --- Setup Stream Video ---
