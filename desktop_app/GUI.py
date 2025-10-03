@@ -21,6 +21,9 @@ from desktop_app.data_viewer import DataViewerWindow
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from pathlib import Path
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, simpledialog
+from pathlib import Path
 import traceback
 import shutil
 import json
@@ -90,12 +93,10 @@ else:
     critical_libraries_missing = False
     missing_lib_error = None
 
-# --- CLASSE MOTORE PER L'ANALISI IN TEMPO REALE ---
-
 class PupilRealtimeAnalyzer:
     """
-    Gestisce la connessione al dispositivo, lo streaming, l'analisi (YOLO, AOI),
-    la registrazione e lo streaming LSL in un thread separato.
+    Gestisce connessione, streaming modulare, analisi multi-task (YOLO),
+    registrazione video e salvataggio dati grezzi su file CSV.
     """
     def __init__(self):
         # Stato e controllo
@@ -105,48 +106,50 @@ class PupilRealtimeAnalyzer:
         self.main_task = None
         self.output_queue = queue.Queue(maxsize=2)
         self.status_queue = queue.Queue()
+        self.last_frame_size = (1280, 720)
 
         # Dati in tempo reale
-        self.last_gaze_datum = None
-        self.last_scene_frame = None
+        self.last_gaze = None
+        self.last_fixation = None
+        self.last_blink_timestamp = 0
         self.pupil_diameter_history = deque(maxlen=100)
 
         # Moduli di analisi
         self.yolo_models = {}
         self.static_aois = []
+        self.overlay_settings = {}
 
-        # Modulo di registrazione
+        # Modulo di registrazione e salvataggio dati
         self.is_recording = False
         self.recording_path = None
         self.video_writer = None
-        self.events_data = []
+        self.file_handlers = {}
+        self.data_queues = {
+            'gaze': queue.Queue(), 'fixations': queue.Queue(),
+            'blinks': queue.Queue(), 'events': queue.Queue()
+        }
+        self.data_writer_thread = None
 
     def connect(self):
-        """Tenta di trovare e preparare un dispositivo Pupil Labs."""
-        # Questa funzione ora è sincrona e si limita a verificare la disponibilità
-        # della libreria, la connessione vera e propria avviene in `start`.
         if critical_libraries_missing:
             self.status_queue.put(f"Errore: Libreria mancante - {missing_lib_error}")
             return False
-        self.status_queue.put("Pronto per la connessione. Premi 'Start Analysis'.")
+        self.status_queue.put("Pronto per la connessione. Configura e premi 'Start Analysis'.")
         return True
 
-    def start(self, yolo_models_to_load: dict):
-        """Avvia il thread principale per lo streaming e l'analisi."""
+    def start(self, yolo_models_to_load: dict, overlay_settings: dict):
         if self.is_running: return
         self.is_running = True
+        self.overlay_settings = overlay_settings
         self._load_yolo_models(yolo_models_to_load)
         self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self.thread.start()
 
     def stop(self):
-        """Ferma lo streaming e l'analisi."""
         self.is_running = False
-        if self.main_task:
-            self.main_task.cancel()
-        if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=2)
-        self.stop_recording() # Assicura che la registrazione sia finalizzata
+        if self.main_task: self.main_task.cancel()
+        if self.thread and self.thread.is_alive(): self.thread.join(timeout=2)
+        self.stop_recording()
         self.status_queue.put("Streaming fermato.")
 
     def _load_yolo_models(self, models: dict):
@@ -160,7 +163,6 @@ class PupilRealtimeAnalyzer:
                     self.status_queue.put(f"Errore caricamento modello {task}: {e}")
 
     def _run_event_loop(self):
-        """Gestisce il loop asyncio in un thread separato."""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         self.main_task = loop.create_task(self._stream_and_process())
@@ -170,7 +172,6 @@ class PupilRealtimeAnalyzer:
             loop.close()
 
     async def _stream_and_process(self):
-        """Task asincrono principale per la gestione dei dati."""
         try:
             self.status_queue.put("Ricerca del dispositivo...")
             async with Network() as network:
@@ -181,71 +182,97 @@ class PupilRealtimeAnalyzer:
             async with Device.from_discovered_device(dev_info) as device:
                 self.device = device
                 status = await device.get_status()
+                
+                streaming_tasks = []
                 sensor_scene = status.direct_scene_sensor()
-                sensor_gaze = status.direct_gaze_sensor()
-                if not all([sensor_scene.connected, sensor_gaze.connected]):
-                    raise RuntimeError("Sensore video o gaze non connesso.")
-                
-                self.status_queue.put("Streaming avviato.")
-                
-                # Task per ricevere i dati di gaze
-                async def gaze_receiver():
-                    async for gaze in receive_gaze_data(sensor_gaze.url):
-                        if not self.is_running: break
-                        self.last_gaze_datum = gaze
-                        if hasattr(gaze, 'pupil_diameter_mm'):
-                           self.pupil_diameter_history.append(gaze.pupil_diameter_mm)
+                if not sensor_scene.connected: raise RuntimeError("Sensore video non connesso.")
+                streaming_tasks.append(self._video_processor(sensor_scene.url))
 
-                # Task per ricevere e processare il video
-                async def video_processor():
-                    async for frame in receive_video_frames(sensor_scene.url):
-                        if not self.is_running: break
-                        self.last_scene_frame = frame
-                        
-                        processed_frame = self.process_frame(frame.bgr_pixels.copy())
-                        
-                        if self.is_recording and self.video_writer:
-                            self.video_writer.write(processed_frame)
+                save_data_enabled = self.overlay_settings.get("save_data", False)
+                if self.overlay_settings.get("show_gaze") or save_data_enabled:
+                    streaming_tasks.append(self._gaze_receiver(status.direct_gaze_sensor().url))
+                if self.overlay_settings.get("show_fixations") or save_data_enabled:
+                    streaming_tasks.append(self._fixation_receiver(status.direct_fixation_sensor().url))
+                if self.overlay_settings.get("show_blinks") or save_data_enabled:
+                    streaming_tasks.append(self._blink_receiver(status.direct_blinks_sensor().url))
 
-                        if self.output_queue.full(): self.output_queue.get_nowait()
-                        self.output_queue.put(processed_frame)
-
-                await asyncio.gather(gaze_receiver(), video_processor())
+                self.status_queue.put("Streaming avviato...")
+                await asyncio.gather(*streaming_tasks)
         except Exception as e:
             self.status_queue.put(f"Errore critico: {e}")
+            traceback.print_exc()
         finally:
             self.is_running = False
 
+    async def _gaze_receiver(self, url):
+        async for gaze in receive_gaze_data(url):
+            if not self.is_running: break
+            self.last_gaze = gaze
+            if self.is_recording and self.overlay_settings.get("save_data"):
+                self.data_queues['gaze'].put(gaze.to_dict())
+            if self.overlay_settings.get("show_pupil_plot") and hasattr(gaze, 'pupil_diameter_mm'):
+                self.pupil_diameter_history.append(gaze.pupil_diameter_mm)
+
+    async def _fixation_receiver(self, url):
+        async for fixation in receive_fixations(url):
+            if not self.is_running: break
+            self.last_fixation = fixation
+            if self.is_recording and self.overlay_settings.get("save_data"):
+                self.data_queues['fixations'].put(fixation.to_dict())
+
+    async def _blink_receiver(self, url):
+        async for blink in receive_blinks(url):
+            if not self.is_running: break
+            self.last_blink_timestamp = time.time()
+            if self.is_recording and self.overlay_settings.get("save_data"):
+                self.data_queues['blinks'].put(blink.to_dict())
+
+    async def _video_processor(self, url):
+        async for frame in receive_video_frames(url):
+            if not self.is_running: break
+            self.last_frame_size = (frame.width, frame.height)
+            processed_frame = self.process_frame(frame.bgr_pixels.copy())
+            if self.is_recording and self.video_writer:
+                self.video_writer.write(processed_frame)
+            if self.output_queue.full(): self.output_queue.get_nowait()
+            self.output_queue.put(processed_frame)
+
     def process_frame(self, frame):
-        """Applica tutte le analisi e gli overlay a un singolo frame."""
-        # 1. Analisi YOLO
-        if self.yolo_models:
-            main_model = next(iter(self.yolo_models.values()))
-            results = main_model.track(frame, persist=True, verbose=False)
-            frame = results[0].plot()
-
-        # 2. Disegna AOI
-        for aoi in self.static_aois:
-            x1, y1, x2, y2 = aoi['rect']
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 255), 2)
-            cv2.putText(frame, aoi['name'], (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
-
-        # 3. Disegna Gaze e Pupillometria
-        if self.last_gaze_datum:
-            gaze = self.last_gaze_datum
-            h, w, _ = frame.shape
-            center_x, center_y = int(gaze.x * w), int(gaze.y * h)
-            cv2.circle(frame, (center_x, center_y), 20, (0, 0, 255), 2)
+        width, height = self.last_frame_size
         
-        self._draw_pupil_plot(frame)
+        # Esegue tutti i modelli YOLO caricati in sequenza
+        if self.overlay_settings.get("show_yolo") and self.yolo_models:
+            # Usiamo 'frame' come input e output per ogni modello, creando una catena di overlay
+            for task, model in self.yolo_models.items():
+                results = model.track(frame, persist=True, verbose=False)
+                frame = results[0].plot()
+
+        if self.overlay_settings.get("show_aois"):
+            for aoi in self.static_aois:
+                x1, y1, x2, y2 = aoi['rect']
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 255), 2)
+                cv2.putText(frame, aoi['name'], (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
+
+        if self.overlay_settings.get("show_gaze") and self.last_gaze:
+            center_x, center_y = int(self.last_gaze.x * width), int(self.last_gaze.y * height)
+            cv2.circle(frame, (center_x, center_y), 20, (0, 0, 255), 2)
+
+        if self.overlay_settings.get("show_fixations") and self.last_fixation:
+            center_x, center_y = int(self.last_fixation.x * width), int(self.last_fixation.y * height)
+            cv2.rectangle(frame, (center_x - 15, center_y - 15), (center_x + 15, center_y + 15), (0, 255, 0), 2)
+
+        if self.overlay_settings.get("show_blinks") and (time.time() - self.last_blink_timestamp < 0.5):
+             cv2.putText(frame, "BLINK", (50, 50), cv2.FONT_HERSHEY_TRIPLEX, 1.5, (255, 255, 0), 2)
+
+        if self.overlay_settings.get("show_pupil_plot"):
+            self._draw_pupil_plot(frame)
+            
         return frame
 
     def _draw_pupil_plot(self, frame):
-        # (Questa funzione è identica alla versione precedente)
         if not self.pupil_diameter_history: return
         plot_width, plot_height, margin = 200, 50, 10
-        x_pos = frame.shape[1] - plot_width - margin
-        y_pos = margin
+        x_pos, y_pos = frame.shape[1] - plot_width - margin, margin
         sub_frame = frame[y_pos:y_pos + plot_height, x_pos:x_pos + plot_width]
         white_rect = np.ones(sub_frame.shape, dtype=np.uint8) * 255
         res = cv2.addWeighted(sub_frame, 0.75, white_rect, 0.25, 1.0)
@@ -255,13 +282,11 @@ class PupilRealtimeAnalyzer:
         min_val, max_val = min(pupil_data), max(pupil_data)
         if max_val == min_val: max_val += 1
         points = np.array([(i, 1 - ((val - min_val) / (max_val - min_val))) for i, val in enumerate(pupil_data)])
-        points[:, 0] *= (plot_width / len(points))
-        points[:, 1] *= (plot_height - 2)
+        points[:, 0] *= (plot_width / len(points)); points[:, 1] *= (plot_height - 2)
         points = points.astype(np.int32)
         cv2.polylines(frame, [points], isClosed=False, color=(0, 0, 255), thickness=1, shift=np.array([x_pos, y_pos]))
         cv2.putText(frame, "Pupil Diameter", (x_pos, y_pos + plot_height + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 
-    # --- Metodi per Controlli Esterni (AOI, Registrazione, Eventi) ---
     def add_static_aoi(self, name, rect):
         if name and not any(aoi['name'] == name for aoi in self.static_aois):
             self.static_aois.append({'name': name, 'rect': rect})
@@ -270,19 +295,15 @@ class PupilRealtimeAnalyzer:
         self.static_aois = [aoi for aoi in self.static_aois if aoi['name'] != name]
 
     def start_recording(self, folder_path):
-        if not self.last_scene_frame or self.is_recording:
-            return False
-        
+        if self.is_recording: return False
         self.recording_path = Path(folder_path)
-        self.recording_path.mkdir(exist_ok=True)
-        video_file = self.recording_path / 'realtime_output.mp4'
-        
+        self.recording_path.mkdir(exist_ok=True, parents=True)
+        video_file = self.recording_path / 'scene_video_overlayed.mp4'
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        # Usa la risoluzione del frame ricevuto
-        frame_size = (self.last_scene_frame.width, self.last_scene_frame.height)
-        self.video_writer = cv2.VideoWriter(str(video_file), fourcc, 30.0, frame_size)
-        
-        self.events_data = []
+        self.video_writer = cv2.VideoWriter(str(video_file), fourcc, 30.0, self.last_frame_size)
+        if self.overlay_settings.get("save_data"):
+            self.data_writer_thread = threading.Thread(target=self._data_writer_loop, daemon=True)
+            self.data_writer_thread.start()
         self.is_recording = True
         self.status_queue.put(f"REC ● | Salvataggio in: {folder_path}")
         return True
@@ -290,23 +311,220 @@ class PupilRealtimeAnalyzer:
     def stop_recording(self):
         if not self.is_recording: return
         self.is_recording = False
-        if self.video_writer:
-            self.video_writer.release()
-            self.video_writer = None
-        
-        # Salva il file degli eventi
-        if self.events_data:
-            df = pd.DataFrame(self.events_data)
-            df.to_csv(self.recording_path / 'events.csv', index=False)
-            
-        self.status_queue.put("Registrazione fermata.")
+        if self.video_writer: self.video_writer.release(); self.video_writer = None
+        if self.data_writer_thread and self.data_writer_thread.is_alive(): self.data_writer_thread.join()
+        for f in self.file_handlers.values(): f.close()
+        self.file_handlers.clear()
+        self.status_queue.put("Registrazione fermata. Salvataggio dati completato.")
 
     def add_event(self, name):
-        if self.is_recording and self.last_gaze_datum:
-            self.events_data.append({
-                'name': name,
-                'timestamp_unix_seconds': self.last_gaze_datum.timestamp_unix_seconds
-            })
+        if self.is_recording and self.last_gaze:
+            event_data = {'name': name, 'timestamp_unix_seconds': self.last_gaze.timestamp_unix_seconds}
+            self.data_queues['events'].put(event_data)
+
+    def _data_writer_loop(self):
+        for key in self.data_queues.keys():
+            file_path = self.recording_path / f"{key}.csv"
+            self.file_handlers[key] = open(file_path, 'w', newline='')
+        headers_written = {key: False for key in self.data_queues.keys()}
+        while self.is_recording or any(not q.empty() for q in self.data_queues.values()):
+            for key, q in self.data_queues.items():
+                if not q.empty():
+                    item = q.get()
+                    writer = self.file_handlers[key]
+                    if not headers_written[key]:
+                        headers = list(item.keys())
+                        writer.write(','.join(headers) + '\n')
+                        headers_written[key] = headers
+                    values = [str(item.get(h, '')) for h in headers_written[key]]
+                    writer.write(','.join(values) + '\n')
+            time.sleep(0.1)
+
+class RealtimeDisplayWindow(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("SPEED Real-time Stream (Multi-YOLO & Salvataggio)")
+        self.geometry("1350x950")
+
+        self.analyzer = PupilRealtimeAnalyzer()
+        self.is_running = False
+        self.is_paused_for_drawing = False
+        self.photo = None
+        
+        self.canvas = tk.Canvas(self, width=1280, height=720, cursor="crosshair", bg="black")
+        self.canvas.pack()
+        self.canvas.bind("<ButtonPress-1>", self.on_canvas_press)
+        self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
+        
+        bottom_pane = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
+        bottom_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        main_control_frame = tk.Frame(bottom_pane, pady=10)
+        bottom_pane.add(main_control_frame, stretch="always")
+
+        connect_frame = tk.Frame(main_control_frame); connect_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 10))
+        self.connect_button = tk.Button(connect_frame, text="Connect to Device", command=self.connect_to_device, font=('Helvetica', 10, 'bold'), bg='#a5d6a7')
+        self.connect_button.pack(fill=tk.X, expand=True)
+        self.start_analysis_button = tk.Button(connect_frame, text="Start Analysis", command=self.start_stream, font=('Helvetica', 10, 'bold'), bg='#c8e6c9', state=tk.DISABLED)
+        self.start_analysis_button.pack(fill=tk.X, expand=True, pady=(5,0))
+
+        record_frame = tk.LabelFrame(main_control_frame, text="Controls", padx=10, pady=10); record_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
+        self.record_button = tk.Button(record_frame, text="Start Recording", command=self.toggle_recording, font=('Helvetica', 10, 'bold'), bg='#c8e6c9', state=tk.DISABLED)
+        self.record_button.pack(pady=(0,5))
+        
+        self.overlay_vars = {
+            "save_data": tk.BooleanVar(value=True), "show_yolo": tk.BooleanVar(value=True),
+            "show_aois": tk.BooleanVar(value=True), "show_gaze": tk.BooleanVar(value=True),
+            "show_fixations": tk.BooleanVar(value=False), "show_blinks": tk.BooleanVar(value=True),
+            "show_pupil_plot": tk.BooleanVar(value=True),
+        }
+        tk.Checkbutton(record_frame, text="Save raw data to CSV", variable=self.overlay_vars["save_data"]).pack(anchor='w')
+        self.event_name_entry = tk.Entry(record_frame, width=25); self.event_name_entry.pack(pady=5); self.event_name_entry.insert(0, "New Event")
+        self.add_event_button = tk.Button(record_frame, text="Add Event", command=self.add_event, state=tk.DISABLED); self.add_event_button.pack(pady=5)
+
+        aoi_frame = tk.LabelFrame(main_control_frame, text="AOI", padx=10, pady=10); aoi_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
+        self.aoi_listbox = tk.Listbox(aoi_frame, height=4); self.aoi_listbox.pack(side=tk.LEFT, fill=tk.Y)
+        aoi_btn_frame = tk.Frame(aoi_frame); aoi_btn_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        tk.Button(aoi_btn_frame, text="Add", command=self.prepare_to_draw_aoi).pack()
+        tk.Button(aoi_btn_frame, text="Remove", command=self.remove_selected_aoi).pack()
+
+        vis_options_frame = tk.LabelFrame(main_control_frame, text="Visual Options", padx=10, pady=10)
+        vis_options_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
+        for key, text in {"show_yolo": "YOLO", "show_aois": "AOIs", "show_gaze": "Gaze", "show_fixations": "Fixations", "show_blinks": "Blinks", "show_pupil_plot": "Pupil Plot"}.items():
+            tk.Checkbutton(vis_options_frame, text=text, variable=self.overlay_vars[key], command=self.update_overlay_settings).pack(anchor='w')
+
+        status_and_yolo_frame = tk.Frame(bottom_pane, padx=10)
+        bottom_pane.add(status_and_yolo_frame)
+
+        self.yolo_config_frame = tk.LabelFrame(status_and_yolo_frame, text="YOLO Controls", padx=10, pady=10)
+        self.yolo_config_frame.pack(fill=tk.X)
+        self.rt_yolo_model_vars = {'detect': tk.StringVar(), 'segment': tk.StringVar(), 'pose': tk.StringVar()}
+        for task, label in [('detect', 'Detection Model:'), ('segment', 'Segmentation Model:'), ('pose', 'Pose Model:')]:
+            tk.Label(self.yolo_config_frame, text=label).pack(anchor='w')
+            combo = ttk.Combobox(self.yolo_config_frame, textvariable=self.rt_yolo_model_vars[task], state='disabled', width=25, values=[""] + YOLO_MODELS.get(task, []))
+            combo.pack(fill=tk.X, pady=(0, 2))
+        
+        self.status_label = tk.Label(status_and_yolo_frame, text="Ready. Press 'Connect'.", font=('Helvetica', 10), wraplength=400, justify=tk.LEFT)
+        self.status_label.pack(side=tk.BOTTOM, fill=tk.X, pady=(10,0))
+        
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.check_status_queue()
+
+    def connect_to_device(self):
+        self.status_label.config(text="Initializing...")
+        self.update()
+        if self.analyzer.connect():
+            self.start_analysis_button.config(state=tk.NORMAL)
+            for child in self.yolo_config_frame.winfo_children():
+                if isinstance(child, ttk.Combobox): child.config(state='readonly')
+        else:
+            self.status_label.config(text="Failed to initialize. Check libraries.")
+
+    def start_stream(self):
+        if self.is_running: return
+        self.is_running = True
+        yolo_models_to_load = {task: var.get() for task, var in self.rt_yolo_model_vars.items() if var.get()}
+        self.analyzer.start(yolo_models_to_load, self.get_overlay_settings())
+        self.start_analysis_button.config(text="Stop Analysis", command=self.stop_stream)
+        self.record_button.config(state=tk.NORMAL)
+        self.add_event_button.config(state=tk.NORMAL)
+        self.update_gui_loop()
+        
+    def stop_stream(self):
+        if not self.is_running: return
+        self.is_running = False
+        self.analyzer.stop()
+        self.start_analysis_button.config(text="Start Analysis", command=self.start_stream)
+        self.record_button.config(state=tk.DISABLED, text="Start Recording", bg='#c8e6c9')
+        self.add_event_button.config(state=tk.DISABLED)
+
+    def get_overlay_settings(self):
+        return {key: var.get() for key, var in self.overlay_vars.items()}
+
+    def update_overlay_settings(self):
+        if self.is_running:
+            self.stop_stream()
+            self.after(200, self.start_stream)
+        else:
+            self.analyzer.overlay_settings = self.get_overlay_settings()
+
+    def check_status_queue(self):
+        try:
+            message = self.analyzer.status_queue.get_nowait()
+            self.status_label.config(text=message)
+        except queue.Empty: pass
+        finally: self.after(100, self.check_status_queue)
+
+    def update_gui_loop(self):
+        if not self.is_running or self.is_paused_for_drawing:
+            self.after(30, self.update_gui_loop)
+            return
+        try:
+            frame = self.analyzer.output_queue.get_nowait()
+            img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            self.photo = ImageTk.PhotoImage(image=Image.fromarray(img))
+            if self.canvas.winfo_exists(): self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
+        except queue.Empty: pass
+        except Exception: pass
+        finally:
+            if self.is_running: self.after(16, self.update_gui_loop)
+
+    def toggle_recording(self):
+        if not self.analyzer.is_recording:
+            folder_path = filedialog.askdirectory(title="Select Folder for Recording Session")
+            if folder_path:
+                self.analyzer.overlay_settings = self.get_overlay_settings()
+                if self.analyzer.start_recording(folder_path):
+                    self.record_button.config(text="Stop Recording", bg='#ffcdd2')
+        else:
+            self.analyzer.stop_recording()
+            self.record_button.config(text="Start Recording", bg='#c8e6c9')
+    
+    def add_event(self):
+        event_name = self.event_name_entry.get()
+        if event_name: self.analyzer.add_event(event_name)
+    
+    def prepare_to_draw_aoi(self):
+        self.is_paused_for_drawing = True
+        self.status_label.config(text="DISEGNA AOI: Clicca e trascina sul video.")
+        
+    def on_canvas_press(self, event):
+        if not self.is_paused_for_drawing: return
+        self.start_x, self.start_y = event.x, event.y
+        self.temp_rect_id = self.canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline='magenta', width=2)
+
+    def on_canvas_drag(self, event):
+        if not self.temp_rect_id: return
+        self.canvas.coords(self.temp_rect_id, self.start_x, self.start_y, event.x, event.y)
+
+    def on_canvas_release(self, event):
+        if not self.temp_rect_id: return
+        x1, y1 = min(self.start_x, event.x), min(self.start_y, event.y)
+        x2, y2 = max(self.start_x, event.x), max(self.start_y, event.y)
+        aoi_name = simpledialog.askstring("AOI Name", "Nome per questa AOI:", parent=self)
+        if aoi_name:
+            self.analyzer.add_static_aoi(aoi_name, [x1, y1, x2, y2])
+            self.update_aoi_listbox()
+        self.canvas.delete(self.temp_rect_id)
+        self.is_paused_for_drawing = False
+        self.status_label.config(text="Streaming...")
+
+    def update_aoi_listbox(self):
+        self.aoi_listbox.delete(0, tk.END)
+        for aoi in self.analyzer.static_aois: self.aoi_listbox.insert(tk.END, f"{aoi['name']} (static)")
+
+    def remove_selected_aoi(self):
+        selected = self.aoi_listbox.curselection()
+        if not selected: return
+        full_name = self.aoi_listbox.get(selected[0])
+        aoi_name = full_name.split(' (')[0]
+        self.analyzer.remove_static_aoi(aoi_name)
+        self.update_aoi_listbox()
+            
+    def on_close(self):
+        self.stop_stream()
+        self.destroy()
 
 
 class LSLBridge:
@@ -364,215 +582,6 @@ class LSLBridge:
                 self.outlet_video.push_sample(frame_image.flatten(), scene_frame.timestamp_unix_seconds)
             time.sleep(1/200)
 
-
-#
-
-# --- CLASSE DELLA FINESTRA GUI COMPLETAMENTE RESTAURATA E ADATTATA ---
-class RealtimeDisplayWindow(tk.Toplevel):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.title("SPEED Real-time Stream (API Diretta)")
-        self.geometry("1280x950")
-
-        self.analyzer = PupilRealtimeAnalyzer()
-        self.is_running = False
-        self.is_paused_for_drawing = False
-        self.lsl_bridge = None
-        self.photo = None
-
-        self.canvas = tk.Canvas(self, width=1280, height=720, cursor="crosshair", bg="black")
-        self.canvas.pack()
-        self.canvas.bind("<ButtonPress-1>", self.on_canvas_press)
-        self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
-        self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
-        self.temp_rect_id = None
-        
-        bottom_pane = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
-        bottom_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        main_control_frame = tk.Frame(bottom_pane, pady=10)
-        bottom_pane.add(main_control_frame, stretch="always")
-        
-        status_frame = tk.Frame(bottom_pane, padx=10)
-        bottom_pane.add(status_frame)
-
-        # --- Controlli di Connessione e Analisi ---
-        connect_frame = tk.Frame(main_control_frame)
-        connect_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 10))
-        self.connect_button = tk.Button(connect_frame, text="Connect to Device", command=self.connect_to_device, font=('Helvetica', 10, 'bold'), bg='#a5d6a7')
-        self.connect_button.pack(fill=tk.X, expand=True)
-        self.start_analysis_button = tk.Button(connect_frame, text="Start Analysis", command=self.start_stream, font=('Helvetica', 10, 'bold'), bg='#c8e6c9', state=tk.DISABLED)
-        self.start_analysis_button.pack(fill=tk.X, expand=True, pady=(5,0))
-
-        # --- Controlli di Registrazione ed Eventi ---
-        record_frame = tk.LabelFrame(main_control_frame, text="Controls", padx=10, pady=10)
-        record_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
-        self.record_button = tk.Button(record_frame, text="Start Recording", command=self.toggle_recording, font=('Helvetica', 10, 'bold'), bg='#c8e6c9', state=tk.DISABLED)
-        self.record_button.pack(pady=(0,5))
-        self.event_name_entry = tk.Entry(record_frame, width=25); self.event_name_entry.pack(pady=5); self.event_name_entry.insert(0, "New Event")
-        self.add_event_button = tk.Button(record_frame, text="Add Event", command=self.add_event, state=tk.DISABLED); self.add_event_button.pack(pady=5)
-        
-        # --- Controlli LSL ---
-        self.lsl_stream_var = tk.BooleanVar(value=False)
-        lsl_check = tk.Checkbutton(record_frame, text="Enable LSL Stream", variable=self.lsl_stream_var)
-        lsl_check.pack(pady=5)
-        if critical_libraries_missing: lsl_check.config(text="LSL (pylsl not found)", state=tk.DISABLED)
-
-        # --- Controlli AOI ---
-        aoi_frame = tk.LabelFrame(main_control_frame, text="AOI Management", padx=10, pady=10)
-        aoi_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
-        self.aoi_listbox = tk.Listbox(aoi_frame, height=4); self.aoi_listbox.pack(side=tk.LEFT, fill=tk.Y)
-        aoi_btn_frame = tk.Frame(aoi_frame); aoi_btn_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
-        tk.Button(aoi_btn_frame, text="Add AOI", command=self.prepare_to_draw_aoi).pack()
-        tk.Button(aoi_btn_frame, text="Remove", command=self.remove_selected_aoi).pack()
-
-        # --- Controlli YOLO ---
-        self.yolo_config_frame = tk.LabelFrame(main_control_frame, text="YOLO Real-Time Controls", padx=10, pady=10)
-        self.yolo_config_frame.pack(side=tk.LEFT, fill=tk.Y)
-        self.rt_yolo_model_vars = {'detect': tk.StringVar(), 'segment': tk.StringVar(), 'pose': tk.StringVar()}
-        yolo_options = ["", "yolov8n.pt", "yolov8s.pt", "yolov9c.pt"] # Esempi
-        for task, label in [('detect', 'Detection Model:'), ('segment', 'Segmentation Model:'), ('pose', 'Pose Model:')]:
-            tk.Label(self.yolo_config_frame, text=label).pack(anchor='w')
-            combo = ttk.Combobox(self.yolo_config_frame, textvariable=self.rt_yolo_model_vars[task], state='disabled', width=25, values=yolo_options)
-            combo.pack(fill=tk.X, pady=(0, 2))
-
-        # --- Status Label ---
-        self.status_label = tk.Label(status_frame, text="Ready. Press 'Connect'.", font=('Helvetica', 10), wraplength=400, justify=tk.LEFT)
-        self.status_label.pack(side=tk.TOP, fill=tk.X, pady=(5,10))
-        
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.check_status_queue()
-
-    def connect_to_device(self):
-        self.status_label.config(text="Initializing...")
-        self.update()
-        if self.analyzer.connect():
-            self.status_label.config(text="Device ready. Configure analysis and press 'Start'.")
-            self.start_analysis_button.config(state=tk.NORMAL)
-            for combo in self.yolo_config_frame.winfo_children():
-                if isinstance(combo, ttk.Combobox): combo.config(state='readonly')
-        else:
-            self.status_label.config(text="Failed to initialize. Check libraries.")
-
-    def start_stream(self):
-        if self.is_running: return
-        self.is_running = True
-        
-        yolo_models_to_load = {task: var.get() for task, var in self.rt_yolo_model_vars.items() if var.get()}
-        self.analyzer.start(yolo_models_to_load)
-
-        # Avvia LSL se richiesto
-        if self.lsl_stream_var.get():
-            try:
-                self.lsl_bridge = LSLBridge(self.analyzer)
-                self.lsl_bridge.start()
-                self.status_label.config(text="Streaming... (LSL Enabled)")
-            except Exception as e:
-                messagebox.showerror("LSL Error", str(e), parent=self)
-        
-        self.start_analysis_button.config(text="Stop Analysis", command=self.stop_stream)
-        self.record_button.config(state=tk.NORMAL)
-        self.add_event_button.config(state=tk.NORMAL)
-        self.update_gui_loop()
-        
-    def stop_stream(self):
-        if not self.is_running: return
-        self.is_running = False
-        self.analyzer.stop()
-        if self.lsl_bridge: self.lsl_bridge.stop()
-        self.start_analysis_button.config(text="Start Analysis", command=self.start_stream)
-        self.record_button.config(state=tk.DISABLED)
-        self.add_event_button.config(state=tk.DISABLED)
-        # Svuota la coda per evitare di mostrare frame vecchi al riavvio
-        while not self.analyzer.output_queue.empty(): self.analyzer.output_queue.get()
-
-    def check_status_queue(self):
-        try:
-            message = self.analyzer.status_queue.get_nowait()
-            self.status_label.config(text=message)
-        except queue.Empty:
-            pass
-        finally:
-            self.after(100, self.check_status_queue)
-
-    def update_gui_loop(self):
-        if not self.is_running or self.is_paused_for_drawing:
-            self.after(30, self.update_gui_loop)
-            return
-        try:
-            frame = self.analyzer.output_queue.get_nowait()
-            img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(img)
-            self.photo = ImageTk.PhotoImage(image=img)
-            self.update_canvas()
-        except queue.Empty:
-            pass
-        self.after(16, self.update_gui_loop) # ~60 FPS
-
-    def update_canvas(self):
-        if self.photo:
-            try: self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
-            except tk.TclError: pass
-
-    def toggle_recording(self):
-        if not self.analyzer.is_recording:
-            folder_path = filedialog.askdirectory(title="Select Folder for Recording")
-            if folder_path and self.analyzer.start_recording(folder_path):
-                self.record_button.config(text="Stop Recording", bg='#ffcdd2')
-        else:
-            self.analyzer.stop_recording()
-            self.record_button.config(text="Start Recording", bg='#c8e6c9')
-
-    def add_event(self):
-        event_name = self.event_name_entry.get()
-        if not event_name: return
-        self.analyzer.add_event(event_name)
-        if self.lsl_bridge: self.lsl_bridge.push_event(event_name)
-        self.event_name_entry.delete(0, tk.END); self.event_name_entry.insert(0, "New Event")
-    
-    def prepare_to_draw_aoi(self):
-        self.is_paused_for_drawing = True
-        self.status_label.config(text="DISEGNA AOI: Clicca e trascina sul video.")
-        
-    def on_canvas_press(self, event):
-        if not self.is_paused_for_drawing: return
-        self.start_x, self.start_y = event.x, event.y
-        self.temp_rect_id = self.canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline='magenta', width=2)
-
-    def on_canvas_drag(self, event):
-        if not self.temp_rect_id: return
-        self.canvas.coords(self.temp_rect_id, self.start_x, self.start_y, event.x, event.y)
-
-    def on_canvas_release(self, event):
-        if not self.temp_rect_id: return
-        x1, y1 = min(self.start_x, event.x), min(self.start_y, event.y)
-        x2, y2 = max(self.start_x, event.x), max(self.start_y, event.y)
-        
-        aoi_name = simpledialog.askstring("AOI Name", "Inserisci un nome unico per questa AOI:", parent=self)
-        if aoi_name:
-            self.analyzer.add_static_aoi(aoi_name, [x1, y1, x2, y2])
-            self.update_aoi_listbox()
-
-        self.canvas.delete(self.temp_rect_id); self.temp_rect_id = None
-        self.is_paused_for_drawing = False
-        self.status_label.config(text="Streaming...")
-
-    def update_aoi_listbox(self):
-        self.aoi_listbox.delete(0, tk.END)
-        for aoi in self.analyzer.static_aois:
-            self.aoi_listbox.insert(tk.END, f"{aoi['name']} (static)")
-
-    def remove_selected_aoi(self):
-        selected = self.aoi_listbox.curselection()
-        if not selected: return
-        full_name = self.aoi_listbox.get(selected[0])
-        aoi_name = full_name.split(' (')[0]
-        self.analyzer.remove_static_aoi(aoi_name)
-        self.update_aoi_listbox()
-            
-    def on_close(self):
-        self.stop_stream()
-        self.destroy()
 
 class EventManagerWindow(tk.Toplevel):
     """
@@ -756,7 +765,7 @@ OFFICIAL_YOLO_CLS_MODELS = [
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.3.8.1")
+        self.root.title("SPEED v5.3.8.2")
         # --- MODIFICA: Avvia a schermo intero ---
         self.root.state('zoomed')
 

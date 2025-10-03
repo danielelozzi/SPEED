@@ -14,3 +14,4 @@ pydicom
 pygame
 qrcode
 torch
+pillow
