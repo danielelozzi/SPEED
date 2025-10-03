@@ -173,8 +173,7 @@ if __name__ == '__main__':
 
     # --- CORREZIONE: Simula la selezione del modello nella GUI ---
     # Imposta il modello e il task prima di avviare lo stream.
-    app.yolo_model_var.set('yolov8n.pt')
-    app.yolo_task_var.set('detect')
+    app.rt_yolo_model_vars['detect'].set('yolov8n.pt')
 
     # Simula il click sui pulsanti della GUI per avviare il test
     app.connect_to_device()
