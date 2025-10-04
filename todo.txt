@@ -10,3 +10,6 @@ multisoggetto
 apertura occhio come CSV 
 manuale e guida e link
 credits
+refactoring intero della GUI
+aggiunta IMU
+diversi dispositivi e standardizzazione informazioni
