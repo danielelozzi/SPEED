@@ -95,8 +95,8 @@ else:
 
 class PupilRealtimeAnalyzer:
     """
-    Gestisce connessione, streaming modulare, analisi multi-task (YOLO),
-    registrazione video e salvataggio dati grezzi su file CSV.
+    Gestisce connessione, streaming completo (inclusi IMU, Audio, Eye Videos),
+    analisi, registrazione e salvataggio dati.
     """
     def __init__(self):
         # Stato e controllo
@@ -112,21 +112,26 @@ class PupilRealtimeAnalyzer:
         self.last_gaze = None
         self.last_fixation = None
         self.last_blink_timestamp = 0
+        self.last_imu = None
+        self.last_eye_openness = [None, None] # [eye0, eye1]
         self.pupil_diameter_history = deque(maxlen=100)
 
-        # Moduli di analisi
+        # Moduli di analisi e overlay
         self.yolo_models = {}
         self.static_aois = []
         self.overlay_settings = {}
 
-        # Modulo di registrazione e salvataggio dati
+        # Modulo di registrazione e salvataggio
         self.is_recording = False
         self.recording_path = None
         self.video_writer = None
+        self.eye_video_writers = {}
+        self.audio_writer = None
         self.file_handlers = {}
         self.data_queues = {
             'gaze': queue.Queue(), 'fixations': queue.Queue(),
-            'blinks': queue.Queue(), 'events': queue.Queue()
+            'blinks': queue.Queue(), 'events': queue.Queue(),
+            'imu': queue.Queue(), 'eye_openness': queue.Queue()
         }
         self.data_writer_thread = None
 
@@ -134,7 +139,7 @@ class PupilRealtimeAnalyzer:
         if critical_libraries_missing:
             self.status_queue.put(f"Errore: Libreria mancante - {missing_lib_error}")
             return False
-        self.status_queue.put("Pronto per la connessione. Configura e premi 'Start Analysis'.")
+        self.status_queue.put("Pronto. Configura e premi 'Start Analysis'.")
         return True
 
     def start(self, yolo_models_to_load: dict, overlay_settings: dict):
@@ -184,17 +189,26 @@ class PupilRealtimeAnalyzer:
                 status = await device.get_status()
                 
                 streaming_tasks = []
-                sensor_scene = status.direct_scene_sensor()
-                if not sensor_scene.connected: raise RuntimeError("Sensore video non connesso.")
-                streaming_tasks.append(self._video_processor(sensor_scene.url))
+                save_data = self.overlay_settings.get("save_data", False)
 
-                save_data_enabled = self.overlay_settings.get("save_data", False)
-                if self.overlay_settings.get("show_gaze") or save_data_enabled:
-                    streaming_tasks.append(self._gaze_receiver(status.direct_gaze_sensor().url))
-                if self.overlay_settings.get("show_fixations") or save_data_enabled:
-                    streaming_tasks.append(self._fixation_receiver(status.direct_fixation_sensor().url))
-                if self.overlay_settings.get("show_blinks") or save_data_enabled:
-                    streaming_tasks.append(self._blink_receiver(status.direct_blinks_sensor().url))
+                # --- Configurazione di tutti i task di streaming ---
+                if status.direct_scene_sensor().connected:
+                    streaming_tasks.append(self._video_processor(status.direct_scene_sensor().url))
+                if self.overlay_settings.get("save_eye_videos"):
+                    if status.direct_eye_sensor(0).connected: streaming_tasks.append(self._eye_video_processor(status.direct_eye_sensor(0).url, 0))
+                    if status.direct_eye_sensor(1).connected: streaming_tasks.append(self._eye_video_processor(status.direct_eye_sensor(1).url, 1))
+                if self.overlay_settings.get("save_audio"):
+                    if status.direct_audio_sensor().connected: streaming_tasks.append(self._audio_receiver(status.direct_audio_sensor().url))
+                
+                if self.overlay_settings.get("show_gaze") or save_data:
+                    if status.direct_gaze_sensor().connected: streaming_tasks.append(self._gaze_receiver(status.direct_gaze_sensor().url))
+                if self.overlay_settings.get("show_fixations") or save_data:
+                    if status.direct_fixation_sensor().connected: streaming_tasks.append(self._fixation_receiver(status.direct_fixation_sensor().url))
+                if self.overlay_settings.get("show_blinks") or save_data:
+                    if status.direct_blinks_sensor().connected: streaming_tasks.append(self._blink_receiver(status.direct_blinks_sensor().url))
+                if self.overlay_settings.get("show_status_panel") or save_data:
+                    if status.direct_imu_sensor().connected: streaming_tasks.append(self._imu_receiver(status.direct_imu_sensor().url))
+                    if status.direct_eye_openness_sensor().connected: streaming_tasks.append(self._eye_openness_receiver(status.direct_eye_openness_sensor().url))
 
                 self.status_queue.put("Streaming avviato...")
                 await asyncio.gather(*streaming_tasks)
@@ -208,8 +222,7 @@ class PupilRealtimeAnalyzer:
         async for gaze in receive_gaze_data(url):
             if not self.is_running: break
             self.last_gaze = gaze
-            if self.is_recording and self.overlay_settings.get("save_data"):
-                self.data_queues['gaze'].put(gaze.to_dict())
+            if self.is_recording and self.overlay_settings.get("save_data"): self.data_queues['gaze'].put(gaze.to_dict())
             if self.overlay_settings.get("show_pupil_plot") and hasattr(gaze, 'pupil_diameter_mm'):
                 self.pupil_diameter_history.append(gaze.pupil_diameter_mm)
 
@@ -217,32 +230,51 @@ class PupilRealtimeAnalyzer:
         async for fixation in receive_fixations(url):
             if not self.is_running: break
             self.last_fixation = fixation
-            if self.is_recording and self.overlay_settings.get("save_data"):
-                self.data_queues['fixations'].put(fixation.to_dict())
+            if self.is_recording and self.overlay_settings.get("save_data"): self.data_queues['fixations'].put(fixation.to_dict())
 
     async def _blink_receiver(self, url):
         async for blink in receive_blinks(url):
             if not self.is_running: break
             self.last_blink_timestamp = time.time()
-            if self.is_recording and self.overlay_settings.get("save_data"):
-                self.data_queues['blinks'].put(blink.to_dict())
+            if self.is_recording and self.overlay_settings.get("save_data"): self.data_queues['blinks'].put(blink.to_dict())
+            
+    async def _imu_receiver(self, url):
+        async for imu in receive_imu_data(url):
+            if not self.is_running: break
+            self.last_imu = imu
+            if self.is_recording and self.overlay_settings.get("save_data"): self.data_queues['imu'].put(imu.to_dict())
+            
+    async def _eye_openness_receiver(self, url):
+        async for openness in receive_eye_openness(url):
+            if not self.is_running: break
+            self.last_eye_openness[openness.eye_id] = openness
+            if self.is_recording and self.overlay_settings.get("save_data"): self.data_queues['eye_openness'].put(openness.to_dict())
+
+    async def _audio_receiver(self, url):
+        async for audio in receive_audio_frames(url):
+            if not self.is_running or not self.is_recording or not self.audio_writer: break
+            # L'API non fornisce ancora un metodo per scrivere l'audio direttamente,
+            # questa è una implementazione concettuale. Per ora, non fa nulla.
+            # self.audio_writer.write(audio.data)
 
     async def _video_processor(self, url):
         async for frame in receive_video_frames(url):
             if not self.is_running: break
             self.last_frame_size = (frame.width, frame.height)
             processed_frame = self.process_frame(frame.bgr_pixels.copy())
-            if self.is_recording and self.video_writer:
-                self.video_writer.write(processed_frame)
+            if self.is_recording and self.video_writer: self.video_writer.write(processed_frame)
             if self.output_queue.full(): self.output_queue.get_nowait()
             self.output_queue.put(processed_frame)
+            
+    async def _eye_video_processor(self, url, eye_id):
+        async for frame in receive_video_frames(url):
+            if not self.is_running or not self.is_recording or eye_id not in self.eye_video_writers: break
+            self.eye_video_writers[eye_id].write(frame.bgr_pixels)
 
     def process_frame(self, frame):
         width, height = self.last_frame_size
         
-        # Esegue tutti i modelli YOLO caricati in sequenza
         if self.overlay_settings.get("show_yolo") and self.yolo_models:
-            # Usiamo 'frame' come input e output per ogni modello, creando una catena di overlay
             for task, model in self.yolo_models.items():
                 results = model.track(frame, persist=True, verbose=False)
                 frame = results[0].plot()
@@ -258,14 +290,17 @@ class PupilRealtimeAnalyzer:
             cv2.circle(frame, (center_x, center_y), 20, (0, 0, 255), 2)
 
         if self.overlay_settings.get("show_fixations") and self.last_fixation:
-            center_x, center_y = int(self.last_fixation.x * width), int(self.last_fixation.y * height)
-            cv2.rectangle(frame, (center_x - 15, center_y - 15), (center_x + 15, center_y + 15), (0, 255, 0), 2)
+            x, y = int(self.last_fixation.x * width), int(self.last_fixation.y * height)
+            cv2.rectangle(frame, (x - 15, y - 15), (x + 15, y + 15), (0, 255, 0), 2)
 
         if self.overlay_settings.get("show_blinks") and (time.time() - self.last_blink_timestamp < 0.5):
              cv2.putText(frame, "BLINK", (50, 50), cv2.FONT_HERSHEY_TRIPLEX, 1.5, (255, 255, 0), 2)
 
         if self.overlay_settings.get("show_pupil_plot"):
             self._draw_pupil_plot(frame)
+
+        if self.overlay_settings.get("show_status_panel"):
+            self._draw_status_panel(frame)
             
         return frame
 
@@ -282,10 +317,32 @@ class PupilRealtimeAnalyzer:
         min_val, max_val = min(pupil_data), max(pupil_data)
         if max_val == min_val: max_val += 1
         points = np.array([(i, 1 - ((val - min_val) / (max_val - min_val))) for i, val in enumerate(pupil_data)])
-        points[:, 0] *= (plot_width / len(points)); points[:, 1] *= (plot_height - 2)
+        points[:, 0] *= (plot_width / len(points))
+        points[:, 1] *= (plot_height - 2)
         points = points.astype(np.int32)
         cv2.polylines(frame, [points], isClosed=False, color=(0, 0, 255), thickness=1, shift=np.array([x_pos, y_pos]))
         cv2.putText(frame, "Pupil Diameter", (x_pos, y_pos + plot_height + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+    def _draw_status_panel(self, frame):
+        x_pos, y_pos, line_height = 20, 30, 20
+        sub_frame = frame[y_pos-5 : y_pos + line_height * 5, x_pos-5:x_pos+250]
+        black_rect = np.zeros(sub_frame.shape, dtype=np.uint8)
+        res = cv2.addWeighted(sub_frame, 0.5, black_rect, 0.5, 1.0)
+        frame[y_pos-5 : y_pos + line_height * 5, x_pos-5:x_pos+250] = res
+        
+        def put_text(text, line):
+            cv2.putText(frame, text, (x_pos, y_pos + line * line_height), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+        put_text("--- Real-time Status ---", 0)
+        if self.last_gaze:
+            put_text(f"Gaze: ({self.last_gaze.x:.2f}, {self.last_gaze.y:.2f})", 1)
+            if hasattr(self.last_gaze, 'pupil_diameter_mm'):
+                put_text(f"Pupil Dia: {self.last_gaze.pupil_diameter_mm:.2f} mm", 2)
+        if self.last_eye_openness[0] and self.last_eye_openness[1]:
+            put_text(f"Openness: L={self.last_eye_openness[0].openness:.2f} R={self.last_eye_openness[1].openness:.2f}", 3)
+        if self.last_imu:
+            gyro = self.last_imu.gyro
+            put_text(f"Gyro: ({gyro.x:.1f}, {gyro.y:.1f}, {gyro.z:.1f})", 4)
 
     def add_static_aoi(self, name, rect):
         if name and not any(aoi['name'] == name for aoi in self.static_aois):
@@ -298,9 +355,13 @@ class PupilRealtimeAnalyzer:
         if self.is_recording: return False
         self.recording_path = Path(folder_path)
         self.recording_path.mkdir(exist_ok=True, parents=True)
-        video_file = self.recording_path / 'scene_video_overlayed.mp4'
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        self.video_writer = cv2.VideoWriter(str(video_file), fourcc, 30.0, self.last_frame_size)
+        self.video_writer = cv2.VideoWriter(str(self.recording_path / 'scene_video_overlayed.mp4'), fourcc, 30.0, self.last_frame_size)
+        if self.overlay_settings.get("save_eye_videos"):
+            self.eye_video_writers[0] = cv2.VideoWriter(str(self.recording_path / 'eye0.mp4'), fourcc, 30.0, (200, 200))
+            self.eye_video_writers[1] = cv2.VideoWriter(str(self.recording_path / 'eye1.mp4'), fourcc, 30.0, (200, 200))
+        if self.overlay_settings.get("save_audio"):
+            pass
         if self.overlay_settings.get("save_data"):
             self.data_writer_thread = threading.Thread(target=self._data_writer_loop, daemon=True)
             self.data_writer_thread.start()
@@ -312,30 +373,27 @@ class PupilRealtimeAnalyzer:
         if not self.is_recording: return
         self.is_recording = False
         if self.video_writer: self.video_writer.release(); self.video_writer = None
+        for writer in self.eye_video_writers.values(): writer.release()
+        self.eye_video_writers.clear()
         if self.data_writer_thread and self.data_writer_thread.is_alive(): self.data_writer_thread.join()
         for f in self.file_handlers.values(): f.close()
         self.file_handlers.clear()
-        self.status_queue.put("Registrazione fermata. Salvataggio dati completato.")
+        self.status_queue.put("Registrazione fermata. Dati salvati.")
 
     def add_event(self, name):
         if self.is_recording and self.last_gaze:
-            event_data = {'name': name, 'timestamp_unix_seconds': self.last_gaze.timestamp_unix_seconds}
-            self.data_queues['events'].put(event_data)
+            self.data_queues['events'].put({'name': name, 'timestamp_unix_seconds': self.last_gaze.timestamp_unix_seconds})
 
     def _data_writer_loop(self):
         for key in self.data_queues.keys():
-            file_path = self.recording_path / f"{key}.csv"
-            self.file_handlers[key] = open(file_path, 'w', newline='')
+            self.file_handlers[key] = open(self.recording_path / f"{key}.csv", 'w', newline='')
         headers_written = {key: False for key in self.data_queues.keys()}
         while self.is_recording or any(not q.empty() for q in self.data_queues.values()):
             for key, q in self.data_queues.items():
                 if not q.empty():
-                    item = q.get()
-                    writer = self.file_handlers[key]
+                    item = q.get(); writer = self.file_handlers[key]
                     if not headers_written[key]:
-                        headers = list(item.keys())
-                        writer.write(','.join(headers) + '\n')
-                        headers_written[key] = headers
+                        headers = list(item.keys()); writer.write(','.join(headers) + '\n'); headers_written[key] = headers
                     values = [str(item.get(h, '')) for h in headers_written[key]]
                     writer.write(','.join(values) + '\n')
             time.sleep(0.1)
@@ -343,8 +401,8 @@ class PupilRealtimeAnalyzer:
 class RealtimeDisplayWindow(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
-        self.title("SPEED Real-time Stream (Multi-YOLO & Salvataggio)")
-        self.geometry("1350x950")
+        self.title("SPEED Real-time Suite")
+        self.geometry("1450x950")
 
         self.analyzer = PupilRealtimeAnalyzer()
         self.is_running = False
@@ -363,35 +421,44 @@ class RealtimeDisplayWindow(tk.Toplevel):
         main_control_frame = tk.Frame(bottom_pane, pady=10)
         bottom_pane.add(main_control_frame, stretch="always")
 
-        connect_frame = tk.Frame(main_control_frame); connect_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 10))
+        col1 = tk.Frame(main_control_frame); col1.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        connect_frame = tk.Frame(col1); connect_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 10))
         self.connect_button = tk.Button(connect_frame, text="Connect to Device", command=self.connect_to_device, font=('Helvetica', 10, 'bold'), bg='#a5d6a7')
-        self.connect_button.pack(fill=tk.X, expand=True)
+        self.connect_button.pack(fill=tk.X)
         self.start_analysis_button = tk.Button(connect_frame, text="Start Analysis", command=self.start_stream, font=('Helvetica', 10, 'bold'), bg='#c8e6c9', state=tk.DISABLED)
-        self.start_analysis_button.pack(fill=tk.X, expand=True, pady=(5,0))
+        self.start_analysis_button.pack(fill=tk.X, pady=5)
 
-        record_frame = tk.LabelFrame(main_control_frame, text="Controls", padx=10, pady=10); record_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
+        record_frame = tk.LabelFrame(col1, text="Recording", padx=10, pady=10); record_frame.pack(fill=tk.X)
         self.record_button = tk.Button(record_frame, text="Start Recording", command=self.toggle_recording, font=('Helvetica', 10, 'bold'), bg='#c8e6c9', state=tk.DISABLED)
-        self.record_button.pack(pady=(0,5))
+        self.record_button.pack(pady=5, fill=tk.X)
         
         self.overlay_vars = {
-            "save_data": tk.BooleanVar(value=True), "show_yolo": tk.BooleanVar(value=True),
+            "save_data": tk.BooleanVar(value=True), "save_eye_videos": tk.BooleanVar(value=True),
+            "save_audio": tk.BooleanVar(value=False), "show_yolo": tk.BooleanVar(value=True),
             "show_aois": tk.BooleanVar(value=True), "show_gaze": tk.BooleanVar(value=True),
             "show_fixations": tk.BooleanVar(value=False), "show_blinks": tk.BooleanVar(value=True),
-            "show_pupil_plot": tk.BooleanVar(value=True),
+            "show_pupil_plot": tk.BooleanVar(value=True), "show_status_panel": tk.BooleanVar(value=True),
         }
-        tk.Checkbutton(record_frame, text="Save raw data to CSV", variable=self.overlay_vars["save_data"]).pack(anchor='w')
-        self.event_name_entry = tk.Entry(record_frame, width=25); self.event_name_entry.pack(pady=5); self.event_name_entry.insert(0, "New Event")
-        self.add_event_button = tk.Button(record_frame, text="Add Event", command=self.add_event, state=tk.DISABLED); self.add_event_button.pack(pady=5)
+        tk.Checkbutton(record_frame, text="Save raw data (.csv)", variable=self.overlay_vars["save_data"]).pack(anchor='w')
+        tk.Checkbutton(record_frame, text="Save Eye Videos", variable=self.overlay_vars["save_eye_videos"]).pack(anchor='w')
+        tk.Checkbutton(record_frame, text="Save Audio (Experimental)", variable=self.overlay_vars["save_audio"]).pack(anchor='w')
 
-        aoi_frame = tk.LabelFrame(main_control_frame, text="AOI", padx=10, pady=10); aoi_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
+        col2 = tk.Frame(main_control_frame); col2.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        event_frame = tk.LabelFrame(col2, text="Events", padx=10, pady=10); event_frame.pack(fill=tk.X)
+        self.event_name_entry = tk.Entry(event_frame, width=25); self.event_name_entry.pack(pady=5); self.event_name_entry.insert(0, "New Event")
+        self.add_event_button = tk.Button(event_frame, text="Add Event", command=self.add_event, state=tk.DISABLED); self.add_event_button.pack(pady=5, fill=tk.X)
+        
+        aoi_frame = tk.LabelFrame(col2, text="AOI", padx=10, pady=10); aoi_frame.pack(fill=tk.X, pady=5)
         self.aoi_listbox = tk.Listbox(aoi_frame, height=4); self.aoi_listbox.pack(side=tk.LEFT, fill=tk.Y)
         aoi_btn_frame = tk.Frame(aoi_frame); aoi_btn_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
         tk.Button(aoi_btn_frame, text="Add", command=self.prepare_to_draw_aoi).pack()
         tk.Button(aoi_btn_frame, text="Remove", command=self.remove_selected_aoi).pack()
 
-        vis_options_frame = tk.LabelFrame(main_control_frame, text="Visual Options", padx=10, pady=10)
-        vis_options_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
-        for key, text in {"show_yolo": "YOLO", "show_aois": "AOIs", "show_gaze": "Gaze", "show_fixations": "Fixations", "show_blinks": "Blinks", "show_pupil_plot": "Pupil Plot"}.items():
+        col3 = tk.Frame(main_control_frame); col3.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        vis_options_frame = tk.LabelFrame(col3, text="Visual Options", padx=10, pady=10)
+        vis_options_frame.pack()
+        for key, text in {"show_yolo": "YOLO", "show_aois": "AOIs", "show_gaze": "Gaze", "show_fixations": "Fixations", 
+                           "show_blinks": "Blinks", "show_pupil_plot": "Pupil Plot", "show_status_panel": "Status Panel"}.items():
             tk.Checkbutton(vis_options_frame, text=text, variable=self.overlay_vars[key], command=self.update_overlay_settings).pack(anchor='w')
 
         status_and_yolo_frame = tk.Frame(bottom_pane, padx=10)
@@ -400,10 +467,10 @@ class RealtimeDisplayWindow(tk.Toplevel):
         self.yolo_config_frame = tk.LabelFrame(status_and_yolo_frame, text="YOLO Controls", padx=10, pady=10)
         self.yolo_config_frame.pack(fill=tk.X)
         self.rt_yolo_model_vars = {'detect': tk.StringVar(), 'segment': tk.StringVar(), 'pose': tk.StringVar()}
-        for task, label in [('detect', 'Detection Model:'), ('segment', 'Segmentation Model:'), ('pose', 'Pose Model:')]:
-            tk.Label(self.yolo_config_frame, text=label).pack(anchor='w')
+        for task, label in [('detect', 'Detection'), ('segment', 'Segmentation'), ('pose', 'Pose')]:
+            tk.Label(self.yolo_config_frame, text=f"{label} Model:").pack(anchor='w')
             combo = ttk.Combobox(self.yolo_config_frame, textvariable=self.rt_yolo_model_vars[task], state='disabled', width=25, values=[""] + YOLO_MODELS.get(task, []))
-            combo.pack(fill=tk.X, pady=(0, 2))
+            combo.pack(fill=tk.X, pady=(0, 5))
         
         self.status_label = tk.Label(status_and_yolo_frame, text="Ready. Press 'Connect'.", font=('Helvetica', 10), wraplength=400, justify=tk.LEFT)
         self.status_label.pack(side=tk.BOTTOM, fill=tk.X, pady=(10,0))
@@ -443,11 +510,12 @@ class RealtimeDisplayWindow(tk.Toplevel):
         return {key: var.get() for key, var in self.overlay_vars.items()}
 
     def update_overlay_settings(self):
+        current_settings = self.get_overlay_settings()
         if self.is_running:
             self.stop_stream()
             self.after(200, self.start_stream)
         else:
-            self.analyzer.overlay_settings = self.get_overlay_settings()
+            self.analyzer.overlay_settings = current_settings
 
     def check_status_queue(self):
         try:
@@ -765,7 +833,7 @@ OFFICIAL_YOLO_CLS_MODELS = [
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.3.8.2")
+        self.root.title("SPEED v5.3.8.3")
         # --- MODIFICA: Avvia a schermo intero ---
         self.root.state('zoomed')
 
