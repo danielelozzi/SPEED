@@ -57,7 +57,6 @@ SPEED is a Python-based project for processing, analyzing, and visualizing eye-t
 - [✍️ Authors & Citation](#-authors--citation)
 - [💻 Artificial Intelligence disclosure](#-artificial-intelligence-disclosure)
 
-- 💻 Artificial Intelligence disclosure
  
 ## 1. SPEED Desktop Application (For End Users)
  
