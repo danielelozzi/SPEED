@@ -9,7 +9,7 @@ SPEED is a Python-based project for processing, analyzing, and visualizing eye-t
 1.  **SPEED Desktop App**: A user-friendly GUI application for running a full analysis pipeline, designed for end-users and researchers. Documentation -> [CLICK HERE](https://danielelozzi.github.io/SPEED)
 2.  **`speed-analyzer`**[![PyPI version](https://img.shields.io/pypi/v/speed-analyzer.svg)](https://pypi.org/project/speed-analyzer/): A Python package for developers who want to integrate the analysis logic into their own scripts. Library documentation - [CLICK HERE](https://danielelozzi.github.io/SPEED/documentation/documentation.html)
 3.  **`speedAnalyzerR`**: An experimental command-line package for the R programming language.
-4.  **`SPEED repository**: The repository of the whole project. Repo website -> [CLICK HERE](https://github.org/danielelozzi/speed)
+4.  **SPEED repository**: The repository of the whole project. Repo website -> [CLICK HERE](https://github.org/danielelozzi/speed)
 
  
  This version supports GPU acceleration for YOLO analysis and also offers four powerful AOI definition methods:
