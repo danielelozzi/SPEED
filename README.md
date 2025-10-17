@@ -1,10 +1,10 @@
- # SPEED v5.3.8.4 - labScoc Software Processing and Extraction of Eye tracking Data
+ # SPEED v5.3.8.5 (Multi-User) - labScoc Software Processing and Extraction of Eye tracking Data
  
  Desktop App & Analysis Package
 
 *An Advanced Eye-Tracking Data Analysis Software*
 
-SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. Version 5.3.8.4 introduces a major restructuring, offering two distinct components:
+SPEED is a Python-based project for processing, analyzing, and visualizing eye-tracking data. Version 5.3.8.5 introduces a major restructuring, offering two distinct components. This version also adds a powerful multi-user batch analysis feature to process multiple participants in a single run.
 
 1.  **SPEED Desktop App**: A user-friendly GUI application for running a full analysis pipeline, designed for end-users and researchers. Documentation -> [CLICK HERE](https://danielelozzi.github.io/SPEED)
 2.  **`speed-analyzer`**[![PyPI version](https://img.shields.io/pypi/v/speed-analyzer.svg)](https://pypi.org/project/speed-analyzer/): A Python package for developers who want to integrate the analysis logic into their own scripts. Library documentation - [CLICK HERE](https://danielelozzi.github.io/SPEED/documentation/documentation.html)
@@ -81,7 +81,7 @@ The core analysis engine of SPEED, now available as a reusable package. It's des
 ### Installation from PyPI
 You can install the package directly from the Python Package Index (PyPI) using pip:
 ```bash
-pip install speed-analyzer==5.3.8.4
+pip install speed-analyzer==5.3.8.5
 ```
 ### How to Use the Package
 The package exposes a main function, `run_full_analysis`, that takes paths and options as arguments. See the `example_usage.py` file for a complete demonstration.
@@ -269,7 +269,7 @@ This approach guarantees that your analysis is always executed in the same contr
 ---
 
 ## The Modular Workflow (GUI)
-SPEED v5.3.8.4 operates on a two-step workflow designed to save time and computational resources.
+SPEED v5.3.8.5 operates on a two-step workflow designed to save time and computational resources.
 
 ### Step 1: Run Core Analysis
 This is the main data processing stage. You run this step only once per participant for a given set of events. The software will:
@@ -338,6 +338,51 @@ New tools are available for more in-depth, interactive analysis.
     *   Save the results to a `nsi_results.csv` file, containing the NSI value for each time window.
 
 This feature provides a powerful, user-driven way to analyze visual attention patterns during specific moments of a recording.
+
+## Batch Analysis for Multiple Participants
+
+SPEED provides a powerful batch processing feature to streamline the analysis of entire studies with multiple participants. This allows you to apply a consistent set of analysis parameters (like AOIs and YOLO models) across all selected participants, while keeping the results for each one neatly organized.
+
+### Step 1: Organize Your Data Folder Structure
+
+Before starting, organize your data on your computer. Create a main project folder, and inside it, create one subfolder for each participant. Each participant's subfolder should contain their respective `RAW` and `un-enriched` data.
+
+```
+My_Experiment/
+├── Subject_01/
+│   ├── RAW/
+│   └── un-enriched/
+│   └── enriched_AOI_A/  (Optional)
+│
+└── Subject_02/
+    ├── RAW/
+    └── un-enriched/
+```
+
+### Step 2: Configure Common Analysis Parameters in the Main Window
+
+Use the main SPEED window as a **template** for your batch analysis. Configure all the settings you want to apply to every participant:
+
+*   **Define AOIs**: Use the "Add New AOI..." button to define all static, dynamic, or marker-based AOIs.
+*   **Select YOLO Models**: Choose the YOLO models for detection, segmentation, etc.
+*   **Load Common Events**: If you have a single `events.csv` file to apply to everyone, load it.
+
+### Step 3: Launch and Configure the Batch Window
+
+1.  In the "1. Project Setup" section, click the **"Start Multi-User Batch..."** button.
+2.  In the new window, click **"Select Project Root..."** and choose your main project folder (e.g., `My_Experiment`).
+3.  The table will automatically populate with the participants found in your project folder.
+4.  **Review and Customize**: You can now customize the settings for each participant:
+    *   Use the checkboxes to select which participants to include in the batch.
+    *   Double-click any path cell (`RAW Path`, `Unenriched Path`, `Enriched Paths`) to manually change it for a specific participant. This is useful if your folder structure isn't perfectly consistent.
+    *   For "Enriched Paths", you can associate **multiple** enriched data folders with a single participant.
+
+### Step 4: Run the Batch Analysis
+
+Once you are satisfied with the configuration, click **"Run Batch Analysis"**. SPEED will iterate through each selected participant and:
+1.  Apply the common settings (AOIs, YOLO models) from the main window.
+2.  Use the specific `RAW`, `un-enriched`, and `Enriched` paths you configured in the table.
+3.  Save the results for each participant in a dedicated subfolder within your main output directory.
 
 ### Computer Vision Analysis with YOLO 🤖
 
@@ -475,7 +520,7 @@ python lsl_stream_simulator.py
 
 ## Export to BIDS Format
 
-SPEED 5.3.8.4 introduces a new feature to convert processed eye-tracking data into a format compatible with the **Brain Imaging Data Structure (BIDS)**, following the [BEP020 for Eye Tracking](https://bids.neuroimaging.io/extensions/beps/bep_020.html) guidelines. This facilitates data sharing and standardization for the research community.
+SPEED 5.3.8.5 introduces a new feature to convert processed eye-tracking data into a format compatible with the **Brain Imaging Data Structure (BIDS)**, following the [BEP020 for Eye Tracking](https://bids.neuroimaging.io/extensions/beps/bep_020.html) guidelines. This facilitates data sharing and standardization for the research community.
 
 ### Use via Desktop App
 

@@ -659,14 +659,15 @@ class EventManagerWindow(tk.Toplevel):
     def __init__(self, parent, events_df: pd.DataFrame):
         super().__init__(parent)
         self.title("Event Manager (Table View)")
-        self.geometry("800x600")
+        self.geometry("900x700")
         self.transient(parent)
         self.grab_set()
 
         self.events_df = events_df.copy()
         if 'selected' not in self.events_df.columns:
             self.events_df['selected'] = True
-        self.events_df.sort_values('timestamp [ns]', inplace=True)
+        if 'timestamp [ns]' in self.events_df.columns:
+            self.events_df.sort_values('timestamp [ns]', inplace=True)
         self.saved_df = None
 
         frame = tk.Frame(self, padx=10, pady=10)
@@ -677,10 +678,10 @@ class EventManagerWindow(tk.Toplevel):
         for col in cols:
             self.tree.heading(col, text=col)
         self.tree.column("Selected", width=80, anchor=tk.CENTER)
-        self.tree.column("Event Name", width=350)
+        self.tree.column("Event Name", width=450)
         self.tree.column("Timestamp (s)", width=150, anchor=tk.CENTER)
         self.tree.column("Source", width=100, anchor=tk.CENTER)
-
+        
         self.populate_tree()
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -708,9 +709,9 @@ class EventManagerWindow(tk.Toplevel):
     def populate_tree(self):
         self.tree.delete(*self.tree.get_children())
         for index, row in self.events_df.iterrows():
-            selected_text = "Yes" if row.get('selected', True) else "No"
-            timestamp_sec = row['timestamp [ns]'] / 1e9
-            source = row.get('source', 'manual')
+            selected_text = "☑" if row.get('selected', True) else "☐"
+            timestamp_sec = row['timestamp [ns]'] / 1e9 if 'timestamp [ns]' in row and pd.notna(row['timestamp [ns]']) else 'N/A'
+            source = row.get('source', 'N/A')
             self.tree.insert("", "end", iid=str(index), values=(selected_text, row['name'], f"{timestamp_sec:.4f}", source))
 
     def sort_events(self):
@@ -803,6 +804,302 @@ class EventManagerWindow(tk.Toplevel):
         self.saved_df = self.events_df
         self.destroy()
 
+
+class BatchAnalysisWindow(tk.Toplevel):
+    """
+    Una finestra per configurare ed eseguire un'analisi in batch su più partecipanti.
+    """
+    def __init__(self, parent):
+        super().__init__(parent.root) # Il genitore Toplevel è la root dell'app
+        self.parent_app = parent      # Riferimento all'istanza di SpeedApp
+        self.title("Multi-User Batch Analysis")
+        self.geometry("600x550")
+        self.transient(parent.root)
+        self.grab_set()
+
+        self.project_root_var = tk.StringVar()
+
+        main_frame = tk.Frame(self, padx=15, pady=15)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # --- Selezione Cartella di Progetto ---
+        folder_frame = tk.Frame(main_frame)
+        folder_frame.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(folder_frame, text="Project Root Folder:").pack(side=tk.LEFT, anchor='w')
+        tk.Entry(folder_frame, textvariable=self.project_root_var, state='readonly').pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        tk.Button(folder_frame, text="Browse...", command=self.select_project_folder).pack(side=tk.RIGHT)
+
+        # --- Lista Partecipanti ---
+        list_frame = tk.LabelFrame(main_frame, text="Participants")
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        self.participant_listbox = tk.Listbox(list_frame, selectmode=tk.MULTIPLE)
+        self.participant_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        list_scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.participant_listbox.yview)
+        list_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.participant_listbox.config(yscrollcommand=list_scrollbar.set)
+
+        # --- Controlli Lista ---
+        list_controls_frame = tk.Frame(main_frame)
+        list_controls_frame.pack(fill=tk.X, pady=5)
+        tk.Button(list_controls_frame, text="Select All", command=lambda: self.participant_listbox.select_set(0, tk.END)).pack(side=tk.LEFT)
+        tk.Button(list_controls_frame, text="Deselect All", command=lambda: self.participant_listbox.select_clear(0, tk.END)).pack(side=tk.LEFT, padx=5)
+
+        # --- NUOVO: Opzioni ---
+        options_frame = tk.Frame(main_frame)
+        options_frame.pack(fill=tk.X, pady=5)
+        self.overwrite_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(options_frame, text="Overwrite existing analysis for selected participants", variable=self.overwrite_var).pack(anchor='w')
+
+        # --- Controlli Esecuzione e Progresso ---
+        run_frame = tk.Frame(main_frame)
+        run_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        self.progress_label = tk.Label(run_frame, text="Ready.")
+        self.progress_label.pack(fill=tk.X)
+        self.progress_bar = ttk.Progressbar(run_frame, orient='horizontal', mode='determinate')
+        self.progress_bar.pack(fill=tk.X, pady=5)
+
+        self.run_button = tk.Button(run_frame, text="Run Batch Analysis", command=self.start_analysis, font=('Helvetica', 10, 'bold'))
+        self.run_button.pack(side=tk.RIGHT, pady=5)
+
+    def select_project_folder(self):
+        """Apre un file dialog per selezionare la cartella radice del progetto e scansiona i partecipanti."""
+        folder_path = filedialog.askdirectory(title="Select Project Root Folder")
+        if not folder_path:
+            return
+        
+        self.project_root_var.set(folder_path)
+        self.participant_listbox.delete(0, tk.END)
+        
+        root_path = Path(folder_path)
+        participants = sorted([d.name for d in root_path.iterdir() if d.is_dir()])
+        
+        for p_name in participants:
+            self.participant_listbox.insert(tk.END, p_name)
+
+    def start_analysis(self):
+        """
+        Avvia l'analisi in batch in un thread separato per non bloccare la GUI.
+        """
+        selected_indices = self.participant_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("No Participants Selected", "Please select at least one participant from the list.", parent=self)
+            return
+
+        participants_to_process = [self.participant_listbox.get(i) for i in selected_indices]
+        project_root_path = Path(self.project_root_var.get())
+        overwrite = self.overwrite_var.get()
+
+        self.run_button.config(state=tk.DISABLED)
+        
+        # Avvia il metodo di SpeedApp in un thread
+        threading.Thread(target=self.parent_app.run_batch_analysis, args=(participants_to_process, project_root_path, overwrite, self), daemon=True).start()
+
+class ManagePathsWindow(tk.Toplevel):
+    """
+    Una finestra modale per aggiungere o rimuovere percorsi da una lista.
+    """
+    def __init__(self, parent, existing_paths=None):
+        super().__init__(parent)
+        self.title("Manage Enriched Paths")
+        self.geometry("600x400")
+        self.transient(parent)
+        self.grab_set()
+
+        self.result_paths = None
+
+        main_frame = tk.Frame(self, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.listbox = tk.Listbox(main_frame)
+        self.listbox.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        if existing_paths:
+            for path in existing_paths:
+                self.listbox.insert(tk.END, path)
+
+        btn_frame = tk.Frame(main_frame, padx=10)
+        btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        tk.Button(btn_frame, text="Add Folder...", command=self.add_folder).pack(pady=5, fill=tk.X)
+        tk.Button(btn_frame, text="Remove Selected", command=self.remove_selected).pack(pady=5, fill=tk.X)
+        tk.Button(btn_frame, text="Confirm", command=self.confirm, font=('Helvetica', 10, 'bold')).pack(side=tk.BOTTOM, pady=10, fill=tk.X)
+
+    def add_folder(self):
+        folder_path = filedialog.askdirectory(title="Select a folder")
+        if folder_path:
+            self.listbox.insert(tk.END, folder_path)
+
+    def remove_selected(self):
+        selected_indices = self.listbox.curselection()
+        for i in sorted(selected_indices, reverse=True):
+            self.listbox.delete(i)
+
+    def confirm(self):
+        self.result_paths = list(self.listbox.get(0, tk.END))
+        self.destroy()
+
+class AdvancedBatchWindow(tk.Toplevel):
+    """
+    Una finestra avanzata per l'analisi in batch che permette di configurare
+    i percorsi di input per ogni partecipante individualmente.
+    """
+    def __init__(self, parent):
+        super().__init__(parent.root)
+        self.parent_app = parent
+        self.title("Advanced Multi-User Batch Analysis")
+        self.geometry("1200x900")
+        self.transient(parent.root)
+        self.grab_set()
+
+        self.project_root_var = tk.StringVar()
+        self.participant_data = {}  # {item_id: {'raw': Path, 'unenriched': Path}}
+
+        main_frame = tk.Frame(self, padx=15, pady=15)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # --- Controlli Superiori ---
+        top_frame = tk.Frame(main_frame)
+        top_frame.pack(fill=tk.X, pady=(0, 10))
+        tk.Button(top_frame, text="Select Project Root...", command=self.select_project_folder).pack(side=tk.LEFT)
+
+        # --- Treeview per i Partecipanti ---
+        tree_frame = tk.Frame(main_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+
+        cols = ("Participant", "RAW Path", "Unenriched Path", "Enriched Paths", "Status")
+        self.tree = ttk.Treeview(tree_frame, columns=cols, show="headings")
+        for col in cols:
+            self.tree.heading(col, text=col)
+        self.tree.column("Participant", width=150, anchor='w')
+        self.tree.column("RAW Path", width=250, anchor='w')
+        self.tree.column("Unenriched Path", width=250, anchor='w')
+        self.tree.column("Enriched Paths", width=150, anchor='w')
+        self.tree.column("Status", width=100, anchor='center')
+
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tree_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=tree_scrollbar.set)
+        tree_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.tree.bind("<Double-1>", self.on_tree_double_click)
+
+        # --- NUOVO: Pannello di Guida ---
+        help_frame = tk.LabelFrame(main_frame, text="How to Use Batch Analysis", padx=10, pady=10)
+        help_frame.pack(fill=tk.X, pady=(10, 5))
+
+        help_text = """
+Step 1: Prepare Your Project Folder
+Organize your data with one subfolder per participant. Each subfolder should contain the 'RAW' and 'un-enriched' directories.
+Example:
+My_Project/
+├── Participant_01/
+│   ├── RAW/
+│   └── un-enriched/
+└── Participant_02/
+    ├── RAW/
+    └── un-enriched/
+
+Step 2: Configure Common Parameters
+Set up the main GUI window with the analysis settings (like AOIs, YOLO models, and events) that you want to apply to ALL participants.
+
+Step 3: Load and Configure Batch
+- Click 'Select Project Root...' and choose your main project folder. The table will populate automatically.
+- Double-click cells in the table to manually change the 'RAW', 'un-enriched', or 'Enriched' paths for any participant.
+
+Step 4: Run Analysis
+Click 'Run Batch Analysis'. The common parameters will be applied to each selected participant, and results will be saved in separate subfolders within your main output directory.
+"""
+        tk.Label(help_frame, text=help_text.strip(), justify=tk.LEFT, wraplength=1100).pack(anchor='w')
+
+        # --- Controlli Inferiori ---
+        bottom_frame = tk.Frame(main_frame)
+        bottom_frame.pack(fill=tk.X, pady=(10, 0))
+
+        self.progress_label = tk.Label(bottom_frame, text="Ready. Select a project root folder.")
+        self.progress_label.pack(fill=tk.X)
+        self.progress_bar = ttk.Progressbar(bottom_frame, orient='horizontal', mode='determinate')
+        self.progress_bar.pack(fill=tk.X, pady=5)
+
+        self.run_button = tk.Button(bottom_frame, text="Run Batch Analysis", command=self.run_batch, font=('Helvetica', 10, 'bold'))
+        self.run_button.pack(side=tk.RIGHT, pady=5)
+
+    def select_project_folder(self):
+        """Scansiona la cartella di progetto e popola il Treeview."""
+        folder_path = filedialog.askdirectory(title="Select Project Root Folder")
+        if not folder_path: return
+
+        self.project_root_var.set(folder_path)
+        self.tree.delete(*self.tree.get_children())
+        self.participant_data.clear()
+        self.enriched_paths_map = {} # Pulisce la mappa dei percorsi enriched
+
+        root_path = Path(folder_path)
+        participants = sorted([d for d in root_path.iterdir() if d.is_dir()])
+
+        for p_dir in participants:
+            p_name = p_dir.name
+            raw_path = p_dir / 'RAW'
+            unenriched_path = p_dir / 'un-enriched'
+
+            raw_display = str(raw_path) if raw_path.exists() else "Not Found"
+            unenriched_display = str(unenriched_path) if unenriched_path.exists() else "Not Found"
+
+            item_id = self.tree.insert("", "end", values=(p_name, raw_display, unenriched_display, "0 folders", "Ready"))
+            self.participant_data[item_id] = {
+                'name': p_name,
+                'raw': raw_path if raw_path.exists() else None,
+                'unenriched': unenriched_path if unenriched_path.exists() else None
+            }
+
+    def on_tree_double_click(self, event):
+        """Gestisce il doppio click per modificare i percorsi."""
+        region = self.tree.identify("region", event.x, event.y)
+        if region != "cell": return
+
+        item_id = self.tree.identify_row(event.y)
+        column_id = self.tree.identify_column(event.x)
+        col_index = int(column_id.replace('#', '')) - 1
+
+        if col_index == 1: # RAW Path
+            new_path = filedialog.askdirectory(title=f"Select RAW folder for {self.participant_data[item_id]['name']}")
+            if new_path:
+                self.participant_data[item_id]['raw'] = Path(new_path)
+                self.tree.set(item_id, column_id, new_path)
+        elif col_index == 2: # Unenriched Path
+            new_path = filedialog.askdirectory(title=f"Select Unenriched folder for {self.participant_data[item_id]['name']}")
+            if new_path:
+                self.participant_data[item_id]['unenriched'] = Path(new_path)
+                self.tree.set(item_id, column_id, new_path)
+        elif col_index == 3: # Enriched Paths
+            current_paths = self.participant_data[item_id].get('enriched', [])
+            dialog = ManagePathsWindow(self, existing_paths=current_paths)
+            self.wait_window(dialog)
+
+            if dialog.result_paths is not None:
+                new_paths = [Path(p) for p in dialog.result_paths]
+                self.participant_data[item_id]['enriched'] = new_paths
+                self.tree.set(item_id, column_id, f"{len(new_paths)} folders selected")
+
+
+
+    def run_batch(self):
+        """Prepara i dati e avvia il thread di analisi."""
+        participants_to_process = []
+        for item_id, data in self.participant_data.items():
+            # Prepara un dizionario per ogni partecipante con tutti i percorsi
+            participants_to_process.append({
+                'name': data['name'],
+                'raw_path': str(data['raw']) if data['raw'] else None,
+                'unenriched_path': str(data['unenriched']) if data['unenriched'] else None,
+                'enriched_paths': [str(p) for p in data.get('enriched', [])],
+                'tree_item_id': item_id # Per aggiornare lo stato
+            })
+
+        # (La logica di esecuzione in thread verrà aggiunta nel prossimo prompt)
+        messagebox.showinfo("Placeholder", "La logica di analisi in batch verrà eseguita qui.", parent=self)
+        self.destroy()
+
 # --- MODIFICA: Ristrutturata la costante dei modelli per task ---
 YOLO_MODELS = {
     'detect': [
@@ -833,7 +1130,7 @@ OFFICIAL_YOLO_CLS_MODELS = [
 class SpeedApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED v5.3.8.4")
+        self.root.title("SPEED v5.3.8.5")
         # --- MODIFICA: Avvia a schermo intero ---
         self.root.state('zoomed')
 
@@ -899,6 +1196,11 @@ class SpeedApp:
         tk.Label(output_frame, text="Output Folder:", width=15, anchor='w').pack(side=tk.LEFT)
         self.output_dir_entry = tk.Entry(output_frame); self.output_dir_entry.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=(0, 5))
         tk.Button(output_frame, text="Browse...", command=self.select_output_dir).pack(side=tk.RIGHT)
+
+        # --- NUOVO: Pulsante per l'analisi in batch ---
+        batch_frame = tk.Frame(setup_frame)
+        batch_frame.pack(fill=tk.X, pady=(5, 2))
+        tk.Button(batch_frame, text="Start Multi-User Batch...", command=self.open_batch_analysis_window).pack(fill=tk.X)
 
         folders_frame = tk.LabelFrame(left_column, text="2. Input Data", padx=5, pady=5)
         folders_frame.pack(pady=3, ipadx=2, ipady=2, fill=tk.X)
@@ -1843,11 +2145,116 @@ class SpeedApp:
         if dir_path: self.output_dir_entry.delete(0, tk.END); self.output_dir_entry.insert(0, dir_path)
 
     def update_post_analysis_buttons_state(self):
+        """Apre la finestra per l'analisi in batch."""
+        BatchAnalysisWindow(self.root)
+    def update_post_analysis_buttons_state(self):
         """Abilita o disabilita i pulsanti degli strumenti post-analisi."""
         # Logica per il pulsante NSI
         can_run_nsi = self.analysis_completed and len(self.user_defined_aois) >= 2
         self.nsi_button.config(state=tk.NORMAL if can_run_nsi else tk.DISABLED)
         self.data_plotter_button.config(state=tk.NORMAL if  self.analysis_completed else tk.DISABLED)
+
+    def run_batch_analysis(self, participants_to_process, project_root_path, overwrite, batch_window):
+        """
+        Orchestra l'analisi in batch per una lista di partecipanti.
+        Questo metodo viene eseguito in un thread separato.
+        """
+        # 1. Raccogli i parametri dalla GUI principale
+        main_output_folder = self.output_dir_entry.get().strip()
+        if not main_output_folder:
+            self.root.after(0, lambda: batch_window.progress_label.config(text="Error: Main output folder not set."))
+            self.root.after(0, lambda: batch_window.run_button.config(state=tk.NORMAL))
+            return
+
+        yolo_enabled = self.yolo_var.get()
+        yolo_models_to_run = {task: var.get() for task, var in self.yolo_model_vars.items() if var.get()}
+        custom_classes_str = self.yolo_classes_var.get().strip()
+        yolo_custom_classes = [cls.strip() for cls in custom_classes_str.split(',') if cls.strip()] if custom_classes_str else None
+        yolo_tracker_config = self.yolo_tracker_config_var.get() or None
+        
+        defined_aois = self.user_defined_aois
+        
+        # Gestione eventi: se un file esterno è specificato, usa quello per tutti.
+        # Altrimenti, run_full_analysis cercherà events.csv in ogni cartella un-enriched.
+        events_df = None
+        if self.external_event_file_var.get():
+            try:
+                events_df = pd.read_csv(self.external_event_file_var.get())
+            except Exception as e:
+                logging.error(f"Could not load external event file for batch: {e}")
+                self.root.after(0, lambda: batch_window.progress_label.config(text=f"Error loading event file: {e}"))
+                self.root.after(0, lambda: batch_window.run_button.config(state=tk.NORMAL))
+                return
+
+        # 2. Inizia il ciclo di analisi
+        total_participants = len(participants_to_process)
+        batch_window.progress_bar['maximum'] = total_participants
+        success_count = 0
+        fail_count = 0
+        log_summary = []
+
+        self.root.after(0, lambda: batch_window.progress_label.config(text="Starting batch analysis..."))
+
+        for i, participant_name in enumerate(participants_to_process):
+            try:
+                self.root.after(0, lambda p=participant_name, n=i+1: batch_window.progress_label.config(text=f"Processing {n}/{total_participants}: {p}..."))
+                
+                # Costruisci percorsi specifici per il partecipante
+                raw_data_path = project_root_path / participant_name / 'RAW'
+                unenriched_data_path = project_root_path / participant_name / 'un-enriched'
+                output_path = Path(main_output_folder) / participant_name
+
+                # Validazione dei percorsi di input
+                if not raw_data_path.is_dir() or not unenriched_data_path.is_dir():
+                    logging.warning(f"Skipping '{participant_name}': Missing 'RAW' or 'un-enriched' directory.")
+                    log_summary.append(f"FAILED: {participant_name} (Missing 'RAW' or 'un-enriched' directory)")
+                    fail_count += 1
+                    continue
+
+                # Controllo sovrascrittura
+                if output_path.exists() and not overwrite:
+                    logging.info(f"Skipping '{participant_name}': Output directory exists and overwrite is disabled.")
+                    log_summary.append(f"SKIPPED: {participant_name} (Output exists, overwrite disabled)")
+                    success_count += 1 # Lo contiamo come successo perché è stato saltato intenzionalmente
+                    continue
+
+                # Prepara gli argomenti per run_full_analysis
+                analysis_args = {
+                    "raw_data_path": str(raw_data_path),
+                    "unenriched_data_path": str(unenriched_data_path),
+                    "output_path": str(output_path),
+                    "subject_name": participant_name,
+                    "events_df": events_df,  # Sarà None se non c'è un file globale
+                    "defined_aois": defined_aois,
+                    "yolo_models": yolo_models_to_run if yolo_enabled else None,
+                    "yolo_custom_classes": yolo_custom_classes if yolo_enabled else None,
+                    "tracker_config_path": yolo_tracker_config if yolo_enabled else None,
+                }
+
+                run_full_analysis(**analysis_args)
+                success_count += 1
+                log_summary.append(f"SUCCESS: {participant_name}")
+
+            except Exception as e:
+                logging.error(f"Failed to process participant '{participant_name}': {e}\n{traceback.format_exc()}")
+                log_summary.append(f"FAILED: {participant_name} (Error: {e})")
+                fail_count += 1
+            finally:
+                self.root.after(0, lambda v=i+1: batch_window.progress_bar.config(value=v))
+
+        # 3. Riepilogo finale
+        summary_message = f"Batch analysis completed. Processed: {success_count}. Failed: {fail_count}."
+        self.root.after(0, lambda: batch_window.progress_label.config(text=summary_message))
+        self.root.after(0, lambda: batch_window.run_button.config(state=tk.NORMAL))
+        
+        # Salva il log di riepilogo
+        log_file_path = Path(main_output_folder) / f"batch_analysis_log_{time.strftime('%Y%m%d-%H%M%S')}.txt"
+        with open(log_file_path, 'w') as f:
+            f.write(f"{summary_message}\n\n")
+            f.write("="*30 + "\nDetails:\n" + "="*30 + "\n")
+            f.write("\n".join(log_summary))
+
+        self.root.after(0, lambda: messagebox.showinfo("Batch Complete", f"{summary_message}\n\nA detailed log has been saved to:\n{log_file_path}", parent=batch_window))
 
     def open_nsi_calculator(self):
         """Apre la finestra per il calcolo dell'NSI."""
@@ -1857,6 +2264,10 @@ class SpeedApp:
             return
         
         NsiCalculatorWindow(self, Path(output_dir), self.user_defined_aois)
+
+    def open_batch_analysis_window(self):
+        """Apre la finestra per l'analisi in batch."""
+        AdvancedBatchWindow(self)
 
     def launch_eyenet(self):
         """Placeholder function to launch the EyeNet application."""
