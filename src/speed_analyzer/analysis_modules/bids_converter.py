@@ -6,8 +6,9 @@ import gzip
 from pathlib import Path
 import logging
 import glob
+from typing import Optional, List, Dict, Any
 
-def convert_to_bids(unenriched_dir: Path, output_bids_dir: Path, subject_id: str, session_id: str, task_name: str):
+def convert_to_bids(unenriched_dir: Path, output_bids_dir: Path, subject_id: str, session_id: str, task_name: str, defined_aois: Optional[List[Dict[str, Any]]] = None):
     """
     Converte i dati di eye-tracking nel formato BIDS.
     """
@@ -103,6 +104,21 @@ def convert_to_bids(unenriched_dir: Path, output_bids_dir: Path, subject_id: str
     if video_file:
         shutil.copy(video_file, session_dir / f"{base_name}_recording.mp4")
         logging.info("File _recording.mp4 copiato.")
+
+    # 7. Salva le definizioni delle AOI come dati derivati (NUOVO)
+    if defined_aois:
+        derivatives_dir = output_bids_dir / "derivatives" / "speed_analysis" / f"sub-{subject_id}" / f"ses-{session_id}" / "eyetrack"
+        derivatives_dir.mkdir(parents=True, exist_ok=True)
+        logging.info(f"Cartella derivatives creata/verificata: {derivatives_dir}")
+
+        aois_filename = f"{base_name}_desc-aois_def.json"
+        aois_filepath = derivatives_dir / aois_filename
+
+        with open(aois_filepath, 'w') as f:
+            json.dump(defined_aois, f, indent=4)
+        logging.info(f"Definizioni delle AOI salvate in: {aois_filepath}")
+    else:
+        logging.info("Nessuna definizione di AOI fornita, il file delle definizioni non verrà creato.")
 
     logging.info("--- CONVERSIONE BIDS COMPLETATA ---")
 
