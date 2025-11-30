@@ -107,6 +107,6 @@ It is also requested to cite Pupil Labs publication, as requested on their websi
 
 ---
 
-## 💻 Artificial Intelligence disclosure
+## Artificial Intelligence disclosure
 
 This code is written in Vibe Coding with Google Gemini Pro
