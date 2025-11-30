@@ -20,6 +20,8 @@ PLOT_DPI = 150
 GAZE_COLOR = (0, 0, 255)  # Red BGR for video
 PUPIL_LEFT_COLOR = 'blue'
 PUPIL_RIGHT_COLOR = 'orange'
+PUPIL_LEFT_COLOR_BGR = (255, 255, 0)  # Cyan for video plot
+PUPIL_RIGHT_COLOR_BGR = (0, 165, 255) # Orange for video plot
 
 # ==============================================================================
 # 1. FILE MANAGEMENT AND DATA PREPARATION
@@ -233,10 +235,12 @@ def generate_full_video(data_dir, output_file, events_df):
     try:
         w_ts = pd.read_csv(data_dir / 'world_timestamps.csv')
         gaze = pd.read_csv(data_dir / 'gaze.csv')
+        blinks = pd.read_csv(data_dir / 'blinks.csv')
         pupil = pd.read_csv(data_dir / '3d_eye_states.csv')
         
         # Merge data frame-by-frame
         merged = pd.merge_asof(w_ts, gaze, on='timestamp [ns]', direction='nearest')
+        merged = pd.merge_asof(merged, blinks.add_suffix('_blink'), left_on='timestamp [ns]', right_on='start timestamp [ns]_blink', direction='nearest')
         merged = pd.merge_asof(merged, pupil, on='timestamp [ns]', direction='nearest')
     except Exception as e:
         print(f"Error loading data for video: {e}")
@@ -270,6 +274,15 @@ def generate_full_video(data_dir, output_file, events_df):
                 if evt_name not in ['recording.begin', 'recording.end']:
                     cv2.putText(frame, f"Event: {evt_name}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             
+            # 1.5 Blink & On-Surface Overlay
+            # Check for active blink (within 50ms of current frame)
+            if pd.notna(row.get('start timestamp [ns]_blink')) and abs(ts - row['start timestamp [ns]_blink']) < 50_000_000:
+                cv2.putText(frame, "BLINK", (width - 180, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
+            
+            # Check for on_surface from enrichment data
+            if row.get('on_surface') == True:
+                 cv2.putText(frame, "ON_SURFACE", (20, height - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
             # 2. Gaze Point & Path
             gx_col = 'gaze x [normalized]' if 'gaze x [normalized]' in row else 'gaze x [px]'
             gy_col = 'gaze y [normalized]' if 'gaze y [normalized]' in row else 'gaze y [px]'
@@ -293,6 +306,11 @@ def generate_full_video(data_dir, output_file, events_df):
                 val_l = row['pupil diameter left [mm]']
                 pupil_history_l.append(val_l)
                 if len(pupil_history_l) > 100: pupil_history_l.pop(0)
+
+            if pd.notna(row.get('pupil diameter right [mm]')):
+                val_r = row['pupil diameter right [mm]']
+                pupil_history_r.append(val_r)
+                if len(pupil_history_r) > 100: pupil_history_r.pop(0)
             
             plot_w, plot_h = 300, 100
             plot_x, plot_y = width - plot_w - 20, height - plot_h - 20
@@ -301,17 +319,28 @@ def generate_full_video(data_dir, output_file, events_df):
             overlay = frame.copy()
             cv2.rectangle(overlay, (plot_x, plot_y), (plot_x + plot_w, plot_y + plot_h), (30, 30, 30), -1)
             cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+            cv2.putText(frame, "Pupil Diameter", (plot_x + 5, plot_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             
-            # Draw line
+            # Draw lines
+            p_min, p_max = 2.0, 8.0 # Assumed range for pupil diameter in mm
+            
+            # Left Pupil Line
             if len(pupil_history_l) > 1:
-                p_min, p_max = 2.0, 8.0
-                pts = []
+                pts_l = []
                 for idx, val in enumerate(pupil_history_l):
                     px = int(plot_x + (idx / 100) * plot_w)
                     py = int(plot_y + plot_h - ((val - p_min) / (p_max - p_min)) * plot_h)
-                    pts.append((px, py))
-                cv2.polylines(frame, [np.array(pts)], False, (255, 255, 0), 2)
-                cv2.putText(frame, "Pupil Dia (L)", (plot_x + 5, plot_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    pts_l.append((px, py))
+                cv2.polylines(frame, [np.array(pts_l)], False, PUPIL_LEFT_COLOR_BGR, 2)
+
+            # Right Pupil Line
+            if len(pupil_history_r) > 1:
+                pts_r = []
+                for idx, val in enumerate(pupil_history_r):
+                    px = int(plot_x + (idx / 100) * plot_w)
+                    py = int(plot_y + plot_h - ((val - p_min) / (p_max - p_min)) * plot_h)
+                    pts_r.append((px, py))
+                cv2.polylines(frame, [np.array(pts_r)], False, PUPIL_RIGHT_COLOR_BGR, 2)
 
         except (IndexError, KeyError):
             pass
