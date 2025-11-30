@@ -73,7 +73,7 @@ def prepare_working_directory(data_dir, enrichment_dir, output_dir):
         else:
             # Create an empty dummy if it's missing
             pd.DataFrame().to_csv(files_dir / filename)
-            print(f"Warning: {filename} non trovato, creato vuoto.")
+            print(f"Warning: {filename} not found, created empty file.")
 
     return files_dir
 
@@ -96,11 +96,19 @@ def calculate_metrics(df_seg, video_res=(1280, 720)):
         metrics['mean_duration_fixations'] = fix['duration [ms]'].mean()
         metrics['std_duration_fixations'] = fix['duration [ms]'].std()
         
-        # Handle coordinates (Normalized or Pixels)
-        if 'fixation x [normalized]' in fix.columns:
+        # Handle coordinates, prioritizing enrichment surface data
+        if 'fixation detected on surface' in fix.columns:
+            # Use only fixations on the surface for position metrics
+            surface_fix = fix[fix['fixation detected on surface'] == True]
+            if not surface_fix.empty:
+                fx = surface_fix['fixation position on surface x [normalized]'] * video_res[0]
+                fy = surface_fix['fixation position on surface y [normalized]'] * video_res[1]
+            else:
+                fx, fy = pd.Series(dtype=float), pd.Series(dtype=float)
+        elif 'fixation x [normalized]' in fix.columns:
             fx = fix['fixation x [normalized]'] * video_res[0]
             fy = fix['fixation y [normalized]'] * video_res[1]
-        elif 'fixation x [px]' in fix.columns:
+        elif 'fixation x [px]' in fix.columns: # Fallback to pixel coordinates
             fx = fix['fixation x [px]']
             fy = fix['fixation y [px]']
         else:
@@ -272,24 +280,40 @@ def generate_full_video(data_dir, output_file, events_df):
                 evt_name = curr_event.iloc[-1]['name']
                 # Filter system events for a cleaner display
                 if evt_name not in ['recording.begin', 'recording.end']:
-                    cv2.putText(frame, f"Event: {evt_name}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    text = f"Event: {evt_name}"
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    font_scale = 1
+                    thickness = 2
+                    (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+                    
+                    # Draw a black background rectangle
+                    cv2.rectangle(frame, (20, 50 - text_height - baseline), (20 + text_width, 50 + baseline), (0, 0, 0), -1)
+                    # Put the text on top of the rectangle
+                    cv2.putText(frame, text, (20, 50), font, font_scale, (255, 255, 255), thickness)
             
             # 1.5 Blink & On-Surface Overlay
-            # Check for active blink (within 50ms of current frame)
-            if pd.notna(row.get('start timestamp [ns]_blink')) and abs(ts - row['start timestamp [ns]_blink']) < 50_000_000:
+            # Check if the current frame's timestamp is within a blink's duration
+            if pd.notna(row.get('start timestamp [ns]_blink')) and ts >= row['start timestamp [ns]_blink'] and ts <= (row['start timestamp [ns]_blink'] + row['duration [ms]_blink'] * 1_000_000):
                 cv2.putText(frame, "BLINK", (width - 180, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
             
-            # Check for on_surface from enrichment data
-            if row.get('on_surface') == True:
+            # Check for on_surface from enrichment data using the correct column name
+            if row.get('gaze detected on surface') == True:
                  cv2.putText(frame, "ON_SURFACE", (20, height - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
             # 2. Gaze Point & Path
-            gx_col = 'gaze x [normalized]' if 'gaze x [normalized]' in row else 'gaze x [px]'
-            gy_col = 'gaze y [normalized]' if 'gaze y [normalized]' in row else 'gaze y [px]'
+            # Prioritize surface data if available
+            if 'gaze detected on surface' in row and row['gaze detected on surface'] == True:
+                gx_col = 'gaze position on surface x [normalized]'
+                gy_col = 'gaze position on surface y [normalized]'
+            else:
+                # Fallback to regular gaze data
+                gx_col = 'gaze x [normalized]' if 'gaze x [normalized]' in row else 'gaze x [px]'
+                gy_col = 'gaze y [normalized]' if 'gaze y [normalized]' in row else 'gaze y [px]'
             
             if pd.notna(row.get(gx_col)):
                 gx, gy = row[gx_col], row[gy_col]
-                # If normalized, scale to pixel coordinates
+                
+                # If coordinates are normalized (which surface data always is), scale to pixels
                 if gx <= 1.0: gx *= width; gy *= height
                 
                 gx, gy = int(gx), int(gy)
@@ -689,15 +713,25 @@ class SpeedLiteApp:
                 # Gaze Plot
                 gaze_seg = seg['gaze']
                 if not gaze_seg.empty:
-                    gx = 'gaze x [normalized]' if 'gaze x [normalized]' in gaze_seg else 'gaze x [px]'
-                    gy = 'gaze y [normalized]' if 'gaze y [normalized]' in gaze_seg else 'gaze y [px]'
+                    if 'gaze detected on surface' in gaze_seg.columns:
+                        gaze_seg = gaze_seg[gaze_seg['gaze detected on surface'] == True]
+                        gx = 'gaze position on surface x [normalized]'
+                        gy = 'gaze position on surface y [normalized]'
+                    else:
+                        gx = 'gaze x [normalized]' if 'gaze x [normalized]' in gaze_seg else 'gaze x [px]'
+                        gy = 'gaze y [normalized]' if 'gaze y [normalized]' in gaze_seg else 'gaze y [px]'
                     generate_heatmap_pdf(gaze_seg, gx, gy, f"Gaze Heatmap - {evt_name}", f"heatmap_gaze_{evt_name}", pdf_dir, res)
                 
                 # Fixation Plot
                 fix_seg = seg['fixations']
                 if not fix_seg.empty:
-                    fx = 'fixation x [normalized]' if 'fixation x [normalized]' in fix_seg else 'fixation x [px]'
-                    fy = 'fixation y [normalized]' if 'fixation y [normalized]' in fix_seg else 'fixation y [px]'
+                    if 'fixation detected on surface' in fix_seg.columns:
+                        fix_seg = fix_seg[fix_seg['fixation detected on surface'] == True]
+                        fx = 'fixation position on surface x [normalized]'
+                        fy = 'fixation position on surface y [normalized]'
+                    else:
+                        fx = 'fixation x [normalized]' if 'fixation x [normalized]' in fix_seg else 'fixation x [px]'
+                        fy = 'fixation y [normalized]' if 'fixation y [normalized]' in fix_seg else 'fixation y [px]'
                     generate_heatmap_pdf(fix_seg, fx, fy, f"Fixation Heatmap - {evt_name}", f"heatmap_fixation_{evt_name}", pdf_dir, res)
                 
                 # Pupil Timeseries Plot

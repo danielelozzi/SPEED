@@ -58,6 +58,8 @@ Before you begin, ensure you have **Git** and **Anaconda** installed on your sys
     Activate the new environment:
     ```bash
     conda activate speedlight
+    conda install pip
+    conda install git
     ```
 
 3.  **Install dependencies**
