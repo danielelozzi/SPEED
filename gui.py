@@ -101,16 +101,19 @@ def calculate_metrics(df_seg, video_res=(1280, 720)):
             # Use only fixations on the surface for position metrics
             surface_fix = fix[fix['fixation detected on surface'] == True]
             if not surface_fix.empty:
-                fx = surface_fix['fixation position on surface x [normalized]'] * video_res[0]
-                fy = surface_fix['fixation position on surface y [normalized]'] * video_res[1]
+                # Keep values normalized (0-1 range)
+                fx = surface_fix['fixation position on surface x [normalized]']
+                fy = surface_fix['fixation position on surface y [normalized]']
             else:
                 fx, fy = pd.Series(dtype=float), pd.Series(dtype=float)
         elif 'fixation x [normalized]' in fix.columns:
-            fx = fix['fixation x [normalized]'] * video_res[0]
-            fy = fix['fixation y [normalized]'] * video_res[1]
+            # Keep values normalized (0-1 range)
+            fx = fix['fixation x [normalized]']
+            fy = fix['fixation y [normalized]']
         elif 'fixation x [px]' in fix.columns: # Fallback to pixel coordinates
-            fx = fix['fixation x [px]']
-            fy = fix['fixation y [px]']
+            # Convert from pixels to normalized for consistent output
+            fx = fix['fixation x [px]'] / video_res[0]
+            fy = fix['fixation y [px]'] / video_res[1]
         else:
             fx, fy = pd.Series(dtype=float), pd.Series(dtype=float)
             
@@ -294,7 +297,17 @@ def generate_full_video(data_dir, output_file, events_df):
             # 1.5 Blink & On-Surface Overlay
             # Check if the current frame's timestamp is within a blink's duration
             if pd.notna(row.get('start timestamp [ns]_blink')) and ts >= row['start timestamp [ns]_blink'] and ts <= (row['start timestamp [ns]_blink'] + row['duration [ms]_blink'] * 1_000_000):
-                cv2.putText(frame, "BLINK", (width - 180, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
+                blink_text = "BLINK"
+                blink_font = cv2.FONT_HERSHEY_SIMPLEX
+                blink_font_scale = 1.2
+                blink_thickness = 3
+                (text_w, text_h), blink_baseline = cv2.getTextSize(blink_text, blink_font, blink_font_scale, blink_thickness)
+                
+                text_x = width - 20 - text_w # Position from right edge
+                text_y = 50
+                
+                cv2.rectangle(frame, (text_x, text_y - text_h - blink_baseline), (text_x + text_w, text_y + blink_baseline), (0, 0, 0), -1)
+                cv2.putText(frame, blink_text, (text_x, text_y), blink_font, blink_font_scale, (0, 255, 255), blink_thickness)
             
             # Check for on_surface from enrichment data using the correct column name
             if row.get('gaze detected on surface') == True:
