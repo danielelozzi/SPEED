@@ -33,12 +33,9 @@ The application is designed to work with the data structure produced by Pupil La
 
 ### Prerequisites
 
-Before you begin, ensure you have **Git** and **Anaconda** installed on your system.
+Before you begin, ensure you have **Anaconda** installed on your system.
 
-*   **Git**: Puoi scaricarlo e installarlo da git-scm.com.
 *   **Anaconda**: You can download and install the Anaconda Distribution (for Python 3.x) from anaconda.com/products/distribution.
-
-`pip` is included with the Anaconda distribution, so a separate installation is not necessary.
 
 ### Installation
 

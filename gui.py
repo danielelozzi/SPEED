@@ -185,23 +185,43 @@ def generate_heatmap_pdf(df, x_col, y_col, title, filename, output_dir, video_re
     x = df[x_col].dropna()
     y = df[y_col].dropna()
     
-    if x.max() <= 1.0: # Normalized -> Pixel
-        x = x * video_res[0]
-        y = y * video_res[1]
+    is_surface_plot = 'surface' in filename.lower()
+
+    if is_surface_plot:
+        # For surface plots, keep data normalized (0-1) and set axes accordingly
+        x_limit, y_limit = 1.0, 1.0
+        x_label, y_label = 'X [normalized]', 'Y [normalized]'
+    else:
+        # For other plots, convert to pixels if necessary
+        if x.max() <= 1.0: # Normalized -> Pixel
+            x = x * video_res[0]
+            y = y * video_res[1]
+        x_limit, y_limit = video_res[0], video_res[1]
+        x_label, y_label = 'X [px]', 'Y [px]'
 
     plt.figure(figsize=(10, 6))
     try:
         k = gaussian_kde(np.vstack([x, y]))
-        xi, yi = np.mgrid[0:video_res[0]:100j, 0:video_res[1]:100j]
+        # Adjust grid to the correct space (pixel or normalized)
+        xi, yi = np.mgrid[0:x_limit:100j, 0:y_limit:100j]
         zi = k(np.vstack([xi.flatten(), yi.flatten()]))
+        zi_reshaped = zi.reshape(xi.shape)
+
+        # Save the numpy matrices
+        numpy_dir = output_dir.parent / "Numpy_Matrices"
+        numpy_dir.mkdir(exist_ok=True)
+        np.save(numpy_dir / f"{filename}_xi.npy", xi)
+        np.save(numpy_dir / f"{filename}_yi.npy", yi)
+        np.save(numpy_dir / f"{filename}_zi.npy", zi_reshaped)
+
         
-        plt.pcolormesh(xi, yi, zi.reshape(xi.shape), shading='auto', cmap='jet')
+        plt.pcolormesh(xi, yi, zi_reshaped, shading='auto', cmap='jet')
         plt.colorbar(label='Density')
-        plt.xlim(0, video_res[0])
-        plt.ylim(video_res[1], 0) # Invert Y-axis
+        plt.xlim(0, x_limit)
+        plt.ylim(y_limit, 0) # Invert Y-axis
         plt.title(title)
-        plt.xlabel('X [px]')
-        plt.ylabel('Y [px]')
+        plt.xlabel(x_label)
+        plt.ylabel(y_label)
         
         out_path = output_dir / f"{filename}.pdf"
         plt.savefig(out_path, format='pdf', bbox_inches='tight')
@@ -210,33 +230,81 @@ def generate_heatmap_pdf(df, x_col, y_col, title, filename, output_dir, video_re
         print(f"Error generating heatmap {title}: {e}")
         plt.close()
 
-def generate_pupil_timeseries_pdf(pupil_df, title, filename, output_dir):
+def generate_pupil_timeseries_pdf(pupil_df, gaze_df, blinks_df, start_ts, title, filename, output_dir):
     """Generates the pupillometry plot (Left and Right) in PDF."""
     if pupil_df.empty: return
     
     plt.figure(figsize=(12, 6))
     
+    # Normalize timestamps to start from 0 for this event
+    pupil_df['time_norm'] = pupil_df['timestamp [ns]'] - start_ts
+
+    # --- Draw On-Surface Bands ---
+    # Use the correct column name for on_surface
+    surface_col = 'gaze detected on surface' if 'gaze detected on surface' in gaze_df.columns else 'on_surface'
+
+    if not gaze_df.empty and surface_col in gaze_df.columns:
+        gaze_df['time_norm'] = gaze_df['timestamp [ns]'] - start_ts
+        # Find blocks of consecutive True/False values
+        gaze_df['block'] = (gaze_df[surface_col] != gaze_df[surface_col].shift()).cumsum()
+        
+        for _, group in gaze_df.groupby('block'):
+            start_band = group['time_norm'].iloc[0]
+            end_band = group['time_norm'].iloc[-1]
+            is_on_surface = group[surface_col].iloc[0]
+            
+            color = 'green' if is_on_surface else 'red'
+            plt.axvspan(start_band, end_band, color=color, alpha=0.15, lw=0)
+
+    # --- Draw Blink Bands ---
+    if not blinks_df.empty:
+        for _, blink_row in blinks_df.iterrows():
+            blink_start = blink_row['start timestamp [ns]']
+            blink_duration_ms = blink_row['duration [ms]']
+            blink_end = blink_start + (blink_duration_ms * 1_000_000) # convert ms to ns
+
+            # Normalize to the event's timeline
+            norm_blink_start = blink_start - start_ts
+            norm_blink_end = blink_end - start_ts
+            plt.axvspan(norm_blink_start, norm_blink_end, color='blue', alpha=0.2, lw=0)
+
     has_data = False
     # Left Pupil
     if 'pupil diameter left [mm]' in pupil_df.columns:
-        plt.plot(pupil_df['timestamp [ns]'], pupil_df['pupil diameter left [mm]'], 
+        plt.plot(pupil_df['time_norm'], pupil_df['pupil diameter left [mm]'], 
                  label='Left Pupil', color=PUPIL_LEFT_COLOR, alpha=0.7)
         has_data = True
         
     # Right Pupil
     if 'pupil diameter right [mm]' in pupil_df.columns:
-        plt.plot(pupil_df['timestamp [ns]'], pupil_df['pupil diameter right [mm]'], 
+        plt.plot(pupil_df['time_norm'], pupil_df['pupil diameter right [mm]'], 
                  label='Right Pupil', color=PUPIL_RIGHT_COLOR, alpha=0.7)
         has_data = True
         
     if has_data:
         plt.title(f"Pupillometry Timeseries - {title}")
-        plt.xlabel("Time (ns)")
+        plt.xlabel("Time from event start (ns)")
         plt.ylabel("Diameter [mm]")
         plt.legend()
         plt.grid(True, linestyle='--', alpha=0.6)
         
         out_path = output_dir / f"{filename}.pdf"
+
+        # --- Save the timeseries data to a .npy file ---
+        try:
+            numpy_dir = output_dir.parent / "Numpy_Matrices"
+            numpy_dir.mkdir(exist_ok=True)
+            
+            # Prepare data for saving: [time, left_pupil, right_pupil]
+            time_col = pupil_df['time_norm'].values
+            left_col = pupil_df.get('pupil diameter left [mm]', pd.Series(np.nan, index=pupil_df.index)).values
+            right_col = pupil_df.get('pupil diameter right [mm]', pd.Series(np.nan, index=pupil_df.index)).values
+            
+            timeseries_data = np.vstack([time_col, left_col, right_col]).T
+            np.save(numpy_dir / f"{filename}_timeseries.npy", timeseries_data)
+        except Exception as e:
+            print(f"Could not save timeseries numpy array for {filename}: {e}")
+
         plt.savefig(out_path, format='pdf', bbox_inches='tight')
     plt.close()
 
@@ -771,7 +839,7 @@ class SpeedLiteApp:
                 # Pupil Timeseries Plot (unchanged)
                 pupil_seg = seg['pupil']
                 if not pupil_seg.empty:
-                    generate_pupil_timeseries_pdf(pupil_seg, evt_name, f"pupil_ts_{evt_name}", pdf_dir)
+                    generate_pupil_timeseries_pdf(pupil_seg, seg['gaze'], seg['blinks'], start_ts, evt_name, f"pupil_ts_{evt_name}", pdf_dir)
 
             # Save Excel
             out_file = Path(self.output_dir.get()) / "Speed_Lite_Results.xlsx"
