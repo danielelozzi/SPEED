@@ -90,6 +90,7 @@ def calculate_metrics(df_seg, video_res=(1280, 720)):
     metrics = {}
     
     fix = df_seg.get('fixations', pd.DataFrame())
+    gaze = df_seg.get('gaze', pd.DataFrame())
     pupil = df_seg.get('pupil', pd.DataFrame())
     blinks = df_seg.get('blinks', pd.DataFrame())
     saccades = df_seg.get('saccades', pd.DataFrame())
@@ -130,10 +131,40 @@ def calculate_metrics(df_seg, video_res=(1280, 720)):
         for k in ['n_fixations', 'mean_duration_fixations', 'std_duration_fixations', 
                   'mean_x_pos_fixations', 'mean_y_pos_fixations', 'std_x_pos_fixations', 'std_y_pos_fixations']:
             metrics[k] = np.nan
+
+    # --- Gaze Metrics (Base and Enriched) ---
+    if not gaze.empty:
+        # Base gaze metrics from raw data (pixels preferred)
+        if 'gaze x [px]' in gaze.columns:
+            gx = gaze['gaze x [px]'] / video_res[0]
+            gy = gaze['gaze y [px]'] / video_res[1]
+        else: # Fallback to normalized
+            gx = gaze.get('gaze x [normalized]', pd.Series(dtype=float))
+            gy = gaze.get('gaze y [normalized]', pd.Series(dtype=float))
+
+        metrics['mean_x_gaze'] = gx.mean()
+        metrics['mean_y_gaze'] = gy.mean()
+        metrics['std_x_gaze'] = gx.std()
+        metrics['std_y_gaze'] = gy.std()
+
+        # Enriched gaze metrics from surface data
+        if 'gaze detected on surface' in gaze.columns:
+            surface_gaze = gaze[gaze['gaze detected on surface'] == True]
+            if not surface_gaze.empty:
+                gx_norm = surface_gaze['gaze position on surface x [normalized]']
+                gy_norm = surface_gaze['gaze position on surface y [normalized]']
+
+                metrics['mean_x_gaze[norm]'] = gx_norm.mean()
+                metrics['mean_y_gaze[norm]'] = gy_norm.mean()
+                metrics['std_x_gaze[norm]'] = gx_norm.std()
+                metrics['std_y_gaze[norm]'] = gy_norm.std()
+    else:
+        for k in ['mean_x_gaze', 'mean_y_gaze', 'std_x_gaze', 'std_y_gaze']:
+            metrics[k] = np.nan
             
     # --- 3. Other Metrics (Blinks, Pupil, Saccades) ---
     metrics['n_blink'] = len(blinks)
-    
+
     # 9-14: Pupil metrics
     if not pupil.empty:
         # Right
@@ -308,6 +339,53 @@ def generate_pupil_timeseries_pdf(pupil_df, gaze_df, blinks_df, start_ts, title,
         plt.savefig(out_path, format='pdf', bbox_inches='tight')
     plt.close()
 
+def generate_fragmentation_plot(gaze_df, x_col, y_col, start_ts, title, filename, output_dir, events_df=None, show_surface_bands=False):
+    """Generates a fragmentation (Euclidean distance) plot for gaze data."""
+    if gaze_df.empty or x_col not in gaze_df.columns or y_col not in gaze_df.columns:
+        return
+
+    df = gaze_df.copy()
+    df['time_norm'] = df['timestamp [ns]'] - start_ts
+
+    # Calculate Euclidean distance from the previous point
+    dx = df[x_col].diff()
+    dy = df[y_col].diff()
+    df['distance'] = np.sqrt(dx**2 + dy**2)
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(df['time_norm'], df['distance'], label='Gaze Fragmentation', color='purple', alpha=0.8)
+
+    # --- Optional: Draw On-Surface Bands ---
+    if show_surface_bands and 'gaze detected on surface' in df.columns:
+        df['block'] = (df['gaze detected on surface'] != df['gaze detected on surface'].shift()).cumsum()
+        for _, group in df.groupby('block'):
+            start_band = group['time_norm'].iloc[0]
+            end_band = group['time_norm'].iloc[-1]
+            color = 'green' if group['gaze detected on surface'].iloc[0] else 'red'
+            plt.axvspan(start_band, end_band, color=color, alpha=0.15, lw=0)
+
+    # --- Optional: Draw Event Triggers for full video plots ---
+    if events_df is not None:
+        for _, event_row in events_df.iterrows():
+            event_time = event_row['timestamp [ns]'] - start_ts
+            plt.axvline(x=event_time, color='k', linestyle='--', linewidth=1)
+
+    plt.title(title)
+    plt.xlabel("Time from start (ns)")
+    plt.ylabel("Euclidean Distance")
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.6)
+
+    # Save PDF and Numpy array
+    out_path_pdf = output_dir / f"{filename}.pdf"
+    plt.savefig(out_path_pdf, format='pdf', bbox_inches='tight')
+    plt.close()
+
+    numpy_dir = output_dir.parent / "Numpy_Matrices"
+    numpy_dir.mkdir(exist_ok=True)
+    fragmentation_data = df[['time_norm', 'distance']].dropna().values
+    np.save(numpy_dir / f"{filename}_fragmentation.npy", fragmentation_data)
+
 # ==============================================================================
 # 3. VIDEO GENERATION (Simplified Engine)
 # ==============================================================================
@@ -348,6 +426,8 @@ def generate_full_video(data_dir, output_file, events_df, enrichment_dir=None):
     gaze_history = []
     pupil_history_l = []
     pupil_history_r = []
+    fragmentation_history = []
+    prev_gaze_point = None
     
     for i in tqdm(range(total_frames), desc="Rendering Video"):
         ret, frame = cap.read()
@@ -420,6 +500,16 @@ def generate_full_video(data_dir, output_file, events_df, enrichment_dir=None):
                 
                 gaze_history.append((gx, gy))
                 if len(gaze_history) > 20: gaze_history.pop(0)
+
+                # Calculate fragmentation
+                if prev_gaze_point:
+                    distance = np.sqrt((gx - prev_gaze_point[0])**2 + (gy - prev_gaze_point[1])**2)
+                    fragmentation_history.append(distance)
+                else:
+                    fragmentation_history.append(0) # No distance for the first point
+                if len(fragmentation_history) > 100: fragmentation_history.pop(0)
+                
+                prev_gaze_point = (gx, gy)
                 
                 for j in range(1, len(gaze_history)):
                     cv2.line(frame, gaze_history[j-1], gaze_history[j], GAZE_COLOR, 2)
@@ -464,6 +554,27 @@ def generate_full_video(data_dir, output_file, events_df, enrichment_dir=None):
                     py = int(plot_y + plot_h - ((val - p_min) / (p_max - p_min)) * plot_h)
                     pts_r.append((px, py))
                 cv2.polylines(frame, [np.array(pts_r)], False, PUPIL_RIGHT_COLOR_BGR, 2)
+
+            # 4. Fragmentation Plot (above pupil plot)
+            frag_plot_y = plot_y - plot_h - 20 # Position it above the pupil plot with a 20px gap
+            
+            # Fragmentation plot background
+            overlay_frag = frame.copy()
+            cv2.rectangle(overlay_frag, (plot_x, frag_plot_y), (plot_x + plot_w, frag_plot_y + plot_h), (30, 30, 30), -1)
+            cv2.addWeighted(overlay_frag, 0.6, frame, 0.4, 0, frame)
+            cv2.putText(frame, "Gaze Fragmentation", (plot_x + 5, frag_plot_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+            # Draw fragmentation line
+            if len(fragmentation_history) > 1:
+                frag_min, frag_max = 0, 150 # Assumed range for distance in pixels
+                pts_frag = []
+                for idx, val in enumerate(fragmentation_history):
+                    px = int(plot_x + (idx / 100) * plot_w)
+                    # Clamp value to max to avoid plot overflow
+                    clamped_val = min(val, frag_max)
+                    py = int(frag_plot_y + plot_h - ((clamped_val - frag_min) / (frag_max - frag_min)) * plot_h)
+                    pts_frag.append((px, py))
+                cv2.polylines(frame, [np.array(pts_frag)], False, (128, 0, 128), 2) # Purple color
 
         except (IndexError, KeyError):
             pass
@@ -841,6 +952,21 @@ class SpeedLiteApp:
                 if not pupil_seg.empty:
                     generate_pupil_timeseries_pdf(pupil_seg, seg['gaze'], seg['blinks'], start_ts, evt_name, f"pupil_ts_{evt_name}", pdf_dir)
 
+                # --- Fragmentation Plot Generation ---
+                if not gaze_seg.empty:
+                    # Always generate for raw data
+                    gx_raw = 'gaze x [px]' if 'gaze x [px]' in gaze_seg.columns else 'gaze x [normalized]'
+                    gy_raw = 'gaze y [px]' if 'gaze y [px]' in gaze_seg.columns else 'gaze y [normalized]'
+                    generate_fragmentation_plot(gaze_seg, gx_raw, gy_raw, start_ts,
+                                                f"Gaze Fragmentation - {evt_name}", f"frag_gaze_{evt_name}", pdf_dir)
+
+                    # Generate for surface data if available
+                    if 'gaze detected on surface' in gaze_seg.columns:
+                        surface_gaze = gaze_seg[gaze_seg['gaze detected on surface'] == True]
+                        if not surface_gaze.empty:
+                            generate_fragmentation_plot(surface_gaze, 'gaze position on surface x [normalized]', 'gaze position on surface y [normalized]', start_ts,
+                                                        f"Gaze Fragmentation (Surface) - {evt_name}", f"frag_gaze_{evt_name}_surface", pdf_dir)
+
             # Save Excel
             out_file = Path(self.output_dir.get()) / "Speed_Lite_Results.xlsx"
             pd.DataFrame(all_metrics).to_excel(out_file, index=False)
@@ -851,6 +977,31 @@ class SpeedLiteApp:
             vid_out = Path(self.output_dir.get()) / "final_video_overlay.mp4"
             enrich_path = Path(self.enrich_dir.get()) if self.enrich_dir.get() else None
             generate_full_video(self.working_dir, vid_out, ev, enrichment_dir=enrich_path)
+
+            # --- Generate Full-Duration Plots ---
+            self.log("Generating full duration plots...")
+            full_duration_dir = Path(self.output_dir.get()) / "Full_Duration_Plots"
+            full_duration_dir.mkdir(exist_ok=True)
+            video_start_ts = gaze['timestamp [ns]'].min()
+
+            # Full Pupillometry
+            generate_pupil_timeseries_pdf(pupil, gaze, blinks, video_start_ts,
+                                          "Full Pupillometry Timeseries", "full_pupillometry", full_duration_dir)
+
+            # Full Fragmentation (Raw)
+            gx_raw_full = 'gaze x [px]' if 'gaze x [px]' in gaze.columns else 'gaze x [normalized]'
+            gy_raw_full = 'gaze y [px]' if 'gaze y [px]' in gaze.columns else 'gaze y [normalized]'
+            generate_fragmentation_plot(gaze, gx_raw_full, gy_raw_full, video_start_ts,
+                                        "Full Gaze Fragmentation (Raw)", "full_frag_raw", full_duration_dir,
+                                        events_df=ev, show_surface_bands=True)
+
+            # Full Fragmentation (Surface/Normalized)
+            if 'gaze detected on surface' in gaze.columns:
+                surface_gaze_full = gaze[gaze['gaze detected on surface'] == True]
+                if not surface_gaze_full.empty:
+                    generate_fragmentation_plot(surface_gaze_full, 'gaze position on surface x [normalized]', 'gaze position on surface y [normalized]', video_start_ts,
+                                                "Full Gaze Fragmentation (Surface)", "full_frag_surface", full_duration_dir,
+                                                events_df=ev)
             
             self.log("Analysis Complete.")
             messagebox.showinfo("Finished", "All operations completed successfully!")
