@@ -1,4 +1,4 @@
-# SPEED-light
+# SPEED-light - Software Processing and Extraction of Eye tracking Data by LabSCoC (University of L'Aquila, Italy)
 
 ## Description
 

@@ -61,7 +61,7 @@ def prepare_working_directory(data_dir, enrichment_dir, output_dir):
             raise FileNotFoundError(f"Required file missing: {filename} in {source}")
 
     # Handle Enrichment precedence for Gaze and Fixations
-    for filename in ['gaze.csv', 'fixations.csv']:
+    for filename in ['gaze.csv', 'fixations.csv', 'surface_positions.csv']:
         # If enrichment is provided AND the file exists there, take it from there
         if enrichment_dir and (enrichment_dir / filename).exists():
             shutil.copy(enrichment_dir / filename, files_dir / filename)
@@ -70,7 +70,8 @@ def prepare_working_directory(data_dir, enrichment_dir, output_dir):
         elif (data_dir / filename).exists():
             shutil.copy(data_dir / filename, files_dir / filename)
             print(f"Used {filename} from Data.")
-        else:
+        # Only create dummy files for gaze and fixations, not for surface_positions
+        elif filename in ['gaze.csv', 'fixations.csv']:
             # Create an empty dummy if it's missing
             pd.DataFrame().to_csv(files_dir / filename)
             print(f"Warning: {filename} not found, created empty file.")
@@ -82,51 +83,55 @@ def prepare_working_directory(data_dir, enrichment_dir, output_dir):
 # ==============================================================================
 
 def calculate_metrics(df_seg, video_res=(1280, 720)):
-    """Calculates the 16 required metrics."""
+    """
+    Calculates metrics. Always calculates from raw data.
+    If enrichment data is present in fixations, it adds normalized surface metrics.
+    """
     metrics = {}
     
     fix = df_seg.get('fixations', pd.DataFrame())
     pupil = df_seg.get('pupil', pd.DataFrame())
     blinks = df_seg.get('blinks', pd.DataFrame())
     saccades = df_seg.get('saccades', pd.DataFrame())
-    
-    # 1-7: Fixations metrics
+
+    # --- 1. Base Fixation Metrics (Always from raw data) ---
     if not fix.empty and 'duration [ms]' in fix.columns:
         metrics['n_fixations'] = len(fix)
         metrics['mean_duration_fixations'] = fix['duration [ms]'].mean()
         metrics['std_duration_fixations'] = fix['duration [ms]'].std()
         
-        # Handle coordinates, prioritizing enrichment surface data
-        if 'fixation detected on surface' in fix.columns:
-            # Use only fixations on the surface for position metrics
-            surface_fix = fix[fix['fixation detected on surface'] == True]
-            if not surface_fix.empty:
-                # Keep values normalized (0-1 range)
-                fx = surface_fix['fixation position on surface x [normalized]']
-                fy = surface_fix['fixation position on surface y [normalized]']
-            else:
-                fx, fy = pd.Series(dtype=float), pd.Series(dtype=float)
-        elif 'fixation x [normalized]' in fix.columns:
-            # Keep values normalized (0-1 range)
-            fx = fix['fixation x [normalized]']
-            fy = fix['fixation y [normalized]']
-        elif 'fixation x [px]' in fix.columns: # Fallback to pixel coordinates
-            # Convert from pixels to normalized for consistent output
+        # Use pixel data for base metrics, then normalize for output consistency
+        if 'fixation x [px]' in fix.columns:
             fx = fix['fixation x [px]'] / video_res[0]
             fy = fix['fixation y [px]'] / video_res[1]
-        else:
-            fx, fy = pd.Series(dtype=float), pd.Series(dtype=float)
+        else: # Fallback to normalized if pixel is not available
+            fx = fix.get('fixation x [normalized]', pd.Series(dtype=float))
+            fy = fix.get('fixation y [normalized]', pd.Series(dtype=float))
             
         metrics['mean_x_pos_fixations'] = fx.mean()
         metrics['mean_y_pos_fixations'] = fy.mean()
         metrics['std_x_pos_fixations'] = fx.std()
         metrics['std_y_pos_fixations'] = fy.std()
+
+        # --- 2. Enriched/Normalized Metrics (Conditional) ---
+        # If surface data is available, calculate additional [norm] metrics from it.
+        if 'fixation detected on surface' in fix.columns:
+            surface_fix = fix[fix['fixation detected on surface'] == True]
+            if not surface_fix.empty:
+                fx_norm = surface_fix['fixation position on surface x [normalized]']
+                fy_norm = surface_fix['fixation position on surface y [normalized]']
+                
+                metrics['mean_x_pos_fixations[norm]'] = fx_norm.mean()
+                metrics['mean_y_pos_fixations[norm]'] = fy_norm.mean()
+                metrics['std_x_pos_fixations[norm]'] = fx_norm.std()
+                metrics['std_y_pos_fixations[norm]'] = fy_norm.std()
+
     else:
         for k in ['n_fixations', 'mean_duration_fixations', 'std_duration_fixations', 
                   'mean_x_pos_fixations', 'mean_y_pos_fixations', 'std_x_pos_fixations', 'std_y_pos_fixations']:
             metrics[k] = np.nan
             
-    # 8: Blinks metric
+    # --- 3. Other Metrics (Blinks, Pupil, Saccades) ---
     metrics['n_blink'] = len(blinks)
     
     # 9-14: Pupil metrics
@@ -239,7 +244,7 @@ def generate_pupil_timeseries_pdf(pupil_df, title, filename, output_dir):
 # 3. VIDEO GENERATION (Simplified Engine)
 # ==============================================================================
 
-def generate_full_video(data_dir, output_file, events_df):
+def generate_full_video(data_dir, output_file, events_df, enrichment_dir=None):
     """Generates the video with all overlays."""
     print("Starting video generation...")
     
@@ -253,6 +258,13 @@ def generate_full_video(data_dir, output_file, events_df):
         merged = pd.merge_asof(w_ts, gaze, on='timestamp [ns]', direction='nearest')
         merged = pd.merge_asof(merged, blinks.add_suffix('_blink'), left_on='timestamp [ns]', right_on='start timestamp [ns]_blink', direction='nearest')
         merged = pd.merge_asof(merged, pupil, on='timestamp [ns]', direction='nearest')
+
+        # Load and merge surface positions if the file was copied
+        surface_file = data_dir / "surface_positions.csv"
+        if surface_file.exists():
+            surf_df = pd.read_csv(surface_file)
+            merged = pd.merge_asof(merged, surf_df.add_suffix('_surf'), left_on='timestamp [ns]', right_on='timestamp [ns]_surf', direction='nearest')
+
     except Exception as e:
         print(f"Error loading data for video: {e}")
         return
@@ -313,21 +325,27 @@ def generate_full_video(data_dir, output_file, events_df):
             if row.get('gaze detected on surface') == True:
                  cv2.putText(frame, "ON_SURFACE", (20, height - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
+            # 1.8 Draw Dynamic Surface Polygon
+            # Check if the surface position columns (with _surf suffix) exist in the merged data for this frame
+            if 'tl x [px]_surf' in row and pd.notna(row['tl x [px]_surf']):
+                tl = (int(row['tl x [px]_surf']), int(row['tl y [px]_surf']))
+                tr = (int(row['tr x [px]_surf']), int(row['tr y [px]_surf']))
+                bl = (int(row['bl x [px]_surf']), int(row['bl y [px]_surf']))
+                br = (int(row['br x [px]_surf']), int(row['br y [px]_surf']))
+                
+                # Define the polygon vertices in order
+                surface_poly_pts = np.array([tl, tr, br, bl], dtype=np.int32)
+                
+                # Draw the polygon
+                cv2.polylines(frame, [surface_poly_pts], isClosed=True, color=(255, 255, 0), thickness=2)
+
             # 2. Gaze Point & Path
-            # Prioritize surface data if available
-            if 'gaze detected on surface' in row and row['gaze detected on surface'] == True:
-                gx_col = 'gaze position on surface x [normalized]'
-                gy_col = 'gaze position on surface y [normalized]'
-            else:
-                # Fallback to regular gaze data
-                gx_col = 'gaze x [normalized]' if 'gaze x [normalized]' in row else 'gaze x [px]'
-                gy_col = 'gaze y [normalized]' if 'gaze y [normalized]' in row else 'gaze y [px]'
+            # For video overlay, ALWAYS use non-normalized pixel coordinates if available.
+            gx_col = 'gaze x [px]'
+            gy_col = 'gaze y [px]'
             
             if pd.notna(row.get(gx_col)):
                 gx, gy = row[gx_col], row[gy_col]
-                
-                # If coordinates are normalized (which surface data always is), scale to pixels
-                if gx <= 1.0: gx *= width; gy *= height
                 
                 gx, gy = int(gx), int(gy)
                 cv2.circle(frame, (gx, gy), 15, GAZE_COLOR, 2)
@@ -602,7 +620,7 @@ class SpeedLiteApp:
         self.btn_edit = tk.Button(root, text="2. Edit Events (Optional)", command=self.edit_events, state=tk.DISABLED)
         self.btn_edit.pack(fill=tk.X, **pad)
         self.btn_run = tk.Button(root, text="3. Estrai Features, Plot & Video", command=self.run_process, bg="#b2dfdb", state=tk.DISABLED)
-        self.btn_run.pack(fill=tk.X, **pad)
+        self.btn_run.pack(fill=tk.X, **pad) # Changed from "Estrai..."
         
         self.log_box = tk.Text(root, height=12)
         self.log_box.pack(fill=tk.BOTH, **pad)
@@ -723,31 +741,34 @@ class SpeedLiteApp:
                 m['event_name'] = evt_name
                 all_metrics.append(m)
                 
-                # Gaze Plot
+                # --- Plot Generation ---
+                # Always generate plots from raw data (using pixel coordinates)
                 gaze_seg = seg['gaze']
                 if not gaze_seg.empty:
-                    if 'gaze detected on surface' in gaze_seg.columns:
-                        gaze_seg = gaze_seg[gaze_seg['gaze detected on surface'] == True]
-                        gx = 'gaze position on surface x [normalized]'
-                        gy = 'gaze position on surface y [normalized]'
-                    else:
-                        gx = 'gaze x [normalized]' if 'gaze x [normalized]' in gaze_seg else 'gaze x [px]'
-                        gy = 'gaze y [normalized]' if 'gaze y [normalized]' in gaze_seg else 'gaze y [px]'
-                    generate_heatmap_pdf(gaze_seg, gx, gy, f"Gaze Heatmap - {evt_name}", f"heatmap_gaze_{evt_name}", pdf_dir, res)
-                
-                # Fixation Plot
+                    gx_raw = 'gaze x [px]' if 'gaze x [px]' in gaze_seg.columns else 'gaze x [normalized]'
+                    gy_raw = 'gaze y [px]' if 'gaze y [px]' in gaze_seg.columns else 'gaze y [normalized]'
+                    generate_heatmap_pdf(gaze_seg, gx_raw, gy_raw, f"Gaze Heatmap - {evt_name}", f"heatmap_gaze_{evt_name}", pdf_dir, res)
+
                 fix_seg = seg['fixations']
                 if not fix_seg.empty:
-                    if 'fixation detected on surface' in fix_seg.columns:
-                        fix_seg = fix_seg[fix_seg['fixation detected on surface'] == True]
-                        fx = 'fixation position on surface x [normalized]'
-                        fy = 'fixation position on surface y [normalized]'
-                    else:
-                        fx = 'fixation x [normalized]' if 'fixation x [normalized]' in fix_seg else 'fixation x [px]'
-                        fy = 'fixation y [normalized]' if 'fixation y [normalized]' in fix_seg else 'fixation y [px]'
-                    generate_heatmap_pdf(fix_seg, fx, fy, f"Fixation Heatmap - {evt_name}", f"heatmap_fixation_{evt_name}", pdf_dir, res)
+                    fx_raw = 'fixation x [px]' if 'fixation x [px]' in fix_seg.columns else 'fixation x [normalized]'
+                    fy_raw = 'fixation y [px]' if 'fixation y [px]' in fix_seg.columns else 'fixation y [normalized]'
+                    generate_heatmap_pdf(fix_seg, fx_raw, fy_raw, f"Fixation Heatmap - {evt_name}", f"heatmap_fixation_{evt_name}", pdf_dir, res)
+
+                # If enrichment data is available, generate additional plots for surface data
+                if 'gaze detected on surface' in gaze_seg.columns:
+                    surface_gaze = gaze_seg[gaze_seg['gaze detected on surface'] == True]
+                    if not surface_gaze.empty:
+                        generate_heatmap_pdf(surface_gaze, 'gaze position on surface x [normalized]', 'gaze position on surface y [normalized]',
+                                             f"Gaze Heatmap (Surface) - {evt_name}", f"heatmap_gaze_{evt_name}_surface", pdf_dir, res)
                 
-                # Pupil Timeseries Plot
+                if 'fixation detected on surface' in fix_seg.columns:
+                    surface_fix = fix_seg[fix_seg['fixation detected on surface'] == True]
+                    if not surface_fix.empty:
+                        generate_heatmap_pdf(surface_fix, 'fixation position on surface x [normalized]', 'fixation position on surface y [normalized]',
+                                             f"Fixation Heatmap (Surface) - {evt_name}", f"heatmap_fixation_{evt_name}_surface", pdf_dir, res)
+
+                # Pupil Timeseries Plot (unchanged)
                 pupil_seg = seg['pupil']
                 if not pupil_seg.empty:
                     generate_pupil_timeseries_pdf(pupil_seg, evt_name, f"pupil_ts_{evt_name}", pdf_dir)
@@ -760,7 +781,8 @@ class SpeedLiteApp:
             # Video Generation
             self.log("Generating Final Video...")
             vid_out = Path(self.output_dir.get()) / "final_video_overlay.mp4"
-            generate_full_video(self.working_dir, vid_out, ev)
+            enrich_path = Path(self.enrich_dir.get()) if self.enrich_dir.get() else None
+            generate_full_video(self.working_dir, vid_out, ev, enrichment_dir=enrich_path)
             
             self.log("Analysis Complete.")
             messagebox.showinfo("Finished", "All operations completed successfully!")
