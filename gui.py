@@ -198,13 +198,16 @@ def calculate_metrics(df_seg, video_res=(1280, 720)):
                   'mean_mm_(dx+sx/2)_pupil', 'std_mm_(dx+sx/2)_pupil']:
             metrics[k] = np.nan
 
-    # 15-16: Saccades (Duration ms)
+    # Saccades metrics
+    metrics['n_saccades'] = len(saccades)
     if not saccades.empty and 'duration [ms]' in saccades.columns:
         metrics['mean_saccades'] = saccades['duration [ms]'].mean()
         metrics['std_saccades'] = saccades['duration [ms]'].std()
     else:
         metrics['mean_saccades'] = np.nan
         metrics['std_saccades'] = np.nan
+        if 'n_saccades' not in metrics: # Should be set already, but as a fallback
+            metrics['n_saccades'] = 0
         
     return metrics
 
