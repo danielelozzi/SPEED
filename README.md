@@ -97,6 +97,7 @@ The `gui.py` script contains the entire implementation. Key parts include:
 If you use this script in your research or work, please cite the following publications:
 
 - Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Ademaj, M.; Migliore, S.; Curcio, G. SPEED: A Graphical User Interface Software for Processing Eye Tracking Data. NeuroSci 2025, 6, 35. [10.3390/neurosci6020035](https://doi.org/10.3390/neurosci6020035)
+- Lozzi, D.; Di Pompeo, I.; Marcaccio, M.; Alemanno, M.; Krüger, M.; Curcio, G.; Migliore, S. AI-Powered Analysis of Eye Tracker Data in Basketball Game. Sensors 2025, 25, 3572. [10.3390/s25113572](https://doi.org/10.3390/s25113572)
 
 It is also requested to cite Pupil Labs publication, as requested on their website [https://docs.pupil-labs.com/neon/data-collection/publications-and-citation/](https://docs.pupil-labs.com/neon/data-collection/publications-and-citation/)
 
