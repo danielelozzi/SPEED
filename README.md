@@ -2,32 +2,41 @@
 
 ## Description
 
-This project provides a graphical user interface (GUI) for processing and analyzing eye-tracking data from Pupil Labs devices. It allows users to load recording data, segment it based on events, calculate various metrics (related to fixations, blinks, pupil diameter, and saccades), generate plots, and create an overlay video with gaze points and event information.
+This project provides a graphical user interface (GUI) for processing and analyzing eye-tracking data from Pupil Labs devices. It allows users to load recording data, segment it based on events, calculate various metrics, generate plots, and create an overlay video. A key feature is its **AI-powered Region of Interest (ROI) tracking**, which uses YOLO for object detection and SAM (Segment Anything Model) for defining and tracking custom objects.
 
 ## How It Works
 
 The application uses Tkinter to create a user-friendly interface. Here's a breakdown of the main components and how they interact:
 
 1.  **Data Preparation**:
-    *   The user selects a `Data` folder (from the Pupil Labs recording) and an optional `Enrichment` folder.
-    *   The application creates a unified `files` directory, intelligently merging files from both sources. For example, it prioritizes `gaze.csv` and `fixations.csv` from the enrichment folder if available.
+    *   The user selects a `Data` folder (from the Pupil Labs recording) and one or more optional `Manual Enrichment` folders.
+    *   The application creates a unified `files` directory in the output folder, intelligently merging files from all sources. It distinguishes between raw data (e.g., `gaze_raw.csv`) and data from enrichment folders (e.g., `gaze_enr_0.csv`).
 
-2.  **Event Editing (Optional)**:
-    *   A simple event editor allows the user to review the recording, add new event markers, or remove existing ones. This helps in refining the data segmentation.
+2.  **AI-Powered ROI Definition (Optional)**:
+    *   The application integrates **YOLOv8** for object detection and tracking and **SAM** for precise segmentation.
+    *   Users can define ROIs in multiple ways:
+        *   **YOLO Class Tracking**: Add a standard object class (e.g., "person", "laptop") to track all instances of that object throughout the video.
+        *   **Interactive AI Window**: Play the video with live YOLO detections and simply click on the objects you want to track.
+        *   **Custom Object Definer (SAM)**: For objects not in the YOLO model, pause the video on any frame, click on the desired object, and SAM will segment it, allowing it to be tracked.
 
-3.  **Analysis & Output Generation**:
+3.  **Advanced Event Editing (Optional)**:
+    *   An advanced event editor allows the user to review the recording frame-by-frame.
+    *   It displays the video alongside a table of events, enabling users to **add, delete, rename, move, or merge** event markers with precision.
+
+4.  **Analysis & Output Generation**:
     *   The script segments the data based on the events defined in `events.csv`.
-    *   For each segment, it calculates 16 different eye-tracking metrics (e.g., number of fixations, mean pupil diameter).
-    *   It generates PDF plots for each event, including gaze/fixation heatmaps and pupillometry timeseries.
-    *   It produces a final summary video (`final_video_overlay.mp4`) that shows the original recording overlaid with gaze points, gaze path, active events, and a live pupil diameter chart.
+    *   For each segment, it calculates various eye-tracking metrics.
+    *   If AI ROIs are defined, it runs the tracking and calculates specific metrics for each tracked object (e.g., number of fixations on the object, mean pupil diameter while looking at the object).
+    *   It produces a final summary video (`final_video.mp4`) that shows the original recording overlaid with raw gaze points, gaze path, and the polygons of all tracked AI ROIs.
     *   All calculated metrics are saved to an Excel file (`Speed_Lite_Results.xlsx`).
+    *   A detailed analysis for each AI-tracked object is saved in a separate file (`ROI_Analysis_Results.xlsx`).
 
 ### Data Structure
 
 The application is designed to work with the data structure produced by Pupil Labs recording software. It primarily requires the following folders and files:
 
 *   **Data Folder**: The main folder containing the raw recording data (e.g., `gaze.csv`, `fixations.csv`, `blinks.csv`, `world_timestamps.csv`, and the `external.mp4` video).
-*   **Enrichment Folder (Optional)**: A folder containing enriched or post-processed data, such as a corrected `gaze.csv` or `fixations.csv`.
+*   **Manual Enrichment Folder (Optional)**: A folder containing enriched or post-processed data, such as a corrected `gaze.csv` or `fixations.csv`.
 
 ## Usage
 
@@ -64,6 +73,11 @@ Before you begin, ensure you have **Anaconda** installed on your system.
     ```bash
     pip install -r requirements.txt
     ```
+    **Note for AI Features**: The AI functionalities depend on PyTorch and Ultralytics. The `requirements.txt` file includes `ultralytics`, which will attempt to install the necessary PyTorch version. If you encounter issues, especially with GPU support, you may need to install PyTorch manually by following the instructions on the official PyTorch website.
+    ```bash
+    # Example for CUDA 12.1
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+    ```
 
 4.  **Running the Application**:
     *   Execute the `gui.py` script from your terminal:
@@ -72,20 +86,22 @@ Before you begin, ensure you have **Anaconda** installed on your system.
         ```
     *   The GUI window will appear.
     *   Use the "Browse" buttons to select the `Data`, `Enrichment` (optional), and `Output` folders.
-    *   Click "1. Load and Prepare Data" to initialize the process.
-    *   (Optional) Click "2. Edit Events" to open the event editor.
-    *   Click "3. Extract Features, Plots & Video" to run the full analysis pipeline.
+    *   (Optional) Configure AI ROIs using the "AI ROI Tracker" section.
+    *   Click "1. Load Data" to validate paths.
+    *   (Optional) Click "2. Edit Events" to open the advanced event editor.
+    *   Click "3. RUN FULL ANALYSIS" to run the complete pipeline, including AI tracking, metrics calculation, and video generation.
 
 ## Code Overview
 
 The `gui.py` script contains the entire implementation. Key parts include:
 
 *   **Tkinter Setup**: Creates the main application window and all GUI elements.
-*   **Data Preparation**: `prepare_working_directory` function handles the logic for merging data sources.
-*   **Metrics Calculation**: `calculate_metrics` computes the 16 features for each data segment.
-*   **Plotting**: Functions like `generate_heatmap_pdf` and `generate_pupil_timeseries_pdf` create the visual outputs.
-*   **Video Generation**: `generate_full_video` uses OpenCV to render the final video with overlays.
-*   **Event Editor**: The `LiteEventEditor` class provides an interactive way to manage event markers.
+*   **AI Engine**: The `run_ai_extraction` function manages YOLO and SAM models to track objects and generate surface data.
+*   **Interactive AI Windows**: The `AIInteractiveWindow` and `CustomObjectDefiner` classes provide intuitive ways to define ROIs.
+*   **Data Preparation**: `prepare_working_directory` handles the logic for merging data from multiple sources.
+*   **Metrics Calculation**: `calculate_metrics` computes features for each data segment and for each ROI.
+*   **Video Generation**: `generate_full_video_layered` uses OpenCV to render the final video with multiple data overlays.
+*   **Advanced Event Editor**: The `AdvancedEventEditor` class provides a comprehensive interface for managing event markers.
 
 ## Additional Information
 

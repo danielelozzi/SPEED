@@ -14,557 +14,750 @@ from tqdm import tqdm
 import threading
 import time
 import queue
+import random
+
+# Tenta di importare Ultralytics per la IA
+try:
+    from ultralytics import YOLO, SAM
+    AI_AVAILABLE = True
+except ImportError:
+    AI_AVAILABLE = False
+    print("Ultralytics non trovato. Le funzioni AI saranno disabilitate.")
 
 # --- CONFIGURATION ---
 PLOT_DPI = 150
-GAZE_COLOR_RAW = (255, 0, 0)      # Blue (BGR) per Raw
-GAZE_COLOR_IN = (0, 255, 0)       # Green (BGR) per Surface In
-GAZE_COLOR_OUT = (0, 0, 255)      # Red (BGR) per Surface Out
+GAZE_COLOR_RAW = (255, 0, 0)      # Blue (BGR)
+GAZE_COLOR_IN = (0, 255, 0)       # Green (BGR)
+GAZE_COLOR_OUT = (0, 0, 255)      # Red (BGR)
 SURFACE_POLY_COLOR = (0, 255, 255) # Yellow (BGR)
 
 PUPIL_LEFT_COLOR = 'blue'
 PUPIL_RIGHT_COLOR = 'orange'
-PUPIL_LEFT_COLOR_BGR = (255, 255, 0)  # Cyan for video plot
-PUPIL_RIGHT_COLOR_BGR = (0, 165, 255) # Orange for video plot
+PUPIL_LEFT_COLOR_BGR = (255, 255, 0) 
+PUPIL_RIGHT_COLOR_BGR = (0, 165, 255)
 
 # Heatmap Colormaps
 CMAP_RAW = 'winter' 
 CMAP_ENRICHED = 'jet' 
 
 # ==============================================================================
-# 1. FILE MANAGEMENT AND DATA PREPARATION
+# 1. HELPERS & AI ENGINE
+# ==============================================================================
+
+def create_tracker():
+    """Crea un tracker CSRT in modo robusto su diverse versioni di OpenCV."""
+    try:
+        # OpenCV standard/contrib moderno
+        return cv2.TrackerCSRT_create()
+    except AttributeError:
+        try:
+            # OpenCV legacy API
+            return cv2.legacy.TrackerCSRT_create()
+        except AttributeError:
+            print("ERRORE CRITICO: TrackerCSRT non trovato. Installa 'opencv-contrib-python'.")
+            return None
+
+def import_torch_cuda():
+    try:
+        import torch
+        return torch.cuda.is_available() or torch.backends.mps.is_available()
+    except: return False
+
+def safe_rename_merge(base_df, new_df, suffix, on_col='timestamp [ns]'):
+    """Rinomina le colonne aggiungendo il suffisso, MA preserva la colonna di merge."""
+    if new_df.empty: return base_df
+    
+    # Rinomina tutte le colonne tranne quella di join
+    rename_map = {c: f"{c}_{suffix}" for c in new_df.columns if c != on_col}
+    new_df_renamed = new_df.rename(columns=rename_map)
+    
+    # Merge asof
+    try:
+        merged = pd.merge_asof(base_df, new_df_renamed, on=on_col, direction='nearest')
+        return merged
+    except Exception as e:
+        print(f"Merge error for {suffix}: {e}")
+        return base_df
+
+def run_ai_extraction(video_path, timestamps_path, roi_config, output_base_dir, queue_log=None):
+    """
+    Esegue l'estrazione AI Ibrida:
+    1. YOLO Tracking per classi standard (con Re-ID).
+    2. OpenCV TrackerCSRT per oggetti custom definiti con SAM.
+    """
+    if not AI_AVAILABLE:
+        if queue_log: queue_log.put(('error', "Libreria Ultralytics non installata."))
+        return []
+
+    try:
+        world_ts = pd.read_csv(timestamps_path)
+        cap = cv2.VideoCapture(str(video_path))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0: fps = 30.0 
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    except Exception as e:
+        if queue_log: queue_log.put(('error', f"Errore apertura video/ts: {e}"))
+        return []
+
+    active_rois = [r for r in roi_config if r.get('active', True)]
+    if not active_rois:
+        if queue_log: queue_log.put(('log', "Nessuna ROI attiva."))
+        return []
+
+    yolo_rois = [r for r in active_rois if r.get('type') == 'yolo']
+    custom_rois = [r for r in active_rois if r.get('type') == 'custom']
+
+    # --- SETUP MODELLI ---
+    loaded_models = {}
+    sam_model = None 
+    
+    need_sam = any(r.get('use_sam', False) for r in active_rois)
+    if need_sam:
+        if queue_log: queue_log.put(('log', "Caricamento SAM..."))
+        try:
+            sam_model = SAM("sam2.1_b.pt") 
+        except: 
+            if queue_log: queue_log.put(('log', "SAM non trovato, funzioni limitate."))
+
+    # --- SETUP CUSTOM TRACKERS ---
+    custom_trackers = []
+    for cr in custom_rois:
+        custom_trackers.append({
+            'roi': cr,
+            'tracker': None,
+            'status': 'waiting'
+        })
+
+    tracking_buffer = {} 
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    
+    map_targets = {}
+    for r in yolo_rois:
+        key = (r['model_path'], r['target_class'])
+        if key not in map_targets: map_targets[key] = []
+        map_targets[key].append(r)
+
+    # --- CICLO VIDEO ---
+    for i in tqdm(range(len(world_ts)), desc="AI Analysis"):
+        ret, frame = cap.read()
+        if not ret: break
+        ts = world_ts.iloc[i]['timestamp [ns]']
+
+        # A. CUSTOM TRACKERS
+        for ct in custom_trackers:
+            roi = ct['roi']
+            init_f = roi['init_frame']
+            
+            if i == init_f:
+                tracker = create_tracker()
+                if tracker:
+                    try:
+                        tracker.init(frame, tuple(roi['init_box']))
+                        ct['tracker'] = tracker
+                        ct['status'] = 'tracking'
+                    except Exception as e:
+                        print(f"Tracker init failed at frame {i}: {e}")
+                        ct['status'] = 'lost'
+                else:
+                    ct['status'] = 'error'
+            
+            if ct['status'] == 'tracking':
+                success, box = ct['tracker'].update(frame)
+                if success:
+                    final_mask = None
+                    if sam_model: 
+                        try:
+                            x, y, w, h = [int(v) for v in box]
+                            b_xyxy = [x, y, x+w, y+h]
+                            sam_res = sam_model(frame, bboxes=[b_xyxy], verbose=False)
+                            if sam_res[0].masks:
+                                final_mask = np.array(sam_res[0].masks.xy[0], dtype=np.int32)
+                        except: pass
+                    
+                    if final_mask is None:
+                        x, y, w, h = [int(v) for v in box]
+                        final_mask = np.array([[x, y], [x+w, y], [x+w, y+h], [x, y+h]], dtype=np.int32)
+
+                    u_key = roi['name'] 
+                    if u_key not in tracking_buffer:
+                        tracking_buffer[u_key] = {'surface': [], 'polygons': {}, 'frames_visible': 0, 'roi_ref': roi}
+                    
+                    rect = cv2.minAreaRect(final_mask)
+                    box_pts = np.int_(cv2.boxPoints(rect))
+                    s = box_pts.sum(axis=1); diff = np.diff(box_pts, axis=1)
+                    tl = box_pts[np.argmin(s)]; br = box_pts[np.argmax(s)]
+                    tr = box_pts[np.argmin(diff)]; bl = box_pts[np.argmax(diff)]
+
+                    tracking_buffer[u_key]['surface'].append({
+                        'timestamp [ns]': ts,
+                        'tl x [px]': tl[0], 'tl y [px]': tl[1],
+                        'tr x [px]': tr[0], 'tr y [px]': tr[1],
+                        'bl x [px]': bl[0], 'bl y [px]': bl[1],
+                        'br x [px]': br[0], 'br y [px]': br[1]
+                    })
+                    tracking_buffer[u_key]['polygons'][i] = final_mask
+                    tracking_buffer[u_key]['frames_visible'] += 1
+
+        # B. YOLO TRACKERS
+        unique_models = set([r['model_path'] for r in yolo_rois])
+        for m_path in unique_models:
+            if m_path not in loaded_models: loaded_models[m_path] = YOLO(m_path)
+            model = loaded_models[m_path]
+            
+            try:
+                results = model.track(frame, persist=True, tracker="botsort.yaml", verbose=False, device='cuda' if import_torch_cuda() else 'cpu')
+            except: continue
+            
+            if not results or not results[0].boxes or results[0].boxes.id is None: continue
+
+            for j, box in enumerate(results[0].boxes):
+                cls_id = int(box.cls[0])
+                track_id = int(box.id[0])
+                cls_name = model.names[cls_id]
+                
+                roi_candidates = map_targets.get((m_path, cls_name), [])
+                if not roi_candidates and (m_path, 'All Detected Classes') in map_targets:
+                    roi_candidates = map_targets[(m_path, 'All Detected Classes')]
+
+                for roi in roi_candidates:
+                    unique_obj_key = f"{roi['name']}_{track_id}"
+                    if unique_obj_key not in tracking_buffer:
+                        tracking_buffer[unique_obj_key] = {'surface': [], 'polygons': {}, 'frames_visible': 0, 'roi_ref': roi}
+                    
+                    final_mask = None
+                    if roi.get('use_sam', False) and sam_model:
+                        try:
+                            b_xyxy = box.xyxy[0].cpu().numpy()
+                            sam_res = sam_model(frame, bboxes=[b_xyxy], verbose=False)
+                            if sam_res[0].masks: final_mask = np.array(sam_res[0].masks.xy[0], dtype=np.int32)
+                        except: pass
+                    
+                    if final_mask is None and results[0].masks and len(results[0].masks) > j:
+                         try: final_mask = np.array(results[0].masks.xy[j], dtype=np.int32)
+                         except: pass
+
+                    if final_mask is None:
+                        b = box.xyxy[0].cpu().numpy()
+                        final_mask = np.array([[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]], dtype=np.int32)
+
+                    if len(final_mask) > 0:
+                        rect = cv2.minAreaRect(final_mask)
+                        box_pts = np.int_(cv2.boxPoints(rect))
+                        s = box_pts.sum(axis=1); diff = np.diff(box_pts, axis=1)
+                        tl = box_pts[np.argmin(s)]; br = box_pts[np.argmax(s)]
+                        tr = box_pts[np.argmin(diff)]; bl = box_pts[np.argmax(diff)]
+
+                        tracking_buffer[unique_obj_key]['surface'].append({
+                            'timestamp [ns]': ts,
+                            'tl x [px]': tl[0], 'tl y [px]': tl[1],
+                            'tr x [px]': tr[0], 'tr y [px]': tr[1],
+                            'bl x [px]': bl[0], 'bl y [px]': bl[1],
+                            'br x [px]': br[0], 'br y [px]': br[1]
+                        })
+                        tracking_buffer[unique_obj_key]['polygons'][i] = final_mask
+                        tracking_buffer[unique_obj_key]['frames_visible'] += 1
+
+    cap.release()
+
+    if queue_log: queue_log.put(('log', f"Salvataggio dati per {len(tracking_buffer)} oggetti tracciati..."))
+
+    processed_rois = []
+    for obj_key, data in tracking_buffer.items():
+        if data['frames_visible'] < 5: continue 
+
+        roi_out_dir = output_base_dir / f"ROI_{obj_key}"
+        roi_out_dir.mkdir(parents=True, exist_ok=True)
+        
+        if data['surface']:
+            pd.DataFrame(data['surface']).to_csv(roi_out_dir / 'surface_positions.csv', index=False)
+        
+        processed_rois.append({
+            'name': obj_key, 
+            'base_name': data['roi_ref']['name'], 
+            'path': roi_out_dir,
+            'polygons': data['polygons'],
+            'frames_visible': data['frames_visible'],
+            'seconds_visible': data['frames_visible'] / fps if fps > 0 else 0
+        })
+
+    return processed_rois
+
+# ==============================================================================
+# 2. FILE MANAGEMENT
 # ==============================================================================
 
 def prepare_working_directory(data_dir, enrichment_dirs, output_dir):
-    """
-    Creates the 'files' folder.
-    ALWAYS creates *_raw.csv files from Data.
-    For each enrichment dir in the list, creates *_enr_{i}.csv files.
-    
-    Args:
-        enrichment_dirs: list of Path objects
-    Returns: files_dir (Path), warnings (list of strings)
-    """
     files_dir = output_dir / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
     warnings = []
     
-    # Map of required files and their default source
-    files_map = [
-        ('events.csv', data_dir, False),
-        ('blinks.csv', data_dir, True),
-        ('3d_eye_states.csv', data_dir, True),
-        ('world_timestamps.csv', data_dir, False),
-        ('saccades.csv', data_dir, True)
-    ]
+    files_map = [('events.csv', False), ('blinks.csv', True), ('3d_eye_states.csv', True), 
+                 ('world_timestamps.csv', False), ('saccades.csv', True)]
     
-    # Video handling: Look for an mp4 in Data
     video_files = list(data_dir.glob("*.mp4"))
-    if video_files:
-        shutil.copy(video_files[0], files_dir / "external.mp4")
-    else:
-        raise FileNotFoundError("No .mp4 file found in the Data folder.")
+    if video_files: shutil.copy(video_files[0], files_dir / "external.mp4")
+    else: raise FileNotFoundError("No .mp4 file in Data.")
 
-    # Copy base files from Data
-    for filename, source, optional in files_map:
-        src_path = source / filename
-        if src_path.exists():
-            shutil.copy(src_path, files_dir / filename)
-        elif not optional:
-            raise FileNotFoundError(f"Required file missing: {filename} in {source}")
+    for fname, opt in files_map:
+        if (data_dir / fname).exists(): shutil.copy(data_dir / fname, files_dir / fname)
+        elif not opt: raise FileNotFoundError(f"Missing {fname}")
 
-    # --- HANDLE RAW FILES ---
-    if (data_dir / 'gaze.csv').exists():
-        shutil.copy(data_dir / 'gaze.csv', files_dir / 'gaze_raw.csv')
-    else:
-        pd.DataFrame().to_csv(files_dir / 'gaze_raw.csv')
-        warnings.append("Gaze RAW mancante. Creato file vuoto.")
-
-    if (data_dir / 'fixations.csv').exists():
-        shutil.copy(data_dir / 'fixations.csv', files_dir / 'fixations_raw.csv')
-    else:
-        pd.DataFrame().to_csv(files_dir / 'fixations_raw.csv')
-        warnings.append("Fixations RAW mancante. Creato file vuoto.")
-
-    # --- HANDLE MULTIPLE ENRICHMENTS ---
-    for i, enr_dir in enumerate(enrichment_dirs):
-        if not enr_dir.exists():
-            warnings.append(f"Enrichment {i} path non trovato: {enr_dir}")
-            continue
-
-        # Gaze
-        if (enr_dir / 'gaze.csv').exists():
-            shutil.copy(enr_dir / 'gaze.csv', files_dir / f'gaze_enr_{i}.csv')
+    for f in ['gaze.csv', 'fixations.csv']:
+        if (data_dir / f).exists():
+            shutil.copy(data_dir / f, files_dir / f"{Path(f).stem}_raw.csv")
         else:
-            warnings.append(f"Gaze mancante in Enrichment {i}")
+            pd.DataFrame().to_csv(files_dir / f"{Path(f).stem}_raw.csv")
+            warnings.append(f"{f} missing (Raw).")
 
-        # Fixations
-        if (enr_dir / 'fixations.csv').exists():
-            shutil.copy(enr_dir / 'fixations.csv', files_dir / f'fixations_enr_{i}.csv')
-            
-        # Surface Positions
-        if (enr_dir / 'surface_positions.csv').exists():
-            shutil.copy(enr_dir / 'surface_positions.csv', files_dir / f'surface_positions_enr_{i}.csv')
+    for i, enr_dir in enumerate(enrichment_dirs):
+        if not enr_dir.exists(): continue
+        for f in ['gaze.csv', 'fixations.csv', 'surface_positions.csv']:
+            if (enr_dir / f).exists():
+                shutil.copy(enr_dir / f, files_dir / f"{Path(f).stem}_enr_{i}.csv")
 
     return files_dir, warnings
 
 # ==============================================================================
-# 2. FEATURE CALCULATION AND PLOTTING
+# 3. METRICS CALCULATOR
 # ==============================================================================
 
 def calculate_metrics(df_seg, video_res=(1280, 720)):
-    """Calculates metrics for a segment."""
-    metrics = {}
-    
+    m = {}
     fix = df_seg.get('fixations', pd.DataFrame())
     gaze = df_seg.get('gaze', pd.DataFrame())
     pupil = df_seg.get('pupil', pd.DataFrame())
     blinks = df_seg.get('blinks', pd.DataFrame())
-    saccades = df_seg.get('saccades', pd.DataFrame())
-
-    # --- 1. Base Fixation Metrics ---
-    if not fix.empty and 'duration [ms]' in fix.columns:
-        metrics['n_fixations'] = len(fix)
-        metrics['mean_duration_fixations'] = fix['duration [ms]'].mean()
-        metrics['std_duration_fixations'] = fix['duration [ms]'].std()
-        
-        if 'fixation x [px]' in fix.columns:
-            fx = fix['fixation x [px]'] / video_res[0]
-            fy = fix['fixation y [px]'] / video_res[1]
-        else: 
-            fx = fix.get('fixation x [normalized]', pd.Series(dtype=float))
-            fy = fix.get('fixation y [normalized]', pd.Series(dtype=float))
-            
-        metrics['mean_x_pos_fixations'] = fx.mean()
-        metrics['mean_y_pos_fixations'] = fy.mean()
-        metrics['std_x_pos_fixations'] = fx.std()
-        metrics['std_y_pos_fixations'] = fy.std()
-
-        if 'fixation detected on surface' in fix.columns:
-            surface_fix = fix[fix['fixation detected on surface'] == True]
-            if not surface_fix.empty:
-                fx_norm = surface_fix['fixation position on surface x [normalized]']
-                fy_norm = surface_fix['fixation position on surface y [normalized]']
-                metrics['mean_x_pos_fixations[norm]'] = fx_norm.mean()
-                metrics['mean_y_pos_fixations[norm]'] = fy_norm.mean()
-                metrics['std_x_pos_fixations[norm]'] = fx_norm.std()
-                metrics['std_y_pos_fixations[norm]'] = fy_norm.std()
-    else:
-        for k in ['n_fixations', 'mean_duration_fixations', 'std_duration_fixations', 
-                  'mean_x_pos_fixations', 'mean_y_pos_fixations', 'std_x_pos_fixations', 'std_y_pos_fixations']:
-            metrics[k] = np.nan
-
-    # --- Gaze Metrics ---
-    if not gaze.empty:
-        if 'gaze x [px]' in gaze.columns:
-            gx = gaze['gaze x [px]'] / video_res[0]
-            gy = gaze['gaze y [px]'] / video_res[1]
-        else: 
-            gx = gaze.get('gaze x [normalized]', pd.Series(dtype=float))
-            gy = gaze.get('gaze y [normalized]', pd.Series(dtype=float))
-
-        metrics['mean_x_gaze'] = gx.mean()
-        metrics['mean_y_gaze'] = gy.mean()
-        metrics['std_x_gaze'] = gx.std()
-        metrics['std_y_gaze'] = gy.std()
-
-        if 'gaze detected on surface' in gaze.columns:
-            surface_gaze = gaze[gaze['gaze detected on surface'] == True]
-            if not surface_gaze.empty:
-                gx_norm = surface_gaze['gaze position on surface x [normalized]']
-                gy_norm = surface_gaze['gaze position on surface y [normalized]']
-                metrics['mean_x_gaze[norm]'] = gx_norm.mean()
-                metrics['mean_y_gaze[norm]'] = gy_norm.mean()
-                metrics['std_x_gaze[norm]'] = gx_norm.std()
-                metrics['std_y_gaze[norm]'] = gy_norm.std()
-    else:
-        for k in ['mean_x_gaze', 'mean_y_gaze', 'std_x_gaze', 'std_y_gaze']:
-            metrics[k] = np.nan
-            
-    # --- 3. Other Metrics ---
-    metrics['n_blink'] = len(blinks)
-
-    if not pupil.empty:
-        # Simplified pupil logic for brevity
-        if 'pupil diameter right [mm]' in pupil.columns:
-            metrics['mean_mm_dx_pupil'] = pupil['pupil diameter right [mm]'].mean()
-            metrics['std_mm_dx_pupil'] = pupil['pupil diameter right [mm]'].std()
-        else:
-            metrics['mean_mm_dx_pupil'] = np.nan
-            metrics['std_mm_dx_pupil'] = np.nan
-            
-        if 'pupil diameter left [mm]' in pupil.columns:
-            metrics['mean_mm_sx_pupil'] = pupil['pupil diameter left [mm]'].mean()
-            metrics['std_mm_sx_pupil'] = pupil['pupil diameter left [mm]'].std()
-        else:
-            metrics['mean_mm_sx_pupil'] = np.nan
-            metrics['std_mm_sx_pupil'] = np.nan
-            
-        if 'pupil diameter right [mm]' in pupil.columns and 'pupil diameter left [mm]' in pupil.columns:
-            p_avg = (pupil['pupil diameter right [mm]'] + pupil['pupil diameter left [mm]']) / 2
-            metrics['mean_mm_(dx+sx/2)_pupil'] = p_avg.mean()
-            metrics['std_mm_(dx+sx/2)_pupil'] = p_avg.std()
-        else:
-            metrics['mean_mm_(dx+sx/2)_pupil'] = np.nan
-            metrics['std_mm_(dx+sx/2)_pupil'] = np.nan
-    else:
-        for k in ['mean_mm_dx_pupil', 'std_mm_dx_pupil', 'mean_mm_sx_pupil', 'std_mm_sx_pupil', 
-                  'mean_mm_(dx+sx/2)_pupil', 'std_mm_(dx+sx/2)_pupil']:
-            metrics[k] = np.nan
-
-    metrics['n_saccades'] = len(saccades)
-    if not saccades.empty and 'duration [ms]' in saccades.columns:
-        metrics['mean_saccades'] = saccades['duration [ms]'].mean()
-        metrics['std_saccades'] = saccades['duration [ms]'].std()
-    else:
-        metrics['mean_saccades'] = np.nan
-        metrics['std_saccades'] = np.nan
-        
-    return metrics
-
-def generate_heatmap_pdf(df, x_col, y_col, title, filename, output_dir, video_res=(1280, 720), cmap='jet'):
-    """Generates a KDE heatmap and saves it to PDF."""
-    if df.empty or x_col not in df.columns or len(df) < 5:
-        return
-
-    x = df[x_col].dropna()
-    y = df[y_col].dropna()
     
-    is_surface_plot = 'surface' in filename.lower()
-
-    if is_surface_plot:
-        x_limit, y_limit = 1.0, 1.0
-        x_label, y_label = 'X [normalized]', 'Y [normalized]'
+    if not fix.empty:
+        m['n_fixations'] = len(fix)
+        m['mean_duration_fixations'] = fix['duration [ms]'].mean()
+        m['std_duration_fixations'] = fix['duration [ms]'].std()
     else:
-        if x.max() <= 1.0: # Normalized -> Pixel
-            x = x * video_res[0]
-            y = y * video_res[1]
-        x_limit, y_limit = video_res[0], video_res[1]
-        x_label, y_label = 'X [px]', 'Y [px]'
+        m['n_fixations'] = 0; m['mean_duration_fixations'] = np.nan; m['std_duration_fixations'] = np.nan
+
+    m['n_blink'] = len(blinks)
+    
+    if not pupil.empty:
+        if 'pupil diameter left [mm]' in pupil.columns:
+            m['mean_pupil_L_global'] = pupil['pupil diameter left [mm]'].mean()
+        if 'pupil diameter right [mm]' in pupil.columns:
+            m['mean_pupil_R_global'] = pupil['pupil diameter right [mm]'].mean()
+
+    # ROI Metrics
+    col_fix_surf = 'fixation detected on surface'
+    if not fix.empty and col_fix_surf in fix.columns:
+        fix_on = fix[fix[col_fix_surf] == True]
+        m['ROI_n_fixations'] = len(fix_on)
+        m['ROI_mean_fix_duration'] = fix_on['duration [ms]'].mean() if not fix_on.empty else 0
+        m['ROI_std_fix_duration'] = fix_on['duration [ms]'].std() if not fix_on.empty else 0
+    else:
+        m['ROI_n_fixations'] = 0; m['ROI_mean_fix_duration'] = np.nan; m['ROI_std_fix_duration'] = np.nan
+
+    col_gaze_surf = 'gaze detected on surface'
+    if not gaze.empty and not pupil.empty and col_gaze_surf in gaze.columns:
+        gaze_on = gaze[gaze[col_gaze_surf] == True]
+        if not gaze_on.empty:
+            p_on = pd.merge_asof(gaze_on.sort_values('timestamp [ns]'), 
+                                 pupil[['timestamp [ns]', 'pupil diameter left [mm]', 'pupil diameter right [mm]']].sort_values('timestamp [ns]'),
+                                 on='timestamp [ns]', direction='nearest', tolerance=50000000)
+            
+            if 'pupil diameter left [mm]' in p_on.columns:
+                m['ROI_mean_pupil_L'] = p_on['pupil diameter left [mm]'].mean()
+                m['ROI_std_pupil_L'] = p_on['pupil diameter left [mm]'].std()
+            else:
+                m['ROI_mean_pupil_L'] = np.nan; m['ROI_std_pupil_L'] = np.nan
+
+            if 'pupil diameter right [mm]' in p_on.columns:
+                m['ROI_mean_pupil_R'] = p_on['pupil diameter right [mm]'].mean()
+                m['ROI_std_pupil_R'] = p_on['pupil diameter right [mm]'].std()
+            else:
+                m['ROI_mean_pupil_R'] = np.nan; m['ROI_std_pupil_R'] = np.nan
+
+            if 'pupil diameter left [mm]' in p_on.columns and 'pupil diameter right [mm]' in p_on.columns:
+                avg_p = (p_on['pupil diameter left [mm]'] + p_on['pupil diameter right [mm]']) / 2
+                m['ROI_mean_pupil_AVG'] = avg_p.mean()
+                m['ROI_std_pupil_AVG'] = avg_p.std()
+            else:
+                m['ROI_mean_pupil_AVG'] = np.nan; m['ROI_std_pupil_AVG'] = np.nan
+        else:
+            for k in ['ROI_mean_pupil_L', 'ROI_std_pupil_L', 'ROI_mean_pupil_R', 'ROI_std_pupil_R', 'ROI_mean_pupil_AVG', 'ROI_std_pupil_AVG']:
+                m[k] = np.nan
+    else:
+        for k in ['ROI_mean_pupil_L', 'ROI_std_pupil_L', 'ROI_mean_pupil_R', 'ROI_std_pupil_R', 'ROI_mean_pupil_AVG', 'ROI_std_pupil_AVG']:
+             m[k] = np.nan
+
+    return m
+
+# ==============================================================================
+# 4. PLOTTING & VIDEO
+# ==============================================================================
+def generate_heatmap_pdf(df, x_col, y_col, title, filename, output_dir, video_res=(1280, 720), cmap='jet'):
+    if df.empty or x_col not in df.columns or len(df) < 5: return
+    x = df[x_col].dropna(); y = df[y_col].dropna()
+    is_surface = 'surface' in filename.lower()
+    x_lim, y_lim = (1.0, 1.0) if is_surface else video_res
+    x_lbl, y_lbl = ('X [norm]', 'Y [norm]') if is_surface else ('X [px]', 'Y [px]')
+    if not is_surface and x.max() <= 1.0: x *= video_res[0]; y *= video_res[1]
 
     plt.figure(figsize=(10, 6))
     try:
         k = gaussian_kde(np.vstack([x, y]))
-        xi, yi = np.mgrid[0:x_limit:100j, 0:y_limit:100j]
-        zi = k(np.vstack([xi.flatten(), yi.flatten()]))
-        zi_reshaped = zi.reshape(xi.shape)
-
-        numpy_dir = output_dir.parent / "Numpy_Matrices"
-        numpy_dir.mkdir(exist_ok=True)
-        np.save(numpy_dir / f"{filename}_xi.npy", xi)
-        np.save(numpy_dir / f"{filename}_yi.npy", yi)
-        np.save(numpy_dir / f"{filename}_zi.npy", zi_reshaped)
-
-        plt.pcolormesh(xi, yi, zi_reshaped, shading='auto', cmap=cmap)
+        xi, yi = np.mgrid[0:x_lim:100j, 0:y_lim:100j]
+        zi = k(np.vstack([xi.flatten(), yi.flatten()])).reshape(xi.shape)
+        np.save(output_dir.parent/"Numpy_Matrices"/f"{filename}_zi.npy", zi)
+        plt.pcolormesh(xi, yi, zi, shading='auto', cmap=cmap)
         plt.colorbar(label='Density')
-        plt.xlim(0, x_limit)
-        plt.ylim(y_limit, 0)
-        plt.title(title)
-        plt.xlabel(x_label)
-        plt.ylabel(y_label)
-        
-        out_path = output_dir / f"{filename}.pdf"
-        plt.savefig(out_path, format='pdf', bbox_inches='tight')
-        plt.close()
-    except Exception as e:
-        print(f"Error generating heatmap {title}: {e}")
-        plt.close()
+        plt.xlim(0, x_lim); plt.ylim(y_lim, 0)
+        plt.title(title); plt.xlabel(x_lbl); plt.ylabel(y_lbl)
+        plt.savefig(output_dir / f"{filename}.pdf", format='pdf', bbox_inches='tight')
+    except: pass
+    plt.close()
 
 def generate_pupil_timeseries_pdf(pupil_df, gaze_df, blinks_df, start_ts, title, filename, output_dir):
-    """Generates the pupillometry plot."""
     if pupil_df.empty: return
-    
     plt.figure(figsize=(12, 6))
     pupil_df['time_norm'] = pupil_df['timestamp [ns]'] - start_ts
+    
+    col_surf = 'gaze detected on surface' if 'gaze detected on surface' in gaze_df.columns else 'on_surface'
+    if not gaze_df.empty and col_surf in gaze_df.columns:
+        gaze_df['t'] = gaze_df['timestamp [ns]'] - start_ts
+        gaze_df['blk'] = (gaze_df[col_surf] != gaze_df[col_surf].shift()).cumsum()
+        for _, g in gaze_df.groupby('blk'):
+            plt.axvspan(g['t'].iloc[0], g['t'].iloc[-1], color='green' if g[col_surf].iloc[0] else 'red', alpha=0.15, lw=0)
 
-    # --- Draw On-Surface Bands ---
-    surface_col = 'gaze detected on surface' if 'gaze detected on surface' in gaze_df.columns else 'on_surface'
-    if not gaze_df.empty and surface_col in gaze_df.columns:
-        gaze_df['time_norm'] = gaze_df['timestamp [ns]'] - start_ts
-        gaze_df['block'] = (gaze_df[surface_col] != gaze_df[surface_col].shift()).cumsum()
-        for _, group in gaze_df.groupby('block'):
-            start_band = group['time_norm'].iloc[0]
-            end_band = group['time_norm'].iloc[-1]
-            color = 'green' if group[surface_col].iloc[0] else 'red'
-            plt.axvspan(start_band, end_band, color=color, alpha=0.15, lw=0)
-
-    # --- Draw Blink Bands ---
-    if not blinks_df.empty:
-        for _, blink_row in blinks_df.iterrows():
-            blink_start = blink_row['start timestamp [ns]']
-            blink_duration_ms = blink_row['duration [ms]']
-            blink_end = blink_start + (blink_duration_ms * 1_000_000)
-            norm_blink_start = blink_start - start_ts
-            norm_blink_end = blink_end - start_ts
-            plt.axvspan(norm_blink_start, norm_blink_end, color='blue', alpha=0.2, lw=0)
-
-    has_data = False
     if 'pupil diameter left [mm]' in pupil_df.columns:
-        plt.plot(pupil_df['time_norm'], pupil_df['pupil diameter left [mm]'], label='Left Pupil', color=PUPIL_LEFT_COLOR, alpha=0.7)
-        has_data = True
+        plt.plot(pupil_df['time_norm'], pupil_df['pupil diameter left [mm]'], color=PUPIL_LEFT_COLOR, alpha=0.7, label='Left')
     if 'pupil diameter right [mm]' in pupil_df.columns:
-        plt.plot(pupil_df['time_norm'], pupil_df['pupil diameter right [mm]'], label='Right Pupil', color=PUPIL_RIGHT_COLOR, alpha=0.7)
-        has_data = True
-        
-    if has_data:
-        plt.title(f"{title}")
-        plt.xlabel("Time from event start (ns)")
-        plt.ylabel("Diameter [mm]")
-        plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.6)
-        out_path = output_dir / f"{filename}.pdf"
-        try:
-            numpy_dir = output_dir.parent / "Numpy_Matrices"
-            numpy_dir.mkdir(exist_ok=True)
-            time_col = pupil_df['time_norm'].values
-            left_col = pupil_df.get('pupil diameter left [mm]', pd.Series(np.nan, index=pupil_df.index)).values
-            right_col = pupil_df.get('pupil diameter right [mm]', pd.Series(np.nan, index=pupil_df.index)).values
-            np.save(numpy_dir / f"{filename}_timeseries.npy", np.vstack([time_col, left_col, right_col]).T)
-        except Exception: pass
-        plt.savefig(out_path, format='pdf', bbox_inches='tight')
+        plt.plot(pupil_df['time_norm'], pupil_df['pupil diameter right [mm]'], color=PUPIL_RIGHT_COLOR, alpha=0.7, label='Right')
+    
+    plt.title(title); plt.legend(); plt.grid(True, alpha=0.5)
+    plt.savefig(output_dir / f"{filename}.pdf", bbox_inches='tight')
     plt.close()
 
-def generate_fragmentation_plot(gaze_df, x_col, y_col, start_ts, title, filename, output_dir, events_df=None, show_surface_bands=False):
-    """Generates fragmentation plot."""
-    if gaze_df.empty or x_col not in gaze_df.columns or y_col not in gaze_df.columns: return
-
-    df = gaze_df.copy()
-    df['time_norm'] = df['timestamp [ns]'] - start_ts
-    df['distance'] = np.sqrt(df[x_col].diff()**2 + df[y_col].diff()**2)
-
-    plt.figure(figsize=(12, 6))
-    plt.plot(df['time_norm'], df['distance'], label='Gaze Fragmentation', color='purple', alpha=0.8)
-
-    if show_surface_bands and 'gaze detected on surface' in df.columns:
-        df['block'] = (df['gaze detected on surface'] != df['gaze detected on surface'].shift()).cumsum()
-        for _, group in df.groupby('block'):
-            start_band = group['time_norm'].iloc[0]
-            end_band = group['time_norm'].iloc[-1]
-            color = 'green' if group['gaze detected on surface'].iloc[0] else 'red'
-            plt.axvspan(start_band, end_band, color=color, alpha=0.15, lw=0)
-
-    if events_df is not None:
-        for _, event_row in events_df.iterrows():
-            event_time = event_row['timestamp [ns]'] - start_ts
-            plt.axvline(x=event_time, color='k', linestyle='--', linewidth=1)
-
-    plt.title(title)
-    plt.xlabel("Time from start (ns)")
-    plt.ylabel("Euclidean Distance")
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.6)
-    
-    out_path_pdf = output_dir / f"{filename}.pdf"
-    plt.savefig(out_path_pdf, format='pdf', bbox_inches='tight')
-    plt.close()
-    
-    numpy_dir = output_dir.parent / "Numpy_Matrices"
-    numpy_dir.mkdir(exist_ok=True)
-    np.save(numpy_dir / f"{filename}_fragmentation.npy", df[['time_norm', 'distance']].dropna().values)
-
-# ==============================================================================
-# 3. VIDEO GENERATION (MULTI-LAYER)
-# ==============================================================================
-
-def generate_full_video(data_dir, output_file, events_df, active_enrichment_indices=[]):
-    """Generates the video with Raw + Multiple Enrichment overlays."""
-    print("Starting video generation...")
-    
+def generate_full_video_layered(data_dir, output_file, events_df, active_layers):
+    print("Generating Video...")
     try:
-        # 1. Base Data (Time, Blinks, Pupil)
         w_ts = pd.read_csv(data_dir / 'world_timestamps.csv')
-        blinks = pd.read_csv(data_dir / 'blinks.csv')
-        pupil = pd.read_csv(data_dir / '3d_eye_states.csv')
+        merged = w_ts
+        # Safe Merges using rename instead of blind add_suffix
+        for f in ['blinks.csv', '3d_eye_states.csv']:
+            if (data_dir/f).exists():
+                merged = safe_rename_merge(merged, pd.read_csv(data_dir/f), 'base')
         
-        merged = pd.merge_asof(w_ts, blinks.add_suffix('_blink'), left_on='timestamp [ns]', right_on='start timestamp [ns]_blink', direction='nearest')
-        merged = pd.merge_asof(merged, pupil, on='timestamp [ns]', direction='nearest')
+        if (data_dir/'gaze_raw.csv').exists():
+            merged = safe_rename_merge(merged, pd.read_csv(data_dir/'gaze_raw.csv'), 'RAW')
 
-        # 2. RAW Gaze (Baseline - Always loaded)
-        if (data_dir / 'gaze_raw.csv').exists():
-            gaze_raw = pd.read_csv(data_dir / 'gaze_raw.csv')
-            # Rinomina colonne raw per chiarezza
-            cols_map = {c: f"{c}_RAW" for c in gaze_raw.columns if c != 'timestamp [ns]'}
-            gaze_raw = gaze_raw.rename(columns=cols_map)
-            merged = pd.merge_asof(merged, gaze_raw, on='timestamp [ns]', direction='nearest')
-
-        # 3. Active Enrichments
-        for idx in active_enrichment_indices:
-            enr_file = data_dir / f'gaze_enr_{idx}.csv'
-            if enr_file.exists():
-                gaze_enr = pd.read_csv(enr_file)
-                # Suffix for this enrichment index
-                cols_map = {c: f"{c}_enr{idx}" for c in gaze_enr.columns if c != 'timestamp [ns]'}
-                gaze_enr = gaze_enr.rename(columns=cols_map)
-                merged = pd.merge_asof(merged, gaze_enr, on='timestamp [ns]', direction='nearest')
+        for layer in active_layers:
+            suf = layer['file_suffix']
+            g_file = data_dir / f"gaze_{suf}.csv"
+            s_file = data_dir / f"surface_positions_{suf}.csv"
+            if g_file.exists():
+                merged = safe_rename_merge(merged, pd.read_csv(g_file), suf)
+            if s_file.exists():
+                merged = safe_rename_merge(merged, pd.read_csv(s_file), suf)
                 
-                # Load surface polygon info if available
-                surf_file = data_dir / f'surface_positions_enr_{idx}.csv'
-                if surf_file.exists():
-                    surf_df = pd.read_csv(surf_file)
-                    cols_map_surf = {c: f"{c}_surf_enr{idx}" for c in surf_df.columns if c != 'timestamp [ns]'}
-                    surf_df = surf_df.rename(columns=cols_map_surf)
-                    merged = pd.merge_asof(merged, surf_df, on='timestamp [ns]', direction='nearest')
-
-    except Exception as e:
-        print(f"Error loading data for video: {e}")
+    except Exception as e: 
+        print(f"Video Data Error: {e}")
         return
 
     cap = cv2.VideoCapture(str(data_dir / "external.mp4"))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    W, H = int(cap.get(3)), int(cap.get(4))
+    out = cv2.VideoWriter(str(output_file), cv2.VideoWriter_fourcc(*'mp4v'), cap.get(5), (W, H))
     
-    writer = cv2.VideoWriter(str(output_file), cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
-    
-    # History buffers
-    gaze_histories = {} # Key: 'RAW' or 'ENR_i', Value: list of points
-    pupil_history_l = []
-    pupil_history_r = []
-    fragmentation_history = [] # Only for RAW mainly or first enriched
-    prev_gaze_point = None
+    histories = {} 
+    colors = {}
+    def get_col(name):
+        if name not in colors: colors[name] = (random.randint(50,255), random.randint(50,255), random.randint(50,255))
+        return colors[name]
 
-    for i in tqdm(range(total_frames), desc="Rendering Video"):
+    for i in tqdm(range(len(merged)), desc="Video Rendering"):
         ret, frame = cap.read()
         if not ret: break
+        row = merged.iloc[i]
+        
+        # RAW
+        if 'gaze x [px]_RAW' in row and pd.notna(row['gaze x [px]_RAW']):
+            gx, gy = int(row['gaze x [px]_RAW']), int(row['gaze y [px]_RAW'])
+            cv2.circle(frame, (gx, gy), 8, GAZE_COLOR_RAW, 2)
+
+        # Layers
+        for layer in active_layers:
+            suf = layer['file_suffix']
+            tl_x = f'tl x [px]_{suf}'
+            if tl_x in row and pd.notna(row[tl_x]):
+                pts = np.array([[row[f'tl x [px]_{suf}'], row[f'tl y [px]_{suf}']], [row[f'tr x [px]_{suf}'], row[f'tr y [px]_{suf}']], [row[f'br x [px]_{suf}'], row[f'br y [px]_{suf}']], [row[f'bl x [px]_{suf}'], row[f'bl y [px]_{suf}']]], np.int32)
+                poly_col = get_col(layer['name'])
+                cv2.polylines(frame, [pts], True, poly_col, 2)
+                cv2.putText(frame, layer['name'], (pts[0][0], pts[0][1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, poly_col, 2)
+
+            gx_col = f'gaze x [px]_{suf}'
+            if gx_col in row and pd.notna(row[gx_col]):
+                gx, gy = int(row[gx_col]), int(row[f'gaze y [px]_{suf}'])
+                is_in = row.get(f'gaze detected on surface_{suf}') == True
+                col = GAZE_COLOR_IN if is_in else GAZE_COLOR_OUT
+                cv2.circle(frame, (gx, gy), 10, col, 3)
+                
+                if suf not in histories: histories[suf] = []
+                histories[suf].append((gx, gy))
+                if len(histories[suf]) > 15: histories[suf].pop(0)
+                for j in range(1, len(histories[suf])):
+                    cv2.line(frame, histories[suf][j-1], histories[suf][j], col, 2)
+
+        out.write(frame)
+    cap.release(); out.release()
+
+# ==============================================================================
+# 5. PREVIEW & INTERACTIVE WINDOWS
+# ==============================================================================
+
+class CustomObjectDefiner(tk.Toplevel):
+    def __init__(self, parent, video_path, app_ref):
+        super().__init__(parent)
+        self.title("Definisci Oggetto Custom (SAM) - Navigazione Completa")
+        self.geometry("1100x850")
+        self.app = app_ref
+        self.video_path = video_path
+        
+        self.cap = cv2.VideoCapture(str(video_path))
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+        self.current_frame_idx = 0
+        self.frame_img = None
+        self.is_playing = False
         
         try:
-            row = merged.iloc[i]
-            ts = row['timestamp [ns]']
-            
-            # --- 1. Event & Blink Overlays (Standard) ---
-            curr_event = events_df[events_df['timestamp [ns]'] <= ts]
-            if not curr_event.empty:
-                evt_name = curr_event.iloc[-1]['name']
-                if evt_name not in ['recording.begin', 'recording.end']:
-                    text = f"Event: {evt_name}"
-                    font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 1, 2
-                    (tw, th), bl = cv2.getTextSize(text, font, scale, thick)
-                    cv2.rectangle(frame, (20, 50 - th - bl), (20 + tw, 50 + bl), (0, 0, 0), -1)
-                    cv2.putText(frame, text, (20, 50), font, scale, (255, 255, 255), thick)
-            
-            if pd.notna(row.get('start timestamp [ns]_blink')) and ts >= row['start timestamp [ns]_blink'] and ts <= (row['start timestamp [ns]_blink'] + row['duration [ms]_blink'] * 1_000_000):
-                btxt = "BLINK"
-                font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3
-                (tw, th), bl = cv2.getTextSize(btxt, font, scale, thick)
-                cv2.rectangle(frame, (width - 20 - tw, 50 - th - bl), (width - 20, 50 + bl), (0, 0, 0), -1)
-                cv2.putText(frame, btxt, (width - 20 - tw, 50), font, scale, (0, 255, 255), thick)
+            self.sam = SAM("sam2.1_b.pt")
+        except:
+            messagebox.showerror("Error", "Modello SAM non trovato.")
+            self.destroy()
+            return
 
-            # --- 2. RAW Gaze Overlay ---
-            gx_raw, gy_raw = None, None
-            if 'gaze x [px]_RAW' in row and pd.notna(row['gaze x [px]_RAW']):
-                gx_raw, gy_raw = int(row['gaze x [px]_RAW']), int(row['gaze y [px]_RAW'])
-            elif 'gaze x [normalized]_RAW' in row and pd.notna(row['gaze x [normalized]_RAW']):
-                gx_raw, gy_raw = int(row['gaze x [normalized]_RAW'] * width), int(row['gaze y [normalized]_RAW'] * height)
-            
-            if gx_raw is not None:
-                # Update history
-                if 'RAW' not in gaze_histories: gaze_histories['RAW'] = []
-                gaze_histories['RAW'].append((gx_raw, gy_raw))
-                if len(gaze_histories['RAW']) > 20: gaze_histories['RAW'].pop(0)
-                
-                # Draw RAW (Blue)
-                cv2.circle(frame, (gx_raw, gy_raw), 10, GAZE_COLOR_RAW, 2)
-                for j in range(1, len(gaze_histories['RAW'])):
-                    cv2.line(frame, gaze_histories['RAW'][j-1], gaze_histories['RAW'][j], GAZE_COLOR_RAW, 2)
-                
-                # Frag calc on RAW
-                if prev_gaze_point:
-                    dist = np.sqrt((gx_raw - prev_gaze_point[0])**2 + (gy_raw - prev_gaze_point[1])**2)
-                    fragmentation_history.append(dist)
-                else:
-                    fragmentation_history.append(0)
-                if len(fragmentation_history) > 100: fragmentation_history.pop(0)
-                prev_gaze_point = (gx_raw, gy_raw)
-
-            # --- 3. Enrichment Overlays ---
-            for idx in active_enrichment_indices:
-                # 3a. Surface Polygon (if present)
-                if f'tl x [px]_surf_enr{idx}' in row and pd.notna(row[f'tl x [px]_surf_enr{idx}']):
-                    tl = (int(row[f'tl x [px]_surf_enr{idx}']), int(row[f'tl y [px]_surf_enr{idx}']))
-                    tr = (int(row[f'tr x [px]_surf_enr{idx}']), int(row[f'tr y [px]_surf_enr{idx}']))
-                    bl = (int(row[f'bl x [px]_surf_enr{idx}']), int(row[f'bl y [px]_surf_enr{idx}']))
-                    br = (int(row[f'br x [px]_surf_enr{idx}']), int(row[f'br y [px]_surf_enr{idx}']))
-                    poly_pts = np.array([tl, tr, br, bl], dtype=np.int32)
-                    cv2.polylines(frame, [poly_pts], isClosed=True, color=SURFACE_POLY_COLOR, thickness=2)
-
-                # 3b. Gaze Point
-                gx_enr, gy_enr = None, None
-                col_x_px = f'gaze x [px]_enr{idx}'
-                col_x_norm = f'gaze x [normalized]_enr{idx}'
-                
-                if col_x_px in row and pd.notna(row[col_x_px]):
-                    gx_enr, gy_enr = int(row[col_x_px]), int(row[f'gaze y [px]_enr{idx}'])
-                elif col_x_norm in row and pd.notna(row[col_x_norm]):
-                    gx_enr, gy_enr = int(row[col_x_norm] * width), int(row[f'gaze y [normalized]_enr{idx}'] * height)
-                
-                if gx_enr is not None:
-                    # Logic Green/Red based on surface detection
-                    is_on_surf = row.get(f'gaze detected on surface_enr{idx}') == True
-                    color = GAZE_COLOR_IN if is_on_surf else GAZE_COLOR_OUT
-                    
-                    # Update History
-                    key = f'ENR_{idx}'
-                    if key not in gaze_histories: gaze_histories[key] = []
-                    gaze_histories[key].append((gx_enr, gy_enr))
-                    if len(gaze_histories[key]) > 20: gaze_histories[key].pop(0)
-
-                    # Draw (Slightly larger or different style to distinguish from raw?)
-                    cv2.circle(frame, (gx_enr, gy_enr), 12, color, 3)
-                    # Label the cursor? Optional, maybe cluttering.
-                    
-                    for j in range(1, len(gaze_histories[key])):
-                        cv2.line(frame, gaze_histories[key][j-1], gaze_histories[key][j], color, 2)
-                    
-                    if is_on_surf:
-                         cv2.putText(frame, f"ON_SURF_{idx}", (20 + (idx*150), height - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-
-            # 4. Plots (Pupil & Frag)
-            # ... (Drawing code identical to previous version, just ensuring data exists)
-            # Pupil Plot
-            if pd.notna(row.get('pupil diameter left [mm]')): pupil_history_l.append(row['pupil diameter left [mm]'])
-            if len(pupil_history_l) > 100: pupil_history_l.pop(0)
-            if pd.notna(row.get('pupil diameter right [mm]')): pupil_history_r.append(row['pupil diameter right [mm]'])
-            if len(pupil_history_r) > 100: pupil_history_r.pop(0)
-            
-            plot_w, plot_h = 300, 100
-            plot_x, plot_y = width - plot_w - 20, height - plot_h - 20
-            
-            overlay = frame.copy()
-            cv2.rectangle(overlay, (plot_x, plot_y), (plot_x + plot_w, plot_y + plot_h), (30, 30, 30), -1)
-            cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
-            cv2.putText(frame, "Pupil Diameter", (plot_x + 5, plot_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            
-            p_min, p_max = 2.0, 8.0 
-            if len(pupil_history_l) > 1:
-                pts_l = [(int(plot_x + (i/100)*plot_w), int(plot_y + plot_h - ((v-p_min)/(p_max-p_min))*plot_h)) for i,v in enumerate(pupil_history_l)]
-                cv2.polylines(frame, [np.array(pts_l)], False, PUPIL_LEFT_COLOR_BGR, 2)
-            if len(pupil_history_r) > 1:
-                pts_r = [(int(plot_x + (i/100)*plot_w), int(plot_y + plot_h - ((v-p_min)/(p_max-p_min))*plot_h)) for i,v in enumerate(pupil_history_r)]
-                cv2.polylines(frame, [np.array(pts_r)], False, PUPIL_RIGHT_COLOR_BGR, 2)
-
-            # Frag Plot (Using RAW data history)
-            frag_y = plot_y - plot_h - 20
-            overlay_f = frame.copy()
-            cv2.rectangle(overlay_f, (plot_x, frag_y), (plot_x + plot_w, frag_y + plot_h), (30, 30, 30), -1)
-            cv2.addWeighted(overlay_f, 0.6, frame, 0.4, 0, frame)
-            cv2.putText(frame, "Gaze Fragmentation (RAW)", (plot_x + 5, frag_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            
-            if len(fragmentation_history) > 1:
-                f_min, f_max = 0, 150
-                pts_f = [(int(plot_x + (i/100)*plot_w), int(frag_y + plot_h - ((min(v, f_max)-f_min)/(f_max-f_min))*plot_h)) for i,v in enumerate(fragmentation_history)]
-                cv2.polylines(frame, [np.array(pts_f)], False, (128, 0, 128), 2)
-
-        except (IndexError, KeyError): pass
-        writer.write(frame)
+        self.canvas = tk.Canvas(self, bg="black")
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        self.canvas.bind("<Button-1>", self.on_click)
         
-    cap.release()
-    writer.release()
-    print(f"Video saved to: {output_file}")
+        ctl_frame = tk.Frame(self, bd=2, relief=tk.RAISED)
+        ctl_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.slider = tk.Scale(ctl_frame, from_=0, to=self.total_frames-1, orient=tk.HORIZONTAL, command=self.on_slider_move)
+        self.slider.pack(fill=tk.X, padx=10, pady=2)
+        
+        btn_box = tk.Frame(ctl_frame)
+        btn_box.pack(fill=tk.X, padx=5, pady=2)
+        
+        tk.Button(btn_box, text="<< -30s", command=lambda: self.seek(-int(30*self.fps))).pack(side=tk.LEFT)
+        tk.Button(btn_box, text="< -1 Frame", command=lambda: self.seek(-1)).pack(side=tk.LEFT)
+        self.btn_play = tk.Button(btn_box, text="▶ Play", command=self.toggle_play, width=10)
+        self.btn_play.pack(side=tk.LEFT, padx=20)
+        tk.Button(btn_box, text="+1 Frame >", command=lambda: self.seek(1)).pack(side=tk.LEFT)
+        tk.Button(btn_box, text="+30s >>", command=lambda: self.seek(int(30*self.fps))).pack(side=tk.LEFT)
+        
+        self.lbl_info = tk.Label(btn_box, text="Frame: 0", font=("Arial", 10, "bold"))
+        self.lbl_info.pack(side=tk.RIGHT, padx=10)
+        
+        self.show_frame()
 
-# ==============================================================================
-# 4. EVENT EDITOR (LITE) - Unchanged
-# ==============================================================================
+    def on_slider_move(self, val):
+        self.current_frame_idx = int(val)
+        if not self.is_playing:
+            self.show_frame()
+
+    def seek(self, delta):
+        self.current_frame_idx = max(0, min(self.total_frames-1, self.current_frame_idx + delta))
+        self.slider.set(self.current_frame_idx)
+        self.show_frame()
+
+    def toggle_play(self):
+        self.is_playing = not self.is_playing
+        self.btn_play.config(text="⏸ Pause" if self.is_playing else "▶ Play")
+        if self.is_playing:
+            self.play_loop()
+
+    def play_loop(self):
+        if self.is_playing and self.current_frame_idx < self.total_frames - 1:
+            self.current_frame_idx += 1
+            self.slider.set(self.current_frame_idx)
+            self.show_frame()
+            self.after(int(1000/self.fps), self.play_loop)
+        else:
+            self.is_playing = False
+            self.btn_play.config(text="▶ Play")
+
+    def show_frame(self):
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame_idx)
+        ret, frame = self.cap.read()
+        if ret:
+            self.frame_img = frame
+            h, w = frame.shape[:2]
+            scale = min(1000/w, 650/h)
+            frame_s = cv2.resize(frame, (0,0), fx=scale, fy=scale)
+            self.scale = scale
+            img = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(frame_s, cv2.COLOR_BGR2RGB)))
+            self.canvas.create_image(0,0, image=img, anchor=tk.NW)
+            self.canvas.image = img
+            sec = self.current_frame_idx / self.fps
+            self.lbl_info.config(text=f"Frame: {self.current_frame_idx} ({int(sec//60)}:{int(sec%60):02d})")
+
+    def on_click(self, event):
+        if self.frame_img is None: return
+        if self.is_playing: self.toggle_play() 
+        
+        px = int(event.x / self.scale)
+        py = int(event.y / self.scale)
+        
+        results = self.sam(self.frame_img, points=[[px, py]], labels=[1], verbose=False)
+        if results[0].masks:
+            mask = results[0].masks.xy[0].astype(np.int32)
+            vis = self.frame_img.copy()
+            cv2.polylines(vis, [mask], True, (0, 255, 0), 3)
+            frame_s = cv2.resize(vis, (0,0), fx=self.scale, fy=self.scale)
+            img = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(frame_s, cv2.COLOR_BGR2RGB)))
+            self.canvas.create_image(0,0, image=img, anchor=tk.NW)
+            self.canvas.image = img
+            
+            existing_names = sorted(list(set([r['name'] for r in self.app.ai_rois if r.get('type') == 'custom'])))
+            prompt_msg = "Nome Oggetto:"
+            if existing_names: prompt_msg += f"\n(Esistenti: {', '.join(existing_names)})"
+            
+            name = simpledialog.askstring("Nuovo Oggetto", prompt_msg)
+            if name:
+                x, y, w, h = cv2.boundingRect(mask)
+                new_roi = {
+                    'name': name,
+                    'type': 'custom',
+                    'model_path': 'SAM',
+                    'target_class': 'Custom',
+                    'active': True,
+                    'init_frame': self.current_frame_idx,
+                    'init_box': (x, y, w, h)
+                }
+                self.app.ai_rois.append(new_roi)
+                self.app.refresh_roi_list()
+                
+                msg = f"Oggetto '{name}' aggiunto al frame {self.current_frame_idx}."
+                if name in existing_names: msg += "\nNOTA: Nome esistente! I dati verranno uniti."
+                messagebox.showinfo("Tracking Avviato", msg)
+                self.show_frame() 
+
+class AIInteractiveWindow(tk.Toplevel):
+    def __init__(self, parent, video_path, model_path, target_class, app_ref):
+        super().__init__(parent)
+        self.title("Interattiva AI: Clicca sugli oggetti per attivarli (Verde = Attivo)")
+        self.geometry("1000x750")
+        
+        self.app = app_ref 
+        self.video_path = video_path
+        self.target_class = target_class
+        self.is_running = True
+        
+        self.lbl_img = tk.Label(self)
+        self.lbl_img.pack(fill=tk.BOTH, expand=True)
+        self.lbl_img.bind("<Button-1>", self.on_click) 
+        
+        try:
+            self.model = YOLO(model_path)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            self.destroy()
+            return
+            
+        self.cap = cv2.VideoCapture(str(video_path))
+        self.current_frame_detections = [] 
+        self.click_queue = queue.Queue()
+        
+        threading.Thread(target=self.loop, daemon=True).start()
+        self.protocol("WM_DELETE_WINDOW", self.stop)
+
+    def stop(self):
+        self.is_running = False
+        self.destroy()
+
+    def on_click(self, event):
+        self.click_queue.put((event.x, event.y, self.lbl_img.winfo_width(), self.lbl_img.winfo_height()))
+
+    def loop(self):
+        while self.is_running and self.cap.isOpened():
+            ret, frame = self.cap.read()
+            if not ret: 
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                continue
+            
+            h, w = frame.shape[:2]
+            target_w = 960 
+            scale = target_w / w
+            frame_s = cv2.resize(frame, (0,0), fx=scale, fy=scale)
+            
+            try:
+                results = self.model.track(frame_s, persist=True, verbose=False, tracker="botsort.yaml")
+            except: continue
+            
+            self.current_frame_detections = []
+            
+            if results[0].boxes and results[0].boxes.id is not None:
+                boxes = results[0].boxes
+                for box in boxes:
+                    cls_id = int(box.cls[0])
+                    track_id = int(box.id[0]) if box.id is not None else -1
+                    name = self.model.names[cls_id]
+                    
+                    if self.target_class == 'All Detected Classes' or name == self.target_class:
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+                        
+                        is_active = False
+                        for r in self.app.ai_rois:
+                            if r.get('type') == 'yolo' and r['target_class'] == name and r['active']:
+                                is_active = True
+                                break
+                        
+                        color = (0, 255, 0) if is_active else (0, 0, 255)
+                        cv2.rectangle(frame_s, (x1, y1), (x2, y2), color, 2)
+                        label = f"{name} (ACTIVE)" if is_active else name
+                        cv2.putText(frame_s, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                        
+                        self.current_frame_detections.append({
+                            'rect': (x1, y1, x2, y2),
+                            'name': name,
+                            'active': is_active
+                        })
+
+            try:
+                cx_gui, cy_gui, w_gui, h_gui = self.click_queue.get_nowait()
+                scale_x = frame_s.shape[1] / w_gui
+                scale_y = frame_s.shape[0] / h_gui
+                cx_frame = cx_gui * scale_x
+                cy_frame = cy_gui * scale_y
+                
+                for det in self.current_frame_detections:
+                    x1, y1, x2, y2 = det['rect']
+                    if x1 <= cx_frame <= x2 and y1 <= cy_frame <= y2:
+                        target = det['name']
+                        found = False
+                        for i, r in enumerate(self.app.ai_rois):
+                            if r.get('type') == 'yolo' and r['target_class'] == target:
+                                self.app.ai_rois[i]['active'] = not self.app.ai_rois[i]['active']
+                                found = True
+                                break
+                        
+                        if not found:
+                            new_roi = {
+                                'name': target,
+                                'type': 'yolo',
+                                'model_path': self.app.cb_model.get(),
+                                'target_class': target,
+                                'use_sam': self.app.var_sam.get(),
+                                'active': True
+                            }
+                            self.app.ai_rois.append(new_roi)
+                        
+                        self.app.refresh_roi_list()
+                        break
+            except queue.Empty: pass
+
+            img = Image.fromarray(cv2.cvtColor(frame_s, cv2.COLOR_BGR2RGB))
+            imgtk = ImageTk.PhotoImage(image=img)
+            if self.is_running: self.lbl_img.configure(image=imgtk); self.lbl_img.image = imgtk
+            time.sleep(0.03)
+
 class AdvancedEventEditor(tk.Toplevel):
     def __init__(self, parent, video_path, events_df, world_ts):
         super().__init__(parent)
@@ -677,273 +870,375 @@ class AdvancedEventEditor(tk.Toplevel):
         self.destroy()
 
 # ==============================================================================
-# 5. MAIN APP (Dynamic Enrichment UI)
+# 6. MAIN APP
 # ==============================================================================
 
 class SpeedLiteApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED Light")
-        self.root.geometry("700x750")
+        self.root.title("SPEED Light + AI Tracker")
+        self.root.geometry("900x900")
         
-        self.data_dir = tk.StringVar()
-        self.output_dir = tk.StringVar()
-        
-        # List of dicts: {'path': StringVar, 'video': BooleanVar, 'frame': widget}
+        self.data_dir = tk.StringVar(); self.output_dir = tk.StringVar()
         self.enrichment_rows = []
+        self.ai_rois = [] 
         
-        self.working_dir = None
-        self.gui_queue = queue.Queue() 
-        
+        self.working_dir = None; self.gui_queue = queue.Queue() 
         pad = {'padx': 10, 'pady': 5}
         
-        # --- INPUTS ---
-        grp_in = tk.LabelFrame(root, text="Input Folders")
+        grp_in = tk.LabelFrame(root, text="Configurazione")
         grp_in.pack(fill=tk.X, **pad)
-        
-        self._build_file_select(grp_in, "Data Folder (Mandatory):", self.data_dir)
-        
-        # Dynamic Enrichment Area
-        self.enrich_frame = tk.LabelFrame(grp_in, text="Enrichment Folders (Optional - Progressive ID)")
-        self.enrich_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        tk.Button(self.enrich_frame, text="+ Aggiungi Enrichment", command=self.add_enrichment_row, bg="#e0f7fa").pack(anchor=tk.W, padx=5, pady=5)
-        
-        self._build_file_select(grp_in, "Output Folder (Default: Data/Output):", self.output_dir)
-        
-        # --- ACTIONS ---
-        tk.Button(root, text="1. Load and Prepare Data", command=self.load_data, bg="#fff9c4").pack(fill=tk.X, **pad)
-        self.btn_edit = tk.Button(root, text="2. Edit Events (Optional)", command=self.edit_events, state=tk.DISABLED)
-        self.btn_edit.pack(fill=tk.X, **pad)
-        self.btn_run = tk.Button(root, text="3. Estrai Features, Plot & Video", command=self.run_process, bg="#b2dfdb", state=tk.DISABLED)
-        self.btn_run.pack(fill=tk.X, **pad)
-        
-        self.log_box = tk.Text(root, height=12)
-        self.log_box.pack(fill=tk.BOTH, **pad)
+        self._build_file_select(grp_in, "Data Folder:", self.data_dir)
+        self._build_file_select(grp_in, "Output Folder:", self.output_dir)
 
-        credits_text = (
-            "Developed by: Dr. Daniele Lozzi (github.com/danielelozzi)\n"
-            "Laboratorio di Scienze Cognitive e del Comportamento (SCoC) - Università degli Studi dell’Aquila\n"
-            "https://labscoc.wordpress.com/"
-        )
-        credits_label = tk.Label(root, text=credits_text, justify=tk.CENTER, font=("Arial", 8), fg="grey")
-        credits_label.pack(side=tk.BOTTOM, fill=tk.X, pady=(5, 10))
+        # AI ROI CONFIG
+        grp_ai = tk.LabelFrame(root, text="AI ROI Tracker (YOLO Re-ID + SAM Custom)")
+        grp_ai.pack(fill=tk.X, **pad)
         
+        frm_ai_ctl = tk.Frame(grp_ai)
+        frm_ai_ctl.pack(fill=tk.X, **pad)
+        
+        tk.Label(frm_ai_ctl, text="Name:").pack(side=tk.LEFT)
+        self.txt_roi_name = tk.Entry(frm_ai_ctl, width=10); self.txt_roi_name.pack(side=tk.LEFT, padx=2)
+        
+        tk.Label(frm_ai_ctl, text="Model:").pack(side=tk.LEFT)
+        self.cb_model = ttk.Combobox(frm_ai_ctl, values=["yolov8n-seg.pt", "yolov8x-seg.pt"], width=15)
+        self.cb_model.set("yolov8x-seg.pt"); self.cb_model.pack(side=tk.LEFT, padx=2)
+        
+        tk.Label(frm_ai_ctl, text="Class:").pack(side=tk.LEFT)
+        self.cb_class = ttk.Combobox(frm_ai_ctl, values=["All Detected Classes", "laptop", "cup", "person", "cell phone", "keyboard"], width=15)
+        self.cb_class.set("All Detected Classes"); self.cb_class.pack(side=tk.LEFT, padx=2)
+        
+        self.var_sam = tk.BooleanVar(value=False)
+        tk.Checkbutton(frm_ai_ctl, text="Use SAM Refine?", variable=self.var_sam).pack(side=tk.LEFT, padx=5)
+        
+        # PULSANTI AI
+        tk.Button(frm_ai_ctl, text="🎨 Definisci Oggetti Custom (SAM)", command=self.open_custom_definer, bg="#e1bee7").pack(side=tk.LEFT, padx=5)
+        tk.Button(frm_ai_ctl, text="✨ IA Interattiva", command=self.open_interactive_ai, bg="#ffecb3").pack(side=tk.LEFT, padx=5)
+        tk.Button(frm_ai_ctl, text="+ Add YOLO ROI", command=self.add_ai_roi).pack(side=tk.LEFT, padx=5)
+        tk.Button(frm_ai_ctl, text="🎬 Genera Video AI", command=self.run_video_only, bg="#b3e5fc").pack(side=tk.LEFT, padx=5)
+
+        self.lst_rois = tk.Listbox(grp_ai, height=5)
+        self.lst_rois.pack(fill=tk.X, padx=10, pady=2)
+        self.lst_rois.bind("<Double-Button-1>", self.toggle_roi_active)
+        
+        btn_roi_act = tk.Frame(grp_ai)
+        btn_roi_act.pack(fill=tk.X, padx=10, pady=2)
+        tk.Button(btn_roi_act, text="Remove Selected", command=self.remove_ai_roi, bg="#ffcdd2").pack(side=tk.RIGHT)
+        tk.Button(btn_roi_act, text="Toggle Active (Double Click)", command=self.toggle_roi_active).pack(side=tk.RIGHT, padx=5)
+
+        grp_man = tk.LabelFrame(root, text="Manual Enrichment Folders")
+        grp_man.pack(fill=tk.X, **pad)
+        tk.Button(grp_man, text="+ Add Manual Folder", command=self.add_enrichment_row).pack(anchor=tk.W, padx=5)
+        self.frm_man_rows = tk.Frame(grp_man); self.frm_man_rows.pack(fill=tk.X)
+
+        btn_fr = tk.Frame(root); btn_fr.pack(fill=tk.X, **pad)
+        tk.Button(btn_fr, text="1. Load Data", command=self.load_data, bg="#fff9c4").pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.btn_edit = tk.Button(btn_fr, text="2. Edit Events", command=self.edit_events, state=tk.DISABLED)
+        self.btn_edit.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        self.btn_run = tk.Button(btn_fr, text="3. RUN FULL ANALYSIS (Metrics & Excel)", command=self.run_process, bg="#b2dfdb", state=tk.DISABLED)
+        self.btn_run.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        self.log_box = tk.Text(root, height=12); self.log_box.pack(fill=tk.BOTH, **pad)
         self.root.after(100, self._check_queue)
-        
-    def _build_file_select(self, parent, label, var):
-        f = tk.Frame(parent)
-        f.pack(fill=tk.X, pady=2)
-        tk.Label(f, text=label).pack(side=tk.LEFT)
-        tk.Entry(f, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        tk.Button(f, text="Browse", command=lambda: self.browse(var)).pack(side=tk.RIGHT)
-        
-    def add_enrichment_row(self):
-        idx = len(self.enrichment_rows)
-        row_f = tk.Frame(self.enrich_frame)
-        row_f.pack(fill=tk.X, pady=2)
-        
-        path_var = tk.StringVar()
-        video_var = tk.BooleanVar(value=True) # Default checked for video
-        
-        tk.Label(row_f, text=f"Enrichment {idx}:").pack(side=tk.LEFT)
-        tk.Entry(row_f, textvariable=path_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        tk.Button(row_f, text="Browse", command=lambda: self.browse(path_var)).pack(side=tk.LEFT)
-        tk.Checkbutton(row_f, text="Video?", variable=video_var).pack(side=tk.LEFT, padx=10)
-        
-        self.enrichment_rows.append({'path': path_var, 'video': video_var, 'frame': row_f})
 
-    def browse(self, var):
+    def _build_file_select(self, p, l, v):
+        f = tk.Frame(p); f.pack(fill=tk.X, pady=2)
+        tk.Label(f, text=l).pack(side=tk.LEFT)
+        tk.Entry(f, textvariable=v).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Button(f, text="Browse", command=lambda: self.browse(v)).pack(side=tk.RIGHT)
+    
+    def browse(self, v): 
         d = filedialog.askdirectory()
-        if d: var.set(d)
+        if d: v.set(d)
         
-    def log(self, msg):
-        self.log_box.insert(tk.END, msg + "\n")
-        self.log_box.see(tk.END)
-        print(msg)
-
     def _check_queue(self):
         try:
             while True:
-                msg_type, content = self.gui_queue.get_nowait()
-                if msg_type == 'log': self.log(content)
-                elif msg_type == 'info': messagebox.showinfo("Info", content)
-                elif msg_type == 'error': messagebox.showerror("Error", content)
-                elif msg_type == 'enable_buttons': self.btn_run.config(state=tk.NORMAL)
-        except queue.Empty: pass
-        finally: self.root.after(100, self._check_queue)
+                t, c = self.gui_queue.get_nowait()
+                if t=='log': self.log_box.insert(tk.END, c+"\n"); self.log_box.see(tk.END)
+                elif t=='info': messagebox.showinfo("Info", c)
+                elif t=='error': messagebox.showerror("Error", c)
+                elif t=='enable': self.btn_run.config(state=tk.NORMAL); self.btn_edit.config(state=tk.NORMAL)
+        except: pass
+        self.root.after(100, self._check_queue)
+
+    def add_enrichment_row(self):
+        idx = len(self.enrichment_rows)
+        row = tk.Frame(self.frm_man_rows); row.pack(fill=tk.X, pady=2)
+        v = tk.StringVar(); chk = tk.BooleanVar(value=True)
+        tk.Label(row, text=f"Manual {idx}:").pack(side=tk.LEFT)
+        tk.Entry(row, textvariable=v).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Button(row, text="Browse", command=lambda: self.browse(v)).pack(side=tk.LEFT)
+        tk.Checkbutton(row, text="Video?", variable=chk).pack(side=tk.LEFT)
+        self.enrichment_rows.append({'path': v, 'video': chk})
+
+    def open_interactive_ai(self):
+        d = self.data_dir.get()
+        if not d: return
+        vid = list(Path(d).glob("*.mp4"))
+        if not vid: messagebox.showerror("Err", "No video in Data"); return
+        AIInteractiveWindow(self.root, vid[0], self.cb_model.get(), self.cb_class.get(), self)
+
+    def open_custom_definer(self):
+        d = self.data_dir.get()
+        if not d: return
+        vid = list(Path(d).glob("*.mp4"))
+        if not vid: messagebox.showerror("Err", "No video in Data"); return
+        CustomObjectDefiner(self.root, vid[0], self)
+
+    def add_ai_roi(self):
+        name = self.txt_roi_name.get()
+        if not name: name = f"{self.cb_class.get()}_{len(self.ai_rois)}"
+        roi = {'name': name, 'type': 'yolo', 'model_path': self.cb_model.get(), 'target_class': self.cb_class.get(), 'use_sam': self.var_sam.get(), 'active': True}
+        self.ai_rois.append(roi)
+        self.refresh_roi_list()
+
+    def refresh_roi_list(self):
+        self.lst_rois.delete(0, tk.END)
+        for r in self.ai_rois:
+            status = "[x]" if r['active'] else "[ ]"
+            tag = "(YOLO)" if r.get('type') == 'yolo' else "(CUSTOM)"
+            sam_tag = "+SAM" if r.get('use_sam') else ""
+            self.lst_rois.insert(tk.END, f"{status} {r['name']} {tag} {sam_tag}")
+
+    def toggle_roi_active(self, event=None):
+        sel = self.lst_rois.curselection()
+        if sel:
+            idx = sel[0]
+            self.ai_rois[idx]['active'] = not self.ai_rois[idx]['active']
+            self.refresh_roi_list()
+
+    def remove_ai_roi(self):
+        sel = self.lst_rois.curselection()
+        if sel:
+            self.ai_rois.pop(sel[0])
+            self.refresh_roi_list()
 
     def load_data(self):
-        data = Path(self.data_dir.get())
-        if not data.exists():
-            messagebox.showerror("Error", "The Data folder is mandatory.")
-            return
-        
-        enrich_paths = []
-        for row in self.enrichment_rows:
-            p = row['path'].get()
-            if p: enrich_paths.append(Path(p))
-        
-        if not self.output_dir.get():
-            self.output_dir.set(str(data / "Output"))
-        
+        if not self.data_dir.get(): return
+        if not self.output_dir.get(): self.output_dir.set(str(Path(self.data_dir.get())/"Output"))
         try:
-            self.log("Preparing working directory...")
-            self.working_dir, warnings = prepare_working_directory(data, enrich_paths, Path(self.output_dir.get()))
-            self.log(f"Unified files in: {self.working_dir}")
-            
-            if warnings: messagebox.showwarning("Dati Mancanti", "\n".join(warnings))
-
-            self.btn_edit.config(state=tk.NORMAL)
+            p = Path(self.data_dir.get())
+            if not (p/'world_timestamps.csv').exists(): raise Exception("world_timestamps missing")
             self.btn_run.config(state=tk.NORMAL)
-            messagebox.showinfo("OK", "Data ready.")
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-            self.log(f"Error: {e}")
+            self.btn_edit.config(state=tk.NORMAL)
+            messagebox.showinfo("OK", "Ready.")
+        except Exception as e: messagebox.showerror("Error", str(e))
 
     def edit_events(self):
-        video_path = self.working_dir / "external.mp4"
-        events_path = self.working_dir / "events.csv"
-        ts_path = self.working_dir / "world_timestamps.csv"
-        df_ev = pd.read_csv(events_path)
-        df_ts = pd.read_csv(ts_path)
+        if not self.working_dir:
+             messagebox.showwarning("Info", "Data loaded directly from Data Folder for editing.")
+             video_path = Path(self.data_dir.get()) / "external.mp4"
+             events_path = Path(self.data_dir.get()) / "events.csv"
+             ts_path = Path(self.data_dir.get()) / "world_timestamps.csv"
+        else:
+             video_path = self.working_dir / "external.mp4"
+             events_path = self.working_dir / "events.csv"
+             ts_path = self.working_dir / "world_timestamps.csv"
+
+        if not video_path.exists(): messagebox.showerror("Err", "Video not found"); return
+        df_ev = pd.read_csv(events_path); df_ts = pd.read_csv(ts_path)
         editor = AdvancedEventEditor(self.root, video_path, df_ev, df_ts)
         self.root.wait_window(editor)
         if editor.saved_df is not None:
             if 'selected' in editor.saved_df.columns: editor.saved_df = editor.saved_df.drop(columns=['selected'])
             editor.saved_df.to_csv(events_path, index=False)
-            self.log("Updated events saved.")
+            self.log_box.insert(tk.END, "Updated events saved.\n")
+
+    def run_video_only(self):
+        threading.Thread(target=self._worker_video_only, daemon=True).start()
+
+    def _worker_video_only(self):
+        try:
+            self.gui_queue.put(('log', "--- GENERATING AI VIDEO ONLY ---"))
+            data_p = Path(self.data_dir.get()); out_p = Path(self.output_dir.get())
+            man_paths = [Path(r['path'].get()) for r in self.enrichment_rows if r['path'].get()]
+            work_dir, warns = prepare_working_directory(data_p, man_paths, out_p)
+            for w in warns: self.gui_queue.put(('log', f"WARN: {w}"))
+            
+            processed_ai_rois = []
+            if self.ai_rois:
+                self.gui_queue.put(('log', "Running Tracking for Active ROIs..."))
+                vid_path = work_dir / "external.mp4"; ts_path = work_dir / "world_timestamps.csv"
+                processed_ai_rois = run_ai_extraction(vid_path, ts_path, self.ai_rois, work_dir, self.gui_queue)
+                
+                g_raw = pd.read_csv(work_dir/"gaze_raw.csv")
+                world_ts = pd.read_csv(ts_path)
+                
+                def check_poly(df, xc, yc, tc, polys):
+                    df = pd.merge_asof(df.sort_values(tc), world_ts[[tc]].reset_index().rename(columns={'index':'fidx'}), on=tc, direction='nearest')
+                    ins = []
+                    for _,r in df.iterrows():
+                        fid = int(r['fidx'])
+                        val = False
+                        if fid in polys:
+                            if cv2.pointPolygonTest(polys[fid], (r[xc], r[yc]), False) >= 0: val = True
+                        ins.append(val)
+                    return ins
+
+                for roi in processed_ai_rois:
+                    suf = f"ROI_{roi['name']}"
+                    shutil.copy(roi['path']/'surface_positions.csv', work_dir/f"surface_positions_{suf}.csv")
+                    if not g_raw.empty:
+                        g_raw['gaze detected on surface'] = check_poly(g_raw, 'gaze x [px]', 'gaze y [px]', 'timestamp [ns]', roi['polygons'])
+                        g_raw.to_csv(work_dir/f"gaze_{suf}.csv", index=False)
+
+            self.gui_queue.put(('log', "Rendering Video..."))
+            layers = []
+            for roi in processed_ai_rois:
+                layers.append({'name': roi['name'], 'file_suffix': f"ROI_{roi['name']}"})
+            
+            ev = pd.read_csv(work_dir / "events.csv") 
+            generate_full_video_layered(work_dir, out_p/"ai_tracking_video.mp4", ev, layers)
+            self.gui_queue.put(('log', f"Video saved: {out_p/'ai_tracking_video.mp4'}"))
+            self.gui_queue.put(('info', "Video Generation Completed!"))
+
+        except Exception as e:
+            self.gui_queue.put(('error', str(e))); print(e)
 
     def run_process(self):
-        threading.Thread(target=self._process_thread, daemon=True).start()
+        threading.Thread(target=self._worker, daemon=True).start()
 
-    def _process_thread(self):
+    def _worker(self):
         try:
-            self.gui_queue.put(('log', "Starting Analysis..."))
+            self.gui_queue.put(('log', "--- STARTING FULL ANALYSIS ---"))
+            data_p = Path(self.data_dir.get()); out_p = Path(self.output_dir.get())
             
-            ev = pd.read_csv(self.working_dir / "events.csv").sort_values('timestamp [ns]')
-            ev = ev[~ev['name'].isin(['recording.begin', 'recording.end', 'begin', 'end'])]
-            if ev.empty:
-                self.gui_queue.put(('log', "Warning: No valid events found after filtering."))
-                self.gui_queue.put(('enable_buttons', None))
-                return
+            man_paths = [Path(r['path'].get()) for r in self.enrichment_rows if r['path'].get()]
+            work_dir, warns = prepare_working_directory(data_p, man_paths, out_p)
+            self.working_dir = work_dir 
+            for w in warns: self.gui_queue.put(('log', f"WARN: {w}"))
+            
+            processed_ai_rois = []
+            if self.ai_rois:
+                self.gui_queue.put(('log', "--- RUNNING AI TRACKING ---"))
+                vid_path = work_dir / "external.mp4"; ts_path = work_dir / "world_timestamps.csv"
+                processed_ai_rois = run_ai_extraction(vid_path, ts_path, self.ai_rois, work_dir, self.gui_queue)
+                
+                for roi in processed_ai_rois:
+                    suf = f"ROI_{roi['name']}"
+                    shutil.copy(roi['path']/'surface_positions.csv', work_dir/f"surface_positions_{suf}.csv")
+                    
+                    g_raw = pd.read_csv(work_dir/"gaze_raw.csv")
+                    f_raw = pd.read_csv(work_dir/"fixations_raw.csv")
+                    world_ts = pd.read_csv(ts_path)
+                    
+                    def check_poly(df, xc, yc, tc, polys):
+                        df = pd.merge_asof(df.sort_values(tc), world_ts[[tc]].reset_index().rename(columns={'index':'fidx'}), on=tc, direction='nearest')
+                        ins = []
+                        for _,r in df.iterrows():
+                            fid = int(r['fidx'])
+                            val = False
+                            if fid in polys:
+                                if cv2.pointPolygonTest(polys[fid], (r[xc], r[yc]), False) >= 0: val = True
+                            ins.append(val)
+                        return ins
 
-            # LOAD BASE FILES
-            gaze_raw = pd.read_csv(self.working_dir / "gaze_raw.csv")
-            fix_raw = pd.read_csv(self.working_dir / "fixations_raw.csv")
-            pupil = pd.read_csv(self.working_dir / "3d_eye_states.csv")
-            sacc = pd.read_csv(self.working_dir / "saccades.csv")
-            blinks = pd.read_csv(self.working_dir / "blinks.csv")
+                    if not g_raw.empty:
+                        g_raw['gaze detected on surface'] = check_poly(g_raw, 'gaze x [px]', 'gaze y [px]', 'timestamp [ns]', roi['polygons'])
+                        g_raw.to_csv(work_dir/f"gaze_{suf}.csv", index=False)
+                    
+                    if not f_raw.empty:
+                        f_raw['fixation detected on surface'] = check_poly(f_raw, 'fixation x [px]', 'fixation y [px]', 'start timestamp [ns]', roi['polygons'])
+                        f_raw.to_csv(work_dir/f"fixations_{suf}.csv", index=False)
+
+
+            self.gui_queue.put(('log', "--- METRICS ---"))
+            ev = pd.read_csv(work_dir / "events.csv").sort_values('timestamp [ns]')
+            ev = ev[~ev['name'].isin(['recording.begin', 'recording.end'])]
             
-            cap = cv2.VideoCapture(str(self.working_dir / "external.mp4"))
-            res = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-            cap.release()
-            
-            all_metrics = []
-            pdf_dir = Path(self.output_dir.get()) / "Plots_PDF"
-            pdf_dir.mkdir(exist_ok=True)
-            
-            # Identify active enrichments available
-            avail_enrichments = []
-            for i in range(len(self.enrichment_rows)):
-                if (self.working_dir / f"gaze_enr_{i}.csv").exists():
-                    avail_enrichments.append(i)
+            res = (1280, 720)
+            fix_raw = pd.read_csv(work_dir / "fixations_raw.csv")
+            gaze_raw = pd.read_csv(work_dir / "gaze_raw.csv")
+            pupil = pd.read_csv(work_dir / "3d_eye_states.csv")
+            blinks = pd.read_csv(work_dir / "blinks.csv")
+            sacc = pd.read_csv(work_dir / "saccades.csv")
+
+            all_metrics = []; roi_detailed_metrics = []
 
             for i in range(len(ev)):
-                start_ts = ev.iloc[i]['timestamp [ns]']
-                end_ts = ev.iloc[i+1]['timestamp [ns]'] if i < len(ev)-1 else gaze_raw['timestamp [ns]'].max()
+                t_start = ev.iloc[i]['timestamp [ns]']
+                t_end = ev.iloc[i+1]['timestamp [ns]'] if i < len(ev)-1 else gaze_raw['timestamp [ns]'].max()
                 evt_name = ev.iloc[i]['name']
-                self.gui_queue.put(('log', f"Processing event: {evt_name}"))
+                self.gui_queue.put(('log', f"Event: {evt_name}"))
                 
-                # --- PROCESS RAW ---
                 seg_raw = {
-                    'fixations': fix_raw[(fix_raw['start timestamp [ns]'] >= start_ts) & (fix_raw['start timestamp [ns]'] < end_ts)],
-                    'pupil': pupil[(pupil['timestamp [ns]'] >= start_ts) & (pupil['timestamp [ns]'] < end_ts)],
-                    'blinks': blinks[(blinks['start timestamp [ns]'] >= start_ts) & (blinks['start timestamp [ns]'] < end_ts)],
-                    'saccades': sacc[(sacc['start timestamp [ns]'] >= start_ts) & (sacc['start timestamp [ns]'] < end_ts)],
-                    'gaze': gaze_raw[(gaze_raw['timestamp [ns]'] >= start_ts) & (gaze_raw['timestamp [ns]'] < end_ts)]
+                    'fixations': fix_raw[(fix_raw['start timestamp [ns]'] >= t_start) & (fix_raw['start timestamp [ns]'] < t_end)],
+                    'gaze': gaze_raw[(gaze_raw['timestamp [ns]'] >= t_start) & (gaze_raw['timestamp [ns]'] < t_end)],
+                    'pupil': pupil[(pupil['timestamp [ns]'] >= t_start) & (pupil['timestamp [ns]'] < t_end)],
+                    'blinks': blinks[(blinks['start timestamp [ns]'] >= t_start) & (blinks['start timestamp [ns]'] < t_end)],
+                    'saccades': sacc[(sacc['start timestamp [ns]'] >= t_start) & (sacc['start timestamp [ns]'] < t_end)]
                 }
-                m_raw = calculate_metrics(seg_raw, res)
-                m_final = {k + '_RAW': v for k, v in m_raw.items()}
-                
-                # PLOTS RAW
-                if not seg_raw['gaze'].empty:
-                    gx = 'gaze x [px]' if 'gaze x [px]' in seg_raw['gaze'].columns else 'gaze x [normalized]'
-                    gy = 'gaze y [px]' if 'gaze y [px]' in seg_raw['gaze'].columns else 'gaze y [normalized]'
-                    generate_heatmap_pdf(seg_raw['gaze'], gx, gy, f"Gaze Heatmap (RAW) - {evt_name}", f"heatmap_gaze_RAW_{evt_name}", pdf_dir, res, cmap=CMAP_RAW)
-                    generate_fragmentation_plot(seg_raw['gaze'], gx, gy, start_ts, f"Gaze Frag (RAW) - {evt_name}", f"frag_gaze_RAW_{evt_name}", pdf_dir)
+                m_main = calculate_metrics(seg_raw, res)
+                m_main = {k+"_RAW": v for k,v in m_main.items()}
+                m_main['event_name'] = evt_name
 
-                if not seg_raw['fixations'].empty:
-                    fx = 'fixation x [px]' if 'fixation x [px]' in seg_raw['fixations'].columns else 'fixation x [normalized]'
-                    fy = 'fixation y [px]' if 'fixation y [px]' in seg_raw['fixations'].columns else 'fixation y [normalized]'
-                    generate_heatmap_pdf(seg_raw['fixations'], fx, fy, f"Fixation Heatmap (RAW) - {evt_name}", f"heatmap_fixation_RAW_{evt_name}", pdf_dir, res, cmap=CMAP_RAW)
+                # Manual
+                for idx, r in enumerate(self.enrichment_rows):
+                    if (work_dir/f"gaze_enr_{idx}.csv").exists():
+                        g_enr = pd.read_csv(work_dir/f"gaze_enr_{idx}.csv")
+                        fx_enr = pd.read_csv(work_dir/f"fixations_enr_{idx}.csv") if (work_dir/f"fixations_enr_{idx}.csv").exists() else pd.DataFrame()
+                        seg_enr = seg_raw.copy()
+                        seg_enr['gaze'] = g_enr[(g_enr['timestamp [ns]'] >= t_start) & (g_enr['timestamp [ns]'] < t_end)]
+                        if not fx_enr.empty: seg_enr['fixations'] = fx_enr[(fx_enr['start timestamp [ns]'] >= t_start) & (fx_enr['start timestamp [ns]'] < t_end)]
+                        m_enr = calculate_metrics(seg_enr, res)
+                        m_main.update({k+f"_MAN_{idx}": v for k,v in m_enr.items()})
 
-                # --- PROCESS ENRICHMENTS ---
-                for idx in avail_enrichments:
-                    gaze_enr = pd.read_csv(self.working_dir / f"gaze_enr_{idx}.csv")
-                    fix_enr = pd.read_csv(self.working_dir / f"fixations_enr_{idx}.csv") if (self.working_dir / f"fixations_enr_{idx}.csv").exists() else pd.DataFrame()
+                # AI ROIs Details
+                for roi in processed_ai_rois:
+                    r_name = roi['name']
+                    g_roi = pd.read_csv(work_dir/f"gaze_ROI_{r_name}.csv")
+                    f_roi = pd.read_csv(work_dir/f"fixations_ROI_{r_name}.csv")
                     
-                    seg_enr = {
-                        'gaze': gaze_enr[(gaze_enr['timestamp [ns]'] >= start_ts) & (gaze_enr['timestamp [ns]'] < end_ts)],
-                        'fixations': fix_enr[(fix_enr['start timestamp [ns]'] >= start_ts) & (fix_enr['start timestamp [ns]'] < end_ts)] if not fix_enr.empty else pd.DataFrame(),
-                        'pupil': seg_raw['pupil'], 'blinks': seg_raw['blinks'], 'saccades': seg_raw['saccades']
+                    seg_roi = seg_raw.copy()
+                    seg_roi['gaze'] = g_roi[(g_roi['timestamp [ns]'] >= t_start) & (g_roi['timestamp [ns]'] < t_end)]
+                    seg_roi['fixations'] = f_roi[(f_roi['start timestamp [ns]'] >= t_start) & (f_roi['start timestamp [ns]'] < t_end)]
+                    
+                    m_roi = calculate_metrics(seg_roi, res)
+                    
+                    # NORMALIZE METRICS
+                    ts_range = pd.read_csv(work_dir/"world_timestamps.csv")
+                    ts_range = ts_range[(ts_range['timestamp [ns]'] >= t_start) & (ts_range['timestamp [ns]'] < t_end)]
+                    frame_idxs = ts_range.index.tolist() 
+                    
+                    frames_vis_event = sum(1 for f in frame_idxs if f in roi['polygons'])
+                    sec_vis_event = frames_vis_event / 30.0 
+
+                    roi_entry = {
+                        'Event': evt_name,
+                        'Object_ID': r_name,
+                        'Frames_Visible': frames_vis_event,
+                        'Seconds_Visible': sec_vis_event,
+                        'N_Fixations': m_roi.get('ROI_n_fixations', 0),
+                        'Mean_Fix_Dur': m_roi.get('ROI_mean_fix_duration', np.nan),
+                        'Std_Fix_Dur': m_roi.get('ROI_std_fix_duration', np.nan),
+                        'Mean_Pupil_Left': m_roi.get('ROI_mean_pupil_L', np.nan),
+                        'Std_Pupil_Left': m_roi.get('ROI_std_pupil_L', np.nan),
+                        'Mean_Pupil_Right': m_roi.get('ROI_mean_pupil_R', np.nan),
+                        'Std_Pupil_Right': m_roi.get('ROI_std_pupil_R', np.nan),
+                        'Fixations_Per_Sec_Vis': m_roi.get('ROI_n_fixations', 0)/sec_vis_event if sec_vis_event > 0 else 0
                     }
-                    m_enr = calculate_metrics(seg_enr, res)
-                    m_final.update({k + f'_ENR_{idx}': v for k, v in m_enr.items()})
+                    roi_detailed_metrics.append(roi_entry)
 
-                    # PLOTS ENR
-                    if not seg_enr['gaze'].empty:
-                        gx = 'gaze x [px]' if 'gaze x [px]' in seg_enr['gaze'].columns else 'gaze x [normalized]'
-                        gy = 'gaze y [px]' if 'gaze y [px]' in seg_enr['gaze'].columns else 'gaze y [normalized]'
-                        generate_heatmap_pdf(seg_enr['gaze'], gx, gy, f"Gaze Heatmap (ENR {idx}) - {evt_name}", f"heatmap_gaze_ENR_{idx}_{evt_name}", pdf_dir, res, cmap=CMAP_ENRICHED)
-                        
-                        if 'gaze detected on surface' in seg_enr['gaze'].columns:
-                            surf_gaze = seg_enr['gaze'][seg_enr['gaze']['gaze detected on surface'] == True]
-                            if not surf_gaze.empty:
-                                generate_heatmap_pdf(surf_gaze, 'gaze position on surface x [normalized]', 'gaze position on surface y [normalized]', f"Gaze Heatmap (Surface {idx}) - {evt_name}", f"heatmap_gaze_ENR_{idx}_SURF_{evt_name}", pdf_dir, res, cmap=CMAP_ENRICHED)
-                                generate_fragmentation_plot(surf_gaze, 'gaze position on surface x [normalized]', 'gaze position on surface y [normalized]', start_ts, f"Frag Surface {idx} - {evt_name}", f"frag_surf_{idx}_{evt_name}", pdf_dir)
+                all_metrics.append(m_main)
 
-                m_final['event_name'] = evt_name
-                all_metrics.append(m_final)
-                
-                # Pupil Plot (Common)
-                generate_pupil_timeseries_pdf(seg_raw['pupil'], seg_raw['gaze'], seg_raw['blinks'], start_ts, evt_name, f"pupil_ts_{evt_name}", pdf_dir)
+            pd.DataFrame(all_metrics).to_excel(out_p / "Speed_Lite_Results.xlsx", index=False)
+            if roi_detailed_metrics: pd.DataFrame(roi_detailed_metrics).to_excel(out_p / "ROI_Analysis_Results.xlsx", index=False)
 
-            out_file = Path(self.output_dir.get()) / "Speed_Lite_Results.xlsx"
-            pd.DataFrame(all_metrics).to_excel(out_file, index=False)
-            self.gui_queue.put(('log', f"Metrics saved to {out_file}"))
+            layers = []
+            for i, r in enumerate(self.enrichment_rows):
+                if r['video'].get(): layers.append({'name': f"Man {i}", 'file_suffix': f"enr_{i}"})
+            for roi in processed_ai_rois:
+                layers.append({'name': roi['name'], 'file_suffix': f"ROI_{roi['name']}"})
             
-            # VIDEO GENERATION
-            self.gui_queue.put(('log', "Generating Final Video..."))
-            vid_out = Path(self.output_dir.get()) / "final_video_overlay.mp4"
-            
-            # Determine active video indices from checkboxes
-            active_video_indices = []
-            for i, row in enumerate(self.enrichment_rows):
-                if row['video'].get() and i in avail_enrichments:
-                    active_video_indices.append(i)
-            
-            generate_full_video(self.working_dir, vid_out, ev, active_video_indices)
-            
-            # FULL DURATION PLOTS
-            self.gui_queue.put(('log', "Generating full duration plots..."))
-            fd_dir = Path(self.output_dir.get()) / "Full_Duration_Plots"
-            fd_dir.mkdir(exist_ok=True)
-            v_start = gaze_raw['timestamp [ns]'].min()
-            generate_pupil_timeseries_pdf(pupil, gaze_raw, blinks, v_start, "Full Pupil", "full_pupil", fd_dir)
-            gx = 'gaze x [px]' if 'gaze x [px]' in gaze_raw.columns else 'gaze x [normalized]'
-            gy = 'gaze y [px]' if 'gaze y [px]' in gaze_raw.columns else 'gaze y [normalized]'
-            generate_fragmentation_plot(gaze_raw, gx, gy, v_start, "Full Frag Raw", "full_frag_raw", fd_dir, events_df=ev, show_surface_bands=True)
-
-            self.gui_queue.put(('log', "Analysis Complete."))
-            self.gui_queue.put(('info', "All operations completed successfully!"))
+            generate_full_video_layered(work_dir, out_p/"final_video.mp4", ev, layers)
+            self.gui_queue.put(('log', "DONE.")); self.gui_queue.put(('enable', None))
+            self.gui_queue.put(('info', "Analysis Completed"))
             
         except Exception as e:
-            self.gui_queue.put(('log', f"Error: {e}"))
-            print(e)
-            self.gui_queue.put(('error', str(e)))
-        finally:
-            self.gui_queue.put(('enable_buttons', None))
+            self.gui_queue.put(('error', str(e))); print(e); self.gui_queue.put(('enable', None))
 
 if __name__ == "__main__":
     root = tk.Tk()
