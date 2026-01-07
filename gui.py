@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import cv2
@@ -350,6 +352,10 @@ def calculate_metrics(df_seg, video_res=(1280, 720)):
         m['ROI_n_fixations'] = len(fix_on)
         m['ROI_mean_fix_duration'] = fix_on['duration [ms]'].mean() if not fix_on.empty else 0
         m['ROI_std_fix_duration'] = fix_on['duration [ms]'].std() if not fix_on.empty else 0
+        
+        if 'fixation position on surface x [normalized]' in fix.columns and 'fixation position on surface y [normalized]' in fix.columns:
+            m['ROI_mean_fix_x'] = fix_on['fixation position on surface x [normalized]'].mean() if not fix_on.empty else np.nan
+            m['ROI_mean_fix_y'] = fix_on['fixation position on surface y [normalized]'].mean() if not fix_on.empty else np.nan
     else:
         m['ROI_n_fixations'] = 0; m['ROI_mean_fix_duration'] = np.nan; m['ROI_std_fix_duration'] = np.nan
 
