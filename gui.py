@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import cv2
@@ -142,9 +144,11 @@ def calculate_metrics(df_seg, video_res=(1280, 720)):
 
         if 'fixation detected on surface' in fix.columns:
             surface_fix = fix[fix['fixation detected on surface'] == True]
-            if not surface_fix.empty:
-                fx_norm = surface_fix['fixation position on surface x [normalized]']
-                fy_norm = surface_fix['fixation position on surface y [normalized]']
+            col_x = 'fixation position on surface x [normalized]'
+            col_y = 'fixation position on surface y [normalized]']
+            if not surface_fix.empty and col_x in fix.columns and col_y in fix.columns:
+                fx_norm = surface_fix[col_x]
+                fy_norm = surface_fix[col_y]
                 metrics['mean_x_pos_fixations[norm]'] = fx_norm.mean()
                 metrics['mean_y_pos_fixations[norm]'] = fy_norm.mean()
                 metrics['std_x_pos_fixations[norm]'] = fx_norm.std()
