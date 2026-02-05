@@ -1,4 +1,4 @@
-# SPEED-light - Software Processing and Extraction of Eye tracking Data by LabSCoC (University of L'Aquila, Italy)
+# SPEED - Software Processing and Extraction of Eye tracking Data by LabSCoC (University of L'Aquila, Italy)
 
 ## Description
 
@@ -42,19 +42,19 @@ Before you begin, ensure you have **Anaconda** installed on your system.
 1.  **Clone the repository**
     Open a terminal (or Anaconda Prompt on Windows) and clone this repository to your local machine using the following command:
     ```bash
-    git clone https://github.com/your-username/SPEED-light.git
-    cd SPEED-light
+    git clone https://github.com/your-username/SPEED.git
+    cd SPEED
     ```
     *(Replace `your-username` with the correct repository path if needed)*
 
 2.  **Create and activate the Anaconda environment**
     Create a new virtual environment for this project to manage dependencies in isolation.
     ```bash
-    conda create --name speedlight python=3.9
+    conda create --name speed python=3.9
     ```
     Activate the new environment:
     ```bash
-    conda activate speedlight
+    conda activate speed
     conda install pip
     conda install git
     ```
