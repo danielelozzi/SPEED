@@ -145,7 +145,7 @@ def calculate_metrics(df_seg, video_res=(1280, 720)):
         if 'fixation detected on surface' in fix.columns:
             surface_fix = fix[fix['fixation detected on surface'] == True]
             col_x = 'fixation position on surface x [normalized]'
-            col_y = 'fixation position on surface y [normalized]']
+            col_y = 'fixation position on surface y [normalized]'
             if not surface_fix.empty and col_x in fix.columns and col_y in fix.columns:
                 fx_norm = surface_fix[col_x]
                 fy_norm = surface_fix[col_y]
@@ -572,7 +572,7 @@ def generate_full_video(data_dir, output_file, events_df, active_enrichment_indi
 class AdvancedEventEditor(tk.Toplevel):
     def __init__(self, parent, video_path, events_df, world_ts):
         super().__init__(parent)
-        self.title("Speed Lite - Advanced Event Editor")
+        self.title("Speed - Advanced Event Editor")
         self.geometry("1400x800")
         self.video_path = video_path
         self.events_df = events_df.copy().reset_index(drop=True)
@@ -687,7 +687,7 @@ class AdvancedEventEditor(tk.Toplevel):
 class SpeedLiteApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SPEED Light")
+        self.root.title("SPEED")
         self.root.geometry("700x750")
         
         self.data_dir = tk.StringVar()
